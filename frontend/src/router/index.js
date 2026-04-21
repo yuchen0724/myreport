@@ -36,6 +36,12 @@ const routes = [
     name: "QueryEditor",
     component: () => import("@/views/QueryEditor.vue"),
     meta: { requiresAuth: true }
+  },
+  {
+    path: "/nl2sql",
+    name: "NL2SQL",
+    component: () => import("@/views/NL2SQLEditor.vue"),
+    meta: { requiresAuth: true }
   }
 ]
 
