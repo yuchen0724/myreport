@@ -6,7 +6,7 @@ from app.schemas.nl2sql import NL2SQLRequest, NL2SQLResponse
 from app.services.nl2sql_service import NL2SQLService
 from app.services.query_service import QueryService
 
-router = APIRouter(prefix="/nl2sql", tags=["NL2SQL"])
+router = APIRouter(prefix="/api/nl2sql", tags=["NL2SQL"])
 
 @router.post("/parse", response_model=NL2SQLResponse)
 async def parse_question(

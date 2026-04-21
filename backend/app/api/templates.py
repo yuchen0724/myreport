@@ -12,7 +12,7 @@ from app.schemas.template import (
 )
 from app.services.template_service import TemplateService
 
-router = APIRouter(prefix="/templates", tags=["Templates"])
+router = APIRouter(prefix="/api/templates", tags=["Templates"])
 
 @router.post("", response_model=TemplateResponse, status_code=status.HTTP_201_CREATED)
 async def create_template(
