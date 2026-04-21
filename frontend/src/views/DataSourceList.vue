@@ -67,7 +67,7 @@ export default {
     }
 
     const handleEdit = (row) => {
-      router.push()
+      router.push(`/datasources/${row.id}/edit`)
     }
 
     const handleDelete = async (row) => {
