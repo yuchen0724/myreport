@@ -25,6 +25,10 @@ request.interceptors.request.use(
 request.interceptors.response.use(
   (response) => {
     console.log('响应拦截器:', response)
+    // 对于 204 状态码，返回空对象
+    if (response.status === 204) {
+      return { success: true }
+    }
     return response.data
   },
   (error) => {
