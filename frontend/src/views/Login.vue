@@ -51,11 +51,21 @@ export default {
         console.log('开始登录...', loginForm.value)
         const response = await login(loginForm.value.username, loginForm.value.password)
         console.log('登录响应:', response)
+        
+        // 先设置 token
         userStore.setToken(response.access_token)
-        userStore.setUser({ username: loginForm.value.username })
         console.log('Token 已设置:', userStore.token)
+        
+        // 再设置用户信息
+        userStore.setUser({ username: loginForm.value.username })
+        console.log('用户已设置:', userStore.user)
+        
         ElMessage.success('登录成功')
         console.log('准备跳转到首页...')
+        
+        // 使用 nextTick 确保 DOM 更新后再跳转
+        await new Promise(resolve => setTimeout(resolve, 100))
+        
         await router.push('/')
         console.log('跳转完成')
       } catch (error) {
