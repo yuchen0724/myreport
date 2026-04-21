@@ -9,7 +9,7 @@ class QueryHistory(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    data_source_id = Column(Integer, ForeignKey("data_sources.id"), nullable=True)
+    data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="SET NULL"), nullable=True)
     query_type = Column(String(20), nullable=False)
     query_text = Column(Text, nullable=False)
     execution_time_ms = Column(Integer, nullable=True)
