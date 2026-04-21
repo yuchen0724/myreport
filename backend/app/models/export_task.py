@@ -9,7 +9,7 @@ class ExportTask(Base):
 
     id = Column(String(50), primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    template_id = Column(Integer, ForeignKey("templates.id"), nullable=True)
+    template_id = Column(String(50), nullable=True)  # 改为字符串，暂时不使用外键
     status = Column(String(20), nullable=False)
     file_path = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
