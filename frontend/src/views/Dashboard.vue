@@ -47,9 +47,11 @@
 
 <script>
 import { ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import Layout from '@/components/Layout.vue'
 import Header from '@/components/Header.vue'
 import Sidebar from '@/components/Sidebar.vue'
+import { getDashboardStats } from '@/api/stats'
 
 export default {
   name: 'Dashboard',
@@ -62,8 +64,24 @@ export default {
       templateCount: 0
     })
 
+    const loadStats = async () => {
+      try {
+        const response = await getDashboardStats()
+        // 转换后端返回的下划线命名为驼峰命名
+        stats.value = {
+          dataSourceCount: response.data_source_count,
+          queryCount: response.query_count,
+          exportCount: response.export_count,
+          templateCount: response.template_count
+        }
+      } catch (error) {
+        console.error('加载统计数据失败:', error)
+        ElMessage.error('加载统计数据失败')
+      }
+    }
+
     onMounted(() => {
-      // TODO: 加载统计数据
+      loadStats()
     })
 
     return { stats }
