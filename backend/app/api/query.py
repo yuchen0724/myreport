@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/query", tags=["查询"])
 async def execute_sql(
     request: SQLQueryRequest,
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # TODO: 从 JWT 获取
+    current_user_id: int = 3  # TODO: 从 JWT 获取
 ):
     """执行 SQL 查询"""
     query_service = QueryService(db)

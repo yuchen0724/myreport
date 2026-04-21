@@ -25,7 +25,7 @@ class DataSourceRepository:
             port=ds_data["port"],
             database=ds_data["database"],
             username=ds_data["username"],
-            password_encrypted=get_password_hash(ds_data["password"]),
+            password_encrypted=ds_data["password"],  # TODO: 加密存储
             is_active=ds_data.get("is_active", True),
             created_by=user_id,
         )

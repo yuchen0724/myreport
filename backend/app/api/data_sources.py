@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/datasources", tags=["数据源管理"])
 async def create_data_source(
     ds_data: DataSourceCreate,
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # TODO: 从 JWT 获取
+    current_user_id: int = 3  # TODO: 从 JWT 获取
 ):
     """创建数据源"""
     ds_service = DataSourceService(db)
