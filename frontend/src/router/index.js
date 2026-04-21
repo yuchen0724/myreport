@@ -48,6 +48,36 @@ const routes = [
     name: "Charts",
     component: () => import("@/views/ChartViewer.vue"),
     meta: { requiresAuth: true }
+  },
+  {
+    path: "/templates",
+    name: "Templates",
+    component: () => import("@/views/TemplateList.vue"),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: "/templates/create",
+    name: "TemplateCreate",
+    component: () => import("@/views/TemplateForm.vue"),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: "/templates/:id",
+    name: "TemplateDetail",
+    component: () => import("@/views/TemplateForm.vue"),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: "/templates/:id/edit",
+    name: "TemplateEdit",
+    component: () => import("@/views/TemplateForm.vue"),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: "/templates/:id/versions",
+    name: "TemplateVersions",
+    component: () => import("@/views/TemplateVersion.vue"),
+    meta: { requiresAuth: true }
   }
 ]
 
