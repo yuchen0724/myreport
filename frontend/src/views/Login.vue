@@ -48,13 +48,19 @@ export default {
       await loginFormRef.value.validate()
       loading.value = true
       try {
+        console.log('开始登录...', loginForm.value)
         const response = await login(loginForm.value.username, loginForm.value.password)
+        console.log('登录响应:', response)
         userStore.setToken(response.access_token)
         userStore.setUser({ username: loginForm.value.username })
+        console.log('Token 已设置:', userStore.token)
         ElMessage.success('登录成功')
-        router.push('/')
+        console.log('准备跳转到首页...')
+        await router.push('/')
+        console.log('跳转完成')
       } catch (error) {
-        ElMessage.error('登录失败')
+        console.error('登录失败:', error)
+        ElMessage.error('登录失败: ' + (error.message || '未知错误'))
       } finally {
         loading.value = false
       }
