@@ -37,6 +37,9 @@ class ReportService:
         # 写入数据
         for row_idx, row in enumerate(result.rows, 2):
             for col_idx, value in enumerate(row, 1):
+                # 处理带时区的 datetime 对象
+                if hasattr(value, 'tzinfo') and value.tzinfo is not None:
+                    value = value.replace(tzinfo=None)
                 ws.cell(row=row_idx, column=col_idx, value=value)
 
         # 保存到内存
