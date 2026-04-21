@@ -31,3 +31,12 @@ export function downloadExportFile(taskId) {
     responseType: "blob"
   })
 }
+
+export function exportPDF(data) {
+  return request({
+    url: "/report/pdf",
+    method: "post",
+    data,
+    responseType: "blob"
+  })
+}
