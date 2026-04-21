@@ -12,7 +12,7 @@
         <span>仪表盘</span>
       </el-menu-item>
       <el-menu-item index="/datasources">
-        <el-icon><database /></el-icon>
+        <el-icon><data-line /></el-icon>
         <span>数据源管理</span>
       </el-menu-item>
       <el-menu-item index="/query">
@@ -26,11 +26,11 @@
 <script>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { House, Database, Document } from '@element-plus/icons-vue'
+import { House, DataLine, Document } from '@element-plus/icons-vue'
 
 export default {
   name: 'Sidebar',
-  components: { House, Database, Document },
+  components: { House, DataLine, Document },
   setup() {
     const route = useRoute()
     const activeMenu = computed(() => route.path)
