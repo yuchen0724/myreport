@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
-from app.api import auth, data_sources
+from app.api import auth, data_sources, query
 
 settings = get_settings()
 
@@ -23,6 +23,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(auth.router)
 app.include_router(data_sources.router)
+app.include_router(query.router)
 
 
 @app.get("/")
