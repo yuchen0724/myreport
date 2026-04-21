@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
-from app.api import auth, data_sources, query, report
+from app.api import auth, data_sources, query, report, nl2sql
 
 settings = get_settings()
 
@@ -25,6 +25,7 @@ app.include_router(auth.router)
 app.include_router(data_sources.router)
 app.include_router(query.router)
 app.include_router(report.router)
+app.include_router(nl2sql.router)
 
 
 @app.get("/")
