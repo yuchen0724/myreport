@@ -42,6 +42,12 @@ const routes = [
     name: "NL2SQL",
     component: () => import("@/views/NL2SQLEditor.vue"),
     meta: { requiresAuth: true }
+  },
+  {
+    path: "/charts",
+    name: "Charts",
+    component: () => import("@/views/ChartViewer.vue"),
+    meta: { requiresAuth: true }
   }
 ]
 
