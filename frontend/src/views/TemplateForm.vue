@@ -1,12 +1,19 @@
 <!-- frontend/src/views/TemplateForm.vue -->
 <template>
-  <div class="template-form">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>{{ isEdit ? '编辑模板' : '新建模板' }}</span>
-        </div>
-      </template>
+  <Layout>
+    <template #header>
+      <Header />
+    </template>
+    <template #sidebar>
+      <Sidebar />
+    </template>
+    <div class="template-form">
+      <el-card>
+        <template #header>
+          <div class="card-header">
+            <span>{{ isEdit ? '编辑模板' : '新建模板' }}</span>
+          </div>
+        </template>
 
       <el-form :model="form" :rules="rules" ref="formRef" label-width="120px">
         <el-form-item label="模板名称" prop="name">
@@ -44,6 +51,7 @@
       </el-form>
     </el-card>
   </div>
+  </Layout>
 </template>
 
 <script setup>
@@ -51,6 +59,9 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getTemplate, createTemplate, updateTemplate } from '@/api/template'
+import Layout from '@/components/Layout.vue'
+import Header from '@/components/Header.vue'
+import Sidebar from '@/components/Sidebar.vue'
 
 const router = useRouter()
 const route = useRoute()

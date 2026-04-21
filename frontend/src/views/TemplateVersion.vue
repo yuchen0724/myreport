@@ -1,13 +1,20 @@
 <!-- frontend/src/views/TemplateVersion.vue -->
 <template>
-  <div class="template-version">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>模板版本管理</span>
-          <el-button @click="handleBack">返回</el-button>
-        </div>
-      </template>
+  <Layout>
+    <template #header>
+      <Header />
+    </template>
+    <template #sidebar>
+      <Sidebar />
+    </template>
+    <div class="template-version">
+      <el-card>
+        <template #header>
+          <div class="card-header">
+            <span>模板版本管理</span>
+            <el-button @click="handleBack">返回</el-button>
+          </div>
+        </template>
 
       <el-table :data="versions" style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />

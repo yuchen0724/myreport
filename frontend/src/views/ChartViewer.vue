@@ -1,12 +1,19 @@
 <!-- frontend/src/views/ChartViewer.vue -->
 <template>
-  <div class="chart-viewer">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>图表查看器</span>
-        </div>
-      </template>
+  <Layout>
+    <template #header>
+      <Header />
+    </template>
+    <template #sidebar>
+      <Sidebar />
+    </template>
+    <div class="chart-viewer">
+      <el-card>
+        <template #header>
+          <div class="card-header">
+            <span>图表查看器</span>
+          </div>
+        </template>
 
       <el-form :model="form" label-width="120px">
         <el-form-item label="数据源">
@@ -68,6 +75,7 @@
       </div>
     </el-card>
   </div>
+  </Layout>
 </template>
 
 <script setup>
@@ -76,6 +84,9 @@ import { ElMessage } from 'element-plus'
 import { generateChart } from '@/api/chart'
 import { getDataSourceList } from '@/api/data_source'
 import ChartRenderer from '@/components/ChartRenderer.vue'
+import Layout from '@/components/Layout.vue'
+import Header from '@/components/Header.vue'
+import Sidebar from '@/components/Sidebar.vue'
 
 const form = ref({
   data_source_id: null,

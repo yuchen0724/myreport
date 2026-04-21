@@ -1,13 +1,20 @@
 <!-- frontend/src/views/TemplateList.vue -->
 <template>
-  <div class="template-list">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>模板管理</span>
-          <el-button type="primary" @click="handleCreate">新建模板</el-button>
-        </div>
-      </template>
+  <Layout>
+    <template #header>
+      <Header />
+    </template>
+    <template #sidebar>
+      <Sidebar />
+    </template>
+    <div class="template-list">
+      <el-card>
+        <template #header>
+          <div class="card-header">
+            <span>模板管理</span>
+            <el-button type="primary" @click="handleCreate">新建模板</el-button>
+          </div>
+        </template>
 
       <el-table :data="templates" style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
@@ -37,6 +44,7 @@
       </el-table>
     </el-card>
   </div>
+  </Layout>
 </template>
 
 <script setup>
@@ -44,6 +52,9 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateList, deleteTemplate } from '@/api/template'
+import Layout from '@/components/Layout.vue'
+import Header from '@/components/Header.vue'
+import Sidebar from '@/components/Sidebar.vue'
 
 const router = useRouter()
 const templates = ref([])
