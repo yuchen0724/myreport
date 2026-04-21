@@ -51,3 +51,26 @@ async def export_excel_async(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+
+
+@router.post("/pdf")
+async def export_pdf(
+    request: ExcelExportRequest,
+    db: Session = Depends(get_db),
+    current_user_id: int = 3  # TODO: 从 JWT 获取
+):
+    """导出 PDF 文件"""
+    report_service = ReportService(db)
+
+    try:
+        pdf_buffer = report_service.generate_pdf(request, current_user_id)
+
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={request.filename or 'report.pdf'}"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

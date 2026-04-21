@@ -6,12 +6,14 @@ from typing import Optional
 from app.services.query_service import QueryService
 from app.schemas.query import SQLQueryRequest
 from app.schemas.report import ExcelExportRequest
+from app.utils.pdf_generator import PDFGenerator
 
 
 class ReportService:
     def __init__(self, db):
         self.db = db
         self.query_service = QueryService(db)
+        self.pdf_generator = PDFGenerator()
 
     def generate_excel(self, request: ExcelExportRequest, user_id: int) -> BytesIO:
         """生成 Excel 文件"""
@@ -47,6 +49,35 @@ class ReportService:
         wb.save(output)
         output.seek(0)
         return output
+
+    def generate_pdf(self, request: ExcelExportRequest, user_id: int) -> BytesIO:
+        """
+        生成 PDF 文件
+
+        Args:
+            request: 导出请求
+            user_id: 用户 ID
+
+        Returns:
+            PDF 文件流
+        """
+        # 执行查询
+        query_request = SQLQueryRequest(
+            data_source_id=request.data_source_id,
+            sql=request.sql,
+            params={}
+        )
+        result = self.query_service.execute_sql(query_request, user_id)
+
+        # 生成 PDF
+        pdf_buffer = self.pdf_generator.generate_pdf(
+            title=request.filename or "Report",
+            columns=result.columns,
+            rows=result.rows,
+            filename=request.filename
+        )
+
+        return pdf_buffer
 
     def generate_excel_async(self, request: ExcelExportRequest, user_id: int) -> str:
         """异步生成 Excel 文件（返回任务 ID）"""
