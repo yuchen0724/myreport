@@ -78,6 +78,12 @@ const routes = [
     name: "TemplateVersions",
     component: () => import("@/views/TemplateVersion.vue"),
     meta: { requiresAuth: true }
+  },
+  {
+    path: "/async-export",
+    name: "AsyncExport",
+    component: () => import("@/views/AsyncExport.vue"),
+    meta: { requiresAuth: true }
   }
 ]
 
