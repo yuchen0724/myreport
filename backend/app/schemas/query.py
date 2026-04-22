@@ -24,4 +24,4 @@ class QueryHistoryResponse(BaseModel):
     query_text: str
     execution_time_ms: Optional[int] = None
     row_count: Optional[int] = None
-    created_at: datetime
+    created_at: Optional[datetime] = None

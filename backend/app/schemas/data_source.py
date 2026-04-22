@@ -27,7 +27,7 @@ class DataSourceInDB(DataSourceBase):
     password_encrypted: str
     is_active: bool
     created_by: Optional[int] = None
-    created_at: datetime
+    created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:
@@ -44,7 +44,7 @@ class DataSourceResponse(BaseModel):
     username: str
     is_active: bool
     created_by: Optional[int] = None
-    created_at: datetime
+    created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
 
