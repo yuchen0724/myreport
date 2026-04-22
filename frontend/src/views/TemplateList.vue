@@ -33,16 +33,42 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="250">
+        <el-table-column label="操作" width="300">
           <template #default="{ row }">
             <el-button size="small" @click="handleView(row)">查看</el-button>
             <el-button size="small" @click="handleEdit(row)">编辑</el-button>
+            <el-button size="small" @click="handleShare(row)">分享</el-button>
             <el-button size="small" @click="handleVersions(row)">版本</el-button>
             <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- 分享对话框 -->
+    <el-dialog v-model="shareDialogVisible" title="分享模板" width="500px">
+      <el-form :model="shareForm" label-width="100px">
+        <el-form-item label="分享给用户">
+          <el-select
+            v-model="shareForm.user_ids"
+            multiple
+            placeholder="请选择用户"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="user in users"
+              :key="user.id"
+              :label="user.username"
+              :value="user.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="shareDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleConfirmShare">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
   </Layout>
 </template>
@@ -52,12 +78,23 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateList, deleteTemplate } from '@/api/template'
+import { shareTemplate, getSharedTemplates } from '@/api/template_share'
 import Layout from '@/components/Layout.vue'
 import Header from '@/components/Header.vue'
 import Sidebar from '@/components/Sidebar.vue'
 
 const router = useRouter()
 const templates = ref([])
+const shareDialogVisible = ref(false)
+const shareForm = ref({
+  template_id: null,
+  user_ids: []
+})
+const users = ref([
+  { id: 1, username: 'admin' },
+  { id: 2, username: 'user1' },
+  { id: 3, username: 'user2' }
+])
 
 onMounted(async () => {
   await loadTemplates()
@@ -108,6 +145,24 @@ const handleDelete = async (row) => {
 
 const formatDate = (date) => {
   return new Date(date).toLocaleString('zh-CN')
+}
+
+const handleShare = (row) => {
+  shareForm.value.template_id = row.id
+  shareForm.value.user_ids = []
+  shareDialogVisible.value = true
+}
+
+const handleConfirmShare = async () => {
+  try {
+    await shareTemplate(shareForm.value.template_id, {
+      user_ids: shareForm.value.user_ids
+    })
+    ElMessage.success('分享成功')
+    shareDialogVisible.value = false
+  } catch (error) {
+    ElMessage.error('分享失败')
+  }
 }
 </script>
 

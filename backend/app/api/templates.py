@@ -111,3 +111,25 @@ async def share_template(
     if not success:
         raise HTTPException(status_code=404, detail="Template not found")
     return {"success": True}
+
+@router.get("/shared/me", response_model=List[TemplateResponse])
+async def get_shared_templates(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user_id: int = 3  # TODO: 从 JWT 获取
+):
+    """获取分享给我的模板列表"""
+    service = TemplateService(db)
+    templates = service.get_shared_templates(current_user_id, skip, limit)
+    return templates
+
+@router.get("/{template_id}/shares", response_model=List[int])
+async def get_template_shares(
+    template_id: int,
+    db: Session = Depends(get_db)
+):
+    """获取模板的分享用户列表"""
+    service = TemplateService(db)
+    user_ids = service.get_template_shares(template_id)
+    return user_ids

@@ -287,3 +287,59 @@ class TemplateService:
 
         self.db.commit()
         return True
+
+    def get_shared_templates(self, user_id: int, skip: int = 0, limit: int = 100) -> List[TemplateResponse]:
+        """
+        获取分享给用户的模板列表
+
+        Args:
+            user_id: 用户 ID
+            skip: 跳过数量
+            limit: 限制数量
+
+        Returns:
+            模板响应列表
+        """
+        shared_template_ids = self.db.query(TemplateShare.template_id).filter(
+            TemplateShare.user_id == user_id
+        ).all()
+
+        template_ids = [t[0] for t in shared_template_ids]
+
+        if not template_ids:
+            return []
+
+        templates = self.db.query(Template).filter(
+            Template.id.in_(template_ids)
+        ).order_by(Template.created_at.desc()).offset(skip).limit(limit).all()
+
+        return [
+            TemplateResponse(
+                id=t.id,
+                name=t.name,
+                description=t.description,
+                config=json.loads(t.config),
+                version=t.version,
+                is_public=t.is_public,
+                created_by=t.created_by,
+                created_at=t.created_at,
+                updated_at=t.updated_at
+            )
+            for t in templates
+        ]
+
+    def get_template_shares(self, template_id: int) -> List[int]:
+        """
+        获取模板的分享用户列表
+
+        Args:
+            template_id: 模板 ID
+
+        Returns:
+            用户 ID 列表
+        """
+        shares = self.db.query(TemplateShare.user_id).filter(
+            TemplateShare.template_id == template_id
+        ).all()
+
+        return [s[0] for s in shares]
