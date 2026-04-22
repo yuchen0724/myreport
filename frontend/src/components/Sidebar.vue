@@ -31,6 +31,14 @@
         <el-icon><folder /></el-icon>
         <span>模板管理</span>
       </el-menu-item>
+      <el-menu-item index="/template-share">
+        <el-icon><share /></el-icon>
+        <span>模板分享</span>
+      </el-menu-item>
+      <el-menu-item index="/async-export">
+        <el-icon><download /></el-icon>
+        <span>异步导出</span>
+      </el-menu-item>
     </el-menu>
   </div>
 </template>
@@ -38,11 +46,11 @@
 <script>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { House, DataLine, Document, ChatLineRound, TrendCharts, Folder } from '@element-plus/icons-vue'
+import { House, DataLine, Document, ChatLineRound, TrendCharts, Folder, Share, Download } from '@element-plus/icons-vue'
 
 export default {
   name: 'Sidebar',
-  components: { House, DataLine, Document, ChatLineRound, TrendCharts, Folder },
+  components: { House, DataLine, Document, ChatLineRound, TrendCharts, Folder, Share, Download },
   setup() {
     const route = useRoute()
     const activeMenu = computed(() => route.path)

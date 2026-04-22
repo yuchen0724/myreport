@@ -90,6 +90,12 @@ const routes = [
     name: "AsyncExport",
     component: () => import("@/views/AsyncExport.vue"),
     meta: { requiresAuth: true }
+  },
+  {
+    path: "/template-share",
+    name: "TemplateShare",
+    component: () => import("@/views/TemplateShare.vue"),
+    meta: { requiresAuth: true }
   }
 ]
 
