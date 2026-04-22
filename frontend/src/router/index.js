@@ -80,6 +80,12 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: "/templates/:id/version-history",
+    name: "TemplateVersionHistory",
+    component: () => import("@/views/TemplateVersionHistory.vue"),
+    meta: { requiresAuth: true }
+  },
+  {
     path: "/async-export",
     name: "AsyncExport",
     component: () => import("@/views/AsyncExport.vue"),

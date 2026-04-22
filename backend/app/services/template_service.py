@@ -343,3 +343,87 @@ class TemplateService:
         ).all()
 
         return [s[0] for s in shares]
+
+    def get_version_diff(self, template_id: int, version1: int, version2: int) -> dict:
+        """
+        获取两个版本之间的差异
+
+        Args:
+            template_id: 模板 ID
+            version1: 版本号 1
+            version2: 版本号 2
+
+        Returns:
+            版本差异
+        """
+        from app.models.template_version import TemplateVersion
+
+        v1 = self.db.query(TemplateVersion).filter(
+            TemplateVersion.template_id == template_id,
+            TemplateVersion.version == version1
+        ).first()
+
+        v2 = self.db.query(TemplateVersion).filter(
+            TemplateVersion.template_id == template_id,
+            TemplateVersion.version == version2
+        ).first()
+
+        if not v1 or not v2:
+            raise ValueError("版本不存在")
+
+        # 解析配置
+        config1 = json.loads(v1.config) if isinstance(v1.config, str) else v1.config
+        config2 = json.loads(v2.config) if isinstance(v2.config, str) else v2.config
+
+        # 简单的配置差异对比
+        diff = {
+            "version1": {
+                "version": v1.version,
+                "config": config1,
+                "created_at": v1.created_at.isoformat()
+            },
+            "version2": {
+                "version": v2.version,
+                "config": config2,
+                "created_at": v2.created_at.isoformat()
+            },
+            "changes": self._compare_configs(config1, config2)
+        }
+
+        return diff
+
+    def _compare_configs(self, config1: dict, config2: dict) -> dict:
+        """
+        比较两个配置的差异
+
+        Args:
+            config1: 配置 1
+            config2: 配置 2
+
+        Returns:
+            差异
+        """
+        changes = {
+            "added": [],
+            "removed": [],
+            "modified": []
+        }
+
+        # 比较顶层键
+        keys1 = set(config1.keys()) if config1 else set()
+        keys2 = set(config2.keys()) if config2 else set()
+
+        changes["added"] = list(keys2 - keys1)
+        changes["removed"] = list(keys1 - keys2)
+
+        # 比较共同键的值
+        common_keys = keys1 & keys2
+        for key in common_keys:
+            if config1[key] != config2[key]:
+                changes["modified"].append({
+                    "key": key,
+                    "old": config1[key],
+                    "new": config2[key]
+                })
+
+        return changes

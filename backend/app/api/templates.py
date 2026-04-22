@@ -133,3 +133,21 @@ async def get_template_shares(
     service = TemplateService(db)
     user_ids = service.get_template_shares(template_id)
     return user_ids
+
+@router.get("/{template_id}/versions/diff")
+async def get_version_diff(
+    template_id: int,
+    version1: int,
+    version2: int,
+    db: Session = Depends(get_db)
+):
+    """获取版本差异"""
+    service = TemplateService(db)
+    try:
+        diff = service.get_version_diff(template_id, version1, version2)
+        return diff
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
