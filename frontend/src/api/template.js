@@ -3,7 +3,7 @@ import request from "@/utils/request"
 
 export function getTemplateList(params) {
   return request({
-    url: "/templates",
+    url: "/api/templates",
     method: "get",
     params
   })
@@ -11,14 +11,14 @@ export function getTemplateList(params) {
 
 export function getTemplate(id) {
   return request({
-    url: `/templates/${id}`,
+    url: `/api/templates/${id}`,
     method: "get"
   })
 }
 
 export function createTemplate(data) {
   return request({
-    url: "/templates",
+    url: "/api/templates",
     method: "post",
     data
   })
@@ -26,7 +26,7 @@ export function createTemplate(data) {
 
 export function updateTemplate(id, data) {
   return request({
-    url: `/templates/${id}`,
+    url: `/api/templates/${id}`,
     method: "put",
     data
   })
@@ -34,21 +34,21 @@ export function updateTemplate(id, data) {
 
 export function deleteTemplate(id) {
   return request({
-    url: `/templates/${id}`,
+    url: `/api/templates/${id}`,
     method: "delete"
   })
 }
 
 export function getTemplateVersions(id) {
   return request({
-    url: `/templates/${id}/versions`,
+    url: `/api/templates/${id}/versions`,
     method: "get"
   })
 }
 
 export function rollbackTemplate(id, version) {
   return request({
-    url: `/templates/${id}/rollback/${version}`,
+    url: `/api/templates/${id}/rollback/${version}`,
     method: "post"
   })
 }
