@@ -10,7 +10,6 @@ celery_app = Celery(
     'myreport',
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=['app.tasks.export_tasks']
 )
 
 # 配置
@@ -32,5 +31,8 @@ celery_app.conf.task_routes = {
     'app.tasks.export_tasks.*': {'queue': 'export'},
 }
 
-# 自动发现任务
-celery_app.autodiscover_tasks(['app.tasks'])
+# 导入任务模块以注册任务
+try:
+    from app.tasks import export_tasks
+except ImportError:
+    pass
