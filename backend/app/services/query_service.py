@@ -7,6 +7,7 @@ from app.schemas.query import SQLQueryRequest, SQLQueryResponse
 from app.utils.sql_validator import SQLValidator
 from app.core.security import verify_password
 from app.services.cache_service import cache_service
+from app.utils.query_optimizer import QueryOptimizer
 
 
 class QueryService:
@@ -17,8 +18,24 @@ class QueryService:
 
     def execute_sql(self, request: SQLQueryRequest, user_id: int) -> SQLQueryResponse:
         """执行 SQL 查询"""
+        # 验证查询
+        is_valid, message = QueryOptimizer.validate_query(request.sql)
+        if not is_valid:
+            raise ValueError(message)
+
+        # 优化查询
+        optimized_sql = QueryOptimizer.optimize_query(request.sql)
+
+        # 估算查询成本
+        cost = QueryOptimizer.estimate_query_cost(optimized_sql)
+
+        # 如果成本过高，建议异步处理
+        if cost > 200:
+            # TODO: 提示用户使用异步导出
+            pass
+
         # 验证 SQL
-        is_valid, message = SQLValidator.validate(request.sql)
+        is_valid, message = SQLValidator.validate(optimized_sql)
         if not is_valid:
             raise ValueError(message)
 
@@ -30,7 +47,7 @@ class QueryService:
         # 生成缓存键
         cache_key = cache_service.generate_query_key(
             request.data_source_id,
-            request.sql,
+            optimized_sql,
             request.params or {}
         )
 
@@ -42,7 +59,7 @@ class QueryService:
         # 执行查询
         start_time = time.time()
         try:
-            result = self._execute_query(ds, request.sql, request.params)
+            result = self._execute_query(ds, optimized_sql, request.params)
             execution_time_ms = int((time.time() - start_time) * 1000)
 
             # 保存查询历史
@@ -50,7 +67,7 @@ class QueryService:
                 "user_id": user_id,
                 "data_source_id": request.data_source_id,
                 "query_type": "SQL",
-                "query_text": request.sql,
+                "query_text": optimized_sql,
                 "execution_time_ms": execution_time_ms,
                 "row_count": result["total"],
             })
