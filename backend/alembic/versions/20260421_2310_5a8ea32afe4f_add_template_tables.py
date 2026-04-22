@@ -27,8 +27,8 @@ def upgrade() -> None:
         sa.Column('version', sa.Integer(), nullable=True),
         sa.Column('is_public', sa.Boolean(), nullable=True),
         sa.Column('created_by', sa.Integer(), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+        sa.Column('updated_at', sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(['created_by'], ['users.id'], ),
         sa.PrimaryKeyConstraint('id')
     )
@@ -41,7 +41,7 @@ def upgrade() -> None:
         sa.Column('version', sa.Integer(), nullable=False),
         sa.Column('config', sa.Text(), nullable=False),
         sa.Column('created_by', sa.Integer(), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.ForeignKeyConstraint(['created_by'], ['users.id'], ),
         sa.ForeignKeyConstraint(['template_id'], ['templates.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')
@@ -53,7 +53,7 @@ def upgrade() -> None:
         sa.Column('template_id', sa.Integer(), nullable=False),
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('shared_by', sa.Integer(), nullable=False),
-        sa.Column('shared_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('shared_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.ForeignKeyConstraint(['shared_by'], ['users.id'], ),
         sa.ForeignKeyConstraint(['template_id'], ['templates.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
