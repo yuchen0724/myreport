@@ -51,53 +51,6 @@
         <pre>{{ JSON.stringify(selectedVersion.config, null, 2) }}</pre>
       </el-card>
 
-      <el-card v-if="diffResult" style="margin-top: 20px;">
-        <template #header>
-          <div class="card-header">
-            <span>版本差异 - v{{ diffResult.version1.version }} vs v{{ diffResult.version2.version }}</span>
-          </div>
-        </template>
-
-        <el-tabs v-model="activeTab">
-          <el-tab-pane label="新增" name="added">
-            <el-tag
-              v-for="item in diffResult.changes.added"
-              :key="item"
-              style="margin: 5px"
-            >
-              {{ item }}
-            </el-tag>
-            <el-empty v-if="!diffResult.changes.added.length" description="无新增项" />
-          </el-tab-pane>
-          <el-tab-pane label="删除" name="removed">
-            <el-tag
-              v-for="item in diffResult.changes.removed"
-              :key="item"
-              type="danger"
-              style="margin: 5px"
-            >
-              {{ item }}
-            </el-tag>
-            <el-empty v-if="!diffResult.changes.removed.length" description="无删除项" />
-          </el-tab-pane>
-          <el-tab-pane label="修改" name="modified">
-            <div
-              v-for="item in diffResult.changes.modified"
-              :key="item.key"
-              style="margin: 10px 0"
-            >
-              <el-tag>{{ item.key }}</el-tag>
-              <div style="margin-top: 5px">
-                <span style="color: #f56c66">旧值: {{ JSON.stringify(item.old) }}</span>
-                <br />
-                <span style="color: #67c23a">新值: {{ JSON.stringify(item.new) }}</span>
-              </div>
-            </div>
-            <el-empty v-if="!diffResult.changes.modified.length" description="无修改项" />
-          </el-tab-pane>
-        </el-tabs>
-      </el-card>
-
       <!-- 对比对话框 -->
       <el-dialog v-model="compareDialogVisible" title="选择对比版本" width="400px">
         <el-form label-width="100px">
@@ -117,6 +70,15 @@
           <el-button type="primary" @click="handleConfirmCompare">确定</el-button>
         </template>
       </el-dialog>
+
+      <!-- 版本对比组件 -->
+      <VersionDiff
+        v-if="versionDiffVisible"
+        :template-id="templateId"
+        :version1="version1"
+        :version2="version2"
+        @close="handleCloseVersionDiff"
+      />
     </div>
   </Layout>
 </template>
@@ -125,22 +87,23 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getTemplateVersions, rollbackTemplate } from '@/api/template'
-import { getVersionDiff } from '@/api/template_version'
+import { getTemplateVersions, rollbackTemplate, getVersionDiff } from '@/api/template'
 import Layout from '@/components/Layout.vue'
 import Header from '@/components/Header.vue'
 import Sidebar from '@/components/Sidebar.vue'
+import VersionDiff from '@/components/VersionDiff.vue'
 
 const route = useRoute()
 const router = useRouter()
 const templateId = ref(parseInt(route.params.id))
 const versions = ref([])
 const selectedVersion = ref(null)
-const diffResult = ref(null)
-const activeTab = ref('added')
 const compareDialogVisible = ref(false)
 const compareVersion = ref(null)
 const baseVersion = ref(null)
+const versionDiffVisible = ref(false)
+const version1 = ref(null)
+const version2 = ref(null)
 
 onMounted(async () => {
   await loadVersions()
@@ -161,7 +124,6 @@ const handleBack = () => {
 
 const handleView = (row) => {
   selectedVersion.value = row
-  diffResult.value = null
 }
 
 const handleRollback = async (row) => {
@@ -199,16 +161,17 @@ const handleConfirmCompare = async () => {
   }
 
   try {
-    const response = await getVersionDiff(
-      templateId.value,
-      baseVersion.value,
-      compareVersion.value
-    )
-    diffResult.value = response
+    version1.value = baseVersion.value
+    version2.value = compareVersion.value
+    versionDiffVisible.value = true
     compareDialogVisible.value = false
   } catch (error) {
-    ElMessage.error('获取版本差异失败')
+    ElMessage.error('打开版本对比失败')
   }
+}
+
+const handleCloseVersionDiff = () => {
+  versionDiffVisible.value = false
 }
 
 const formatDate = (date) => {
