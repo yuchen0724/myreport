@@ -47,3 +47,6 @@ package-lock.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Git credentials
+.git-credentials
