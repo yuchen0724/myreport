@@ -14,6 +14,7 @@ class ExportTask(Base):
     file_path = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
     row_count = Column(Integer, nullable=True)
+    sql = Column(Text, nullable=True)  # 添加SQL字段
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)

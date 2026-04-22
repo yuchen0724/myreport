@@ -20,6 +20,7 @@ class AsyncExportService:
             id=task_id,
             user_id=user_id,
             status="PENDING",
+            sql=request.sql  # 保存SQL
         )
         self.db.add(task)
         self.db.commit()

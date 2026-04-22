@@ -47,8 +47,33 @@
             保存
           </el-button>
           <el-button @click="handleCancel">取消</el-button>
+          <el-button @click="handlePreview" :loading="previewing" v-if="isEdit">
+            预览查询结果
+          </el-button>
         </el-form-item>
       </el-form>
+
+      <!-- 查询结果预览 -->
+      <el-card v-if="queryResult" style="margin-top: 20px;">
+        <template #header>
+          <div class="card-header">
+            <span>查询结果预览</span>
+            <el-button @click="queryResult = null">关闭</el-button>
+          </div>
+        </template>
+        <el-table :data="queryResult.rows" style="width: 100%" max-height="400">
+          <el-table-column
+            v-for="column in queryResult.columns"
+            :key="column"
+            :prop="column"
+            :label="column"
+            :width="150"
+          />
+        </el-table>
+        <div style="margin-top: 10px; color: #666;">
+          共 {{ queryResult.total }} 条记录，执行时间：{{ queryResult.execution_time_ms }}ms
+        </div>
+      </el-card>
     </el-card>
   </div>
   </Layout>
@@ -59,6 +84,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getTemplate, createTemplate, updateTemplate } from '@/api/template'
+import { executeQuery } from '@/api/query'
 import Layout from '@/components/Layout.vue'
 import Header from '@/components/Header.vue'
 import Sidebar from '@/components/Sidebar.vue'
@@ -67,6 +93,8 @@ const router = useRouter()
 const route = useRoute()
 const formRef = ref(null)
 const loading = ref(false)
+const previewing = ref(false)
+const queryResult = ref(null)
 
 const isEdit = computed(() => !!route.params.id)
 
@@ -102,6 +130,31 @@ const loadTemplate = async () => {
     configJson.value = JSON.stringify(response.config, null, 2)
   } catch (error) {
     ElMessage.error('加载模板失败')
+  }
+}
+
+const handlePreview = async () => {
+  try {
+    previewing.value = true
+    const config = JSON.parse(configJson.value)
+    
+    if (!config.data_source_id || !config.sql) {
+      ElMessage.warning('模板配置中缺少数据源ID或SQL语句')
+      return
+    }
+
+    const response = await executeQuery({
+      data_source_id: config.data_source_id,
+      sql: config.sql,
+      params: config.params || {}
+    })
+    
+    queryResult.value = response
+    ElMessage.success('查询成功')
+  } catch (error) {
+    ElMessage.error('查询失败：' + (error.message || '未知错误'))
+  } finally {
+    previewing.value = false
   }
 }
 

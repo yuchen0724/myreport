@@ -52,6 +52,7 @@ async def get_task_status(
         file_path=task.file_path,
         error_message=task.error_message,
         row_count=task.row_count,
+        sql=task.sql,  # 添加SQL字段
         created_at=task.created_at,
         started_at=task.started_at,
         completed_at=task.completed_at,
@@ -76,6 +77,7 @@ async def get_user_tasks(
             file_path=task.file_path,
             error_message=task.error_message,
             row_count=task.row_count,
+            sql=task.sql,  # 添加SQL字段
             created_at=task.created_at,
             started_at=task.started_at,
             completed_at=task.completed_at,

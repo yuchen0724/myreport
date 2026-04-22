@@ -23,6 +23,7 @@ class ExportTaskStatus(BaseModel):
     file_path: Optional[str]
     error_message: Optional[str]
     row_count: Optional[int]
+    sql: Optional[str] = None  # 添加SQL字段
     created_at: Optional[datetime] = None
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
