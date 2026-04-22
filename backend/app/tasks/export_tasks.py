@@ -6,8 +6,9 @@ from app.services.report_service import ReportService
 from app.services.query_service import QueryService
 from datetime import datetime
 import traceback
+from celery_config import celery_app
 
-@shared_task(bind=True)
+@celery_app.task(bind=True)
 def export_excel_async(self, task_id: str, data_source_id: int, sql: str, user_id: int):
     """异步导出 Excel 任务"""
     db = SessionLocal()
@@ -20,10 +21,6 @@ def export_excel_async(self, task_id: str, data_source_id: int, sql: str, user_i
         task.status = "RUNNING"
         task.started_at = datetime.now()
         db.commit()
-
-        # 执行查询
-        query_service = QueryService(db)
-        result = query_service.execute_query(data_source_id, sql, {})
 
         # 生成 Excel
         report_service = ReportService(db)
@@ -45,7 +42,6 @@ def export_excel_async(self, task_id: str, data_source_id: int, sql: str, user_i
         task.status = "SUCCESS"
         task.file_path = file_path
         task.completed_at = datetime.now()
-        task.row_count = result.total
         db.commit()
 
         return {"status": "success", "file_path": file_path}
@@ -69,7 +65,7 @@ def export_excel_async(self, task_id: str, data_source_id: int, sql: str, user_i
     finally:
         db.close()
 
-@shared_task(bind=True)
+@celery_app.task(bind=True)
 def export_pdf_async(self, task_id: str, data_source_id: int, sql: str, user_id: int):
     """异步导出 PDF 任务"""
     db = SessionLocal()
@@ -82,10 +78,6 @@ def export_pdf_async(self, task_id: str, data_source_id: int, sql: str, user_id:
         task.status = "RUNNING"
         task.started_at = datetime.now()
         db.commit()
-
-        # 执行查询
-        query_service = QueryService(db)
-        result = query_service.execute_query(data_source_id, sql, {})
 
         # 生成 PDF
         report_service = ReportService(db)
@@ -107,7 +99,6 @@ def export_pdf_async(self, task_id: str, data_source_id: int, sql: str, user_id:
         task.status = "SUCCESS"
         task.file_path = file_path
         task.completed_at = datetime.now()
-        task.row_count = result.total
         db.commit()
 
         return {"status": "success", "file_path": file_path}

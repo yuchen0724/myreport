@@ -23,7 +23,7 @@ class ExportTaskStatus(BaseModel):
     file_path: Optional[str]
     error_message: Optional[str]
     row_count: Optional[int]
-    created_at: datetime
+    created_at: Optional[datetime] = None
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
     progress: float  # 0-100
