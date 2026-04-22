@@ -21,8 +21,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 限流中间件
-app.add_middleware(rate_limit_middleware)
+# 限流中间件（临时禁用）
+# app.add_middleware(rate_limit_middleware)
 
 # 注册路由
 app.include_router(auth.router)
