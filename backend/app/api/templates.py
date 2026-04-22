@@ -8,7 +8,8 @@ from app.schemas.template import (
     TemplateUpdate,
     TemplateResponse,
     TemplateVersionResponse,
-    TemplateShareRequest
+    TemplateShareRequest,
+    SharedTemplateResponse
 )
 from app.services.template_service import TemplateService
 
@@ -112,7 +113,7 @@ async def share_template(
         raise HTTPException(status_code=404, detail="Template not found")
     return {"success": True}
 
-@router.get("/shared/me", response_model=List[TemplateResponse])
+@router.get("/shared/me", response_model=List[SharedTemplateResponse])
 async def get_shared_templates(
     skip: int = 0,
     limit: int = 100,

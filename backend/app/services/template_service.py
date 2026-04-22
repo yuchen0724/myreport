@@ -1,7 +1,7 @@
 # backend/app/services/template_service.py
 from typing import List, Optional, Dict, Any
 import json
-from app.schemas.template import TemplateCreate, TemplateUpdate, TemplateResponse, TemplateVersionResponse, TemplateShareRequest
+from app.schemas.template import TemplateCreate, TemplateUpdate, TemplateResponse, TemplateVersionResponse, TemplateShareRequest, SharedTemplateResponse
 from app.models.template import Template
 from app.models.template_version import TemplateVersion
 from app.models.template_share import TemplateShare
@@ -149,7 +149,7 @@ class TemplateService:
         version = TemplateVersion(
             template_id=updated_template.id,
             version=updated_template.version,
-            config=json.loads(updated_template.config),
+            config=json.dumps(template_data.config),
             created_by=user_id
         )
         self.version_repo.create(version)
@@ -288,7 +288,7 @@ class TemplateService:
         self.db.commit()
         return True
 
-    def get_shared_templates(self, user_id: int, skip: int = 0, limit: int = 100) -> List[TemplateResponse]:
+    def get_shared_templates(self, user_id: int, skip: int = 0, limit: int = 100) -> List[SharedTemplateResponse]:
         """
         获取分享给用户的模板列表
 
@@ -300,32 +300,33 @@ class TemplateService:
         Returns:
             模板响应列表
         """
-        shared_template_ids = self.db.query(TemplateShare.template_id).filter(
+        from app.models.user import User
+
+        # 查询分享记录和模板信息
+        shares = self.db.query(TemplateShare, Template, User).join(
+            Template, TemplateShare.template_id == Template.id
+        ).join(
+            User, TemplateShare.shared_by == User.id
+        ).filter(
             TemplateShare.user_id == user_id
-        ).all()
-
-        template_ids = [t[0] for t in shared_template_ids]
-
-        if not template_ids:
-            return []
-
-        templates = self.db.query(Template).filter(
-            Template.id.in_(template_ids)
-        ).order_by(Template.created_at.desc()).offset(skip).limit(limit).all()
+        ).order_by(TemplateShare.shared_at.desc()).offset(skip).limit(limit).all()
 
         return [
-            TemplateResponse(
-                id=t.id,
-                name=t.name,
-                description=t.description,
-                config=json.loads(t.config),
-                version=t.version,
-                is_public=t.is_public,
-                created_by=t.created_by,
-                created_at=t.created_at,
-                updated_at=t.updated_at
+            SharedTemplateResponse(
+                id=template.id,
+                name=template.name,
+                description=template.description,
+                config=json.loads(template.config),
+                version=template.version,
+                is_public=template.is_public,
+                created_by=template.created_by,
+                created_at=template.created_at,
+                updated_at=template.updated_at,
+                shared_by=share.shared_by,
+                shared_by_username=user.username,
+                shared_at=share.shared_at
             )
-            for t in templates
+            for share, template, user in shares
         ]
 
     def get_template_shares(self, template_id: int) -> List[int]:

@@ -3,7 +3,7 @@ import request from "@/utils/request"
 
 export function getUserList(params) {
   return request({
-    url: "/api/users",
+    url: "/users",
     method: "get",
     params
   })

@@ -16,29 +16,30 @@
           </div>
         </template>
 
-      <el-table :data="versions" style="width: 100%">
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="version" label="版本号" width="100" />
-        <el-table-column prop="created_at" label="创建时间" width="180">
-          <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_by" label="创建者" width="100" />
-        <el-table-column label="操作" width="150">
-          <template #default="{ row }">
-            <el-button size="small" @click="handleView(row)">查看</el-button>
-            <el-button size="small" type="primary" @click="handleRollback(row)">回滚</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+        <el-table :data="versions" style="width: 100%">
+          <el-table-column prop="id" label="ID" width="80" />
+          <el-table-column prop="version" label="版本号" width="100" />
+          <el-table-column prop="created_at" label="创建时间" width="180">
+            <template #default="{ row }">
+              {{ formatDate(row.created_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_by" label="创建者" width="100" />
+          <el-table-column label="操作" width="150">
+            <template #default="{ row }">
+              <el-button size="small" @click="handleView(row)">查看</el-button>
+              <el-button size="small" type="primary" @click="handleRollback(row)">回滚</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
 
-      <!-- 配置预览对话框 -->
-      <el-dialog v-model="configDialogVisible" title="配置预览" width="60%">
-        <pre>{{ currentConfig }}</pre>
-      </el-dialog>
-    </el-card>
-  </div>
+        <!-- 配置预览对话框 -->
+        <el-dialog v-model="configDialogVisible" title="配置预览" width="60%">
+          <pre>{{ currentConfig }}</pre>
+        </el-dialog>
+      </el-card>
+    </div>
+  </Layout>
 </template>
 
 <script setup>

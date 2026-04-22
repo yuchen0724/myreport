@@ -3,7 +3,7 @@ import request from "@/utils/request"
 
 export function getTemplateList(params) {
   return request({
-    url: "/api/templates",
+    url: "/templates",
     method: "get",
     params
   })
@@ -11,14 +11,14 @@ export function getTemplateList(params) {
 
 export function getTemplate(id) {
   return request({
-    url: `/api/templates/${id}`,
+    url: `/templates/${id}`,
     method: "get"
   })
 }
 
 export function createTemplate(data) {
   return request({
-    url: "/api/templates",
+    url: "/templates",
     method: "post",
     data
   })
@@ -26,7 +26,7 @@ export function createTemplate(data) {
 
 export function updateTemplate(id, data) {
   return request({
-    url: `/api/templates/${id}`,
+    url: `/templates/${id}`,
     method: "put",
     data
   })
@@ -34,21 +34,21 @@ export function updateTemplate(id, data) {
 
 export function deleteTemplate(id) {
   return request({
-    url: `/api/templates/${id}`,
+    url: `/templates/${id}`,
     method: "delete"
   })
 }
 
 export function getTemplateVersions(id) {
   return request({
-    url: `/api/templates/${id}/versions`,
+    url: `/templates/${id}/versions`,
     method: "get"
   })
 }
 
 export function rollbackTemplate(id, version) {
   return request({
-    url: `/api/templates/${id}/rollback/${version}`,
+    url: `/templates/${id}/rollback/${version}`,
     method: "post"
   })
 }
@@ -61,7 +61,7 @@ export function rollbackTemplate(id, version) {
  */
 export function getVersionDiff(templateId, version1, version2) {
   return request({
-    url: `/api/templates/${templateId}/versions/diff`,
+    url: `/templates/${templateId}/versions/diff`,
     method: "get",
     params: { version1, version2 }
   })

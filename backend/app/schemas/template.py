@@ -26,7 +26,7 @@ class TemplateResponse(TemplateBase):
     id: int
     version: int
     created_by: int
-    created_at: datetime
+    created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:
@@ -39,7 +39,7 @@ class TemplateVersionResponse(BaseModel):
     version: int
     config: Dict[str, Any]
     created_by: int
-    created_at: datetime
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -47,3 +47,9 @@ class TemplateVersionResponse(BaseModel):
 class TemplateShareRequest(BaseModel):
     """模板分享请求"""
     user_ids: List[int] = Field(..., description="分享给的用户 ID 列表")
+
+class SharedTemplateResponse(TemplateResponse):
+    """分享的模板响应"""
+    shared_by: Optional[int] = None
+    shared_by_username: Optional[str] = None
+    shared_at: Optional[datetime] = None
