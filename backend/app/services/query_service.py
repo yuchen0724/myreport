@@ -6,6 +6,7 @@ from app.repositories.query_history_repository import QueryHistoryRepository
 from app.schemas.query import SQLQueryRequest, SQLQueryResponse
 from app.utils.sql_validator import SQLValidator
 from app.core.security import verify_password
+from app.services.cache_service import cache_service
 
 
 class QueryService:
@@ -26,6 +27,18 @@ class QueryService:
         if not ds:
             raise ValueError("数据源不存在")
 
+        # 生成缓存键
+        cache_key = cache_service.generate_query_key(
+            request.data_source_id,
+            request.sql,
+            request.params or {}
+        )
+
+        # 尝试从缓存获取
+        cached_result = cache_service.get(cache_key)
+        if cached_result:
+            return SQLQueryResponse(**cached_result)
+
         # 执行查询
         start_time = time.time()
         try:
@@ -42,12 +55,17 @@ class QueryService:
                 "row_count": result["total"],
             })
 
-            return SQLQueryResponse(
+            response = SQLQueryResponse(
                 columns=result["columns"],
                 rows=result["rows"],
                 total=result["total"],
                 execution_time_ms=execution_time_ms,
             )
+
+            # 缓存结果（5分钟）
+            cache_service.set(cache_key, response.dict(), expire=300)
+
+            return response
         except Exception as e:
             raise ValueError(f"查询执行失败: {str(e)}")
 
