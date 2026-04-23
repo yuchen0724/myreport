@@ -64,7 +64,7 @@ const routes = [
   {
     path: "/templates/:id",
     name: "TemplateDetail",
-    component: () => import("@/views/TemplateForm.vue"),
+    component: () => import("@/views/TemplateDetail.vue"),
     meta: { requiresAuth: true }
   },
   {

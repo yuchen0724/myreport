@@ -6,7 +6,7 @@ import request from "@/utils/request"
  */
 export function getTemplates(params = {}) {
   return request({
-    url: "/templates",
+    url: "/api/templates",
     method: "get",
     params
   })
@@ -19,7 +19,7 @@ export function getTemplates(params = {}) {
  */
 export function shareTemplate(templateId, userIds) {
   return request({
-    url: `/templates/${templateId}/share`,
+    url: `/api/templates/${templateId}/share`,
     method: "post",
     data: userIds
   })
@@ -30,7 +30,7 @@ export function shareTemplate(templateId, userIds) {
  */
 export function getSharedTemplates(params = {}) {
   return request({
-    url: "/templates/shared/me",
+    url: "/api/templates/shared/me",
     method: "get",
     params
   })
@@ -42,7 +42,7 @@ export function getSharedTemplates(params = {}) {
  */
 export function getTemplateShares(templateId) {
   return request({
-    url: `/templates/${templateId}/shares`,
+    url: `/api/templates/${templateId}/shares`,
     method: "get"
   })
 }
@@ -54,7 +54,7 @@ export function getTemplateShares(templateId) {
  */
 export function unshareTemplate(templateId, userId) {
   return request({
-    url: `/templates/${templateId}/unshare`,
+    url: `/api/templates/${templateId}/unshare`,
     method: "post",
     data: { user_id: userId }
   })
