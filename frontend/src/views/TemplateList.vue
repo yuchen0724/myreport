@@ -123,26 +123,66 @@ const handleCreate = () => {
 }
 
 const handleView = (row) => {
-  console.log('查看模板:', row.id)
+  console.log('查看模板 - row对象:', row)
+  console.log('查看模板 - row.id:', row.id)
+  
+  if (!row || !row.id) {
+    console.error('row对象或row.id为空')
+    ElMessage.error('模板数据异常，无法查看')
+    return
+  }
+  
+  console.log('准备跳转到模板详情页面，ID:', row.id)
   router.push(`/templates/${row.id}`).catch(err => {
     console.error('路由跳转失败:', err)
-    ElMessage.error('无法查看模板')
+    ElMessage.error('无法查看模板：' + (err.message || '未知错误'))
   })
 }
 
 const handleEdit = (row) => {
-  console.log('编辑模板:', row.id)
+  console.log('编辑模板 - row对象:', row)
+  console.log('编辑模板 - row.id:', row.id)
+  
+  if (!row || !row.id) {
+    console.error('row对象或row.id为空')
+    ElMessage.error('模板数据异常，无法编辑')
+    return
+  }
+  
+  console.log('准备跳转到模板编辑页面，ID:', row.id)
   router.push(`/templates/${row.id}/edit`).catch(err => {
     console.error('路由跳转失败:', err)
-    ElMessage.error('无法编辑模板')
+    ElMessage.error('无法编辑模板：' + (err.message || '未知错误'))
   })
 }
 
 const handleVersions = (row) => {
-  router.push(`/templates/${row.id}/versions`)
+  console.log('查看版本历史 - row对象:', row)
+  console.log('查看版本历史 - row.id:', row.id)
+  
+  if (!row || !row.id) {
+    console.error('row对象或row.id为空')
+    ElMessage.error('模板数据异常，无法查看版本')
+    return
+  }
+  
+  console.log('准备跳转到版本历史页面，ID:', row.id)
+  router.push(`/templates/${row.id}/versions`).catch(err => {
+    console.error('路由跳转失败:', err)
+    ElMessage.error('无法查看版本：' + (err.message || '未知错误'))
+  })
 }
 
 const handleDelete = async (row) => {
+  console.log('删除模板 - row对象:', row)
+  console.log('删除模板 - row.id:', row.id)
+  
+  if (!row || !row.id) {
+    console.error('row对象或row.id为空')
+    ElMessage.error('模板数据异常，无法删除')
+    return
+  }
+  
   try {
     await ElMessageBox.confirm('确定要删除该模板吗？', '提示', {
       confirmButtonText: '确定',
@@ -150,12 +190,14 @@ const handleDelete = async (row) => {
       type: 'warning'
     })
 
+    console.log('开始删除模板，ID:', row.id)
     await deleteTemplate(row.id)
     ElMessage.success('删除成功')
     await loadTemplates()
   } catch (error) {
+    console.error('删除模板失败:', error)
     if (error !== 'cancel') {
-      ElMessage.error('删除失败')
+      ElMessage.error('删除失败：' + (error.message || '未知错误'))
     }
   }
 }
@@ -165,20 +207,40 @@ const formatDate = (date) => {
 }
 
 const handleShare = (row) => {
+  console.log('分享模板 - row对象:', row)
+  console.log('分享模板 - row.id:', row.id)
+  
+  if (!row || !row.id) {
+    console.error('row对象或row.id为空')
+    ElMessage.error('模板数据异常，无法分享')
+    return
+  }
+  
+  console.log('准备打开分享对话框，模板ID:', row.id)
   shareForm.value.template_id = row.id
   shareForm.value.user_ids = []
   shareDialogVisible.value = true
 }
 
 const handleConfirmShare = async () => {
+  console.log('确认分享模板 - shareForm:', shareForm.value)
+  
+  if (!shareForm.value.template_id) {
+    console.error('template_id为空')
+    ElMessage.error('模板ID异常，无法分享')
+    return
+  }
+  
   try {
+    console.log('开始分享模板，ID:', shareForm.value.template_id, '用户IDs:', shareForm.value.user_ids)
     await shareTemplate(shareForm.value.template_id, {
       user_ids: shareForm.value.user_ids
     })
     ElMessage.success('分享成功')
     shareDialogVisible.value = false
   } catch (error) {
-    ElMessage.error('分享失败')
+    console.error('分享模板失败:', error)
+    ElMessage.error('分享失败：' + (error.message || '未知错误'))
   }
 }
 </script>
