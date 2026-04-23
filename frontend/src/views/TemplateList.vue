@@ -114,11 +114,19 @@ const handleCreate = () => {
 }
 
 const handleView = (row) => {
-  router.push(`/templates/${row.id}`)
+  console.log('查看模板:', row.id)
+  router.push(`/templates/${row.id}`).catch(err => {
+    console.error('路由跳转失败:', err)
+    ElMessage.error('无法查看模板')
+  })
 }
 
 const handleEdit = (row) => {
-  router.push(`/templates/${row.id}/edit`)
+  console.log('编辑模板:', row.id)
+  router.push(`/templates/${row.id}/edit`).catch(err => {
+    console.error('路由跳转失败:', err)
+    ElMessage.error('无法编辑模板')
+  })
 }
 
 const handleVersions = (row) => {
