@@ -102,10 +102,19 @@ onMounted(async () => {
 
 const loadTemplates = async () => {
   try {
+    console.log('开始加载模板列表...')
     const response = await getTemplateList()
+    console.log('模板列表响应:', response)
     templates.value = response
+    console.log('模板列表已更新，共', templates.value.length, '个模板')
   } catch (error) {
-    ElMessage.error('加载模板列表失败')
+    console.error('加载模板列表失败:', error)
+    console.error('错误详情:', {
+      message: error.message,
+      response: error.response,
+      request: error.request
+    })
+    ElMessage.error('加载模板列表失败：' + (error.message || '未知错误'))
   }
 }
 
