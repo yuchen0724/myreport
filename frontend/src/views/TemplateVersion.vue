@@ -98,7 +98,13 @@ const handleRollback = async (row) => {
 }
 
 const handleBack = () => {
-  router.push('/templates')
+  console.log('返回上一页')
+  // 尝试返回上一页，如果没有历史记录则返回模板列表
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push('/templates')
+  }
 }
 
 const formatDate = (date) => {
