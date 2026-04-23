@@ -47,6 +47,9 @@ import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateVersions, rollbackTemplate } from '@/api/template'
+import Layout from '@/components/Layout.vue'
+import Header from '@/components/Header.vue'
+import Sidebar from '@/components/Sidebar.vue'
 
 const router = useRouter()
 const route = useRoute()
