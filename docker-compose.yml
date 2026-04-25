@@ -17,6 +17,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - report_network
 
   redis:
     image: redis:7-alpine
@@ -30,6 +32,72 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - report_network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: report_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://report_user:report_password@postgres:5432/report_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=change-me-in-production
+      - PASSWORD_ENCRYPTION_KEY=
+      - DEBUG=false
+      - CORS_ORIGINS=["http://localhost:3000","http://localhost"]
+      - RATE_LIMIT_ENABLED=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - report_network
+    restart: unless-stopped
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: report_celery
+    command: celery -A celery_config worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://report_user:report_password@postgres:5432/report_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=change-me-in-production
+      - PASSWORD_ENCRYPTION_KEY=
+      - DEBUG=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - report_network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: report_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - report_network
+    restart: unless-stopped
+
+networks:
+  report_network:
+    driver: bridge
 
 volumes:
   postgres_data:

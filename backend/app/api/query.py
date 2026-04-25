@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.auth_deps import get_current_user_id
 from app.schemas.query import SQLQueryRequest, SQLQueryResponse, QueryHistoryResponse
 from app.services.query_service import QueryService
 from app.repositories.query_history_repository import QueryHistoryRepository
@@ -12,7 +13,7 @@ router = APIRouter(prefix="/api/query", tags=["查询"])
 async def execute_sql(
     request: SQLQueryRequest,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """执行 SQL 查询"""
     query_service = QueryService(db)
@@ -28,7 +29,7 @@ async def execute_sql(
 @router.get("/history", response_model=list[QueryHistoryResponse])
 async def get_query_history(
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """获取查询历史记录"""
     history_repo = QueryHistoryRepository(db)

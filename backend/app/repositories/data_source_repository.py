@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.models.data_source import DataSource
-from app.core.security import get_password_hash
+from app.core.security import encrypt_password
 
 
 class DataSourceRepository:
@@ -25,7 +25,7 @@ class DataSourceRepository:
             port=ds_data["port"],
             database=ds_data["database"],
             username=ds_data["username"],
-            password_encrypted=ds_data["password"],  # TODO: 加密存储
+            password_encrypted=encrypt_password(ds_data["password"]),
             is_active=ds_data.get("is_active", True),
             created_by=user_id,
         )

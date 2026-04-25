@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.auth_deps import get_current_user_id
 from app.schemas.chart import ChartRequest, ChartResponse
 from app.services.chart_service import ChartService
 from app.services.query_service import QueryService
@@ -12,7 +13,7 @@ router = APIRouter(prefix="/api/charts", tags=["Charts"])
 async def generate_chart(
     request: ChartRequest,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """
     生成图表数据

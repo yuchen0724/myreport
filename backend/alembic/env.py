@@ -13,6 +13,7 @@ from app.config import get_settings
 
 # 导入所有模型
 from app.models import user, role, permission, data_source, query_history, export_task
+from app.models import template, template_share, template_version
 
 # Alembic Config 对象
 config = context.config

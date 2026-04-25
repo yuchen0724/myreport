@@ -1,12 +1,11 @@
 # backend/app/tasks/export_tasks.py
-from celery import shared_task
+from app.celery_app import celery_app
 from app.core.database import SessionLocal
 from app.models.export_task import ExportTask
 from app.services.report_service import ReportService
 from app.services.query_service import QueryService
 from datetime import datetime
 import traceback
-from celery_config import celery_app
 
 @celery_app.task(bind=True)
 def export_excel_async(self, task_id: str, data_source_id: int, sql: str, user_id: int):

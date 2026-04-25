@@ -3,13 +3,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
+from app.core.auth_deps import get_current_user_id
 from app.schemas.template import (
     TemplateCreate,
     TemplateUpdate,
     TemplateResponse,
     TemplateVersionResponse,
     TemplateShareRequest,
-    SharedTemplateResponse
+    SharedTemplateResponse,
+    TemplateShareUserResponse,
+    UnshareRequest
 )
 from app.services.template_service import TemplateService
 
@@ -19,7 +22,7 @@ router = APIRouter(prefix="/api/templates", tags=["Templates"])
 async def create_template(
     template_data: TemplateCreate,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """创建模板"""
     service = TemplateService(db)
@@ -30,7 +33,7 @@ async def create_template(
 async def get_templates(
     user_id: int = None,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """获取模板列表"""
     service = TemplateService(db)
@@ -54,7 +57,7 @@ async def update_template(
     template_id: int,
     template_data: TemplateUpdate,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """更新模板"""
     service = TemplateService(db)
@@ -90,7 +93,7 @@ async def rollback_template(
     template_id: int,
     version: int,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """回滚模板到指定版本"""
     service = TemplateService(db)
@@ -104,7 +107,7 @@ async def share_template(
     template_id: int,
     share_request: TemplateShareRequest,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """分享模板"""
     service = TemplateService(db)
@@ -118,22 +121,36 @@ async def get_shared_templates(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """获取分享给我的模板列表"""
     service = TemplateService(db)
     templates = service.get_shared_templates(current_user_id, skip, limit)
     return templates
 
-@router.get("/{template_id}/shares", response_model=List[int])
+@router.get("/{template_id}/shares", response_model=List[TemplateShareUserResponse])
 async def get_template_shares(
     template_id: int,
     db: Session = Depends(get_db)
 ):
     """获取模板的分享用户列表"""
     service = TemplateService(db)
-    user_ids = service.get_template_shares(template_id)
-    return user_ids
+    users = service.get_template_shares(template_id)
+    return users
+
+@router.post("/{template_id}/unshare")
+async def unshare_template(
+    template_id: int,
+    request: UnshareRequest,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
+):
+    """取消分享模板"""
+    service = TemplateService(db)
+    success = service.unshare_template(template_id, request.user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="分享记录不存在")
+    return {"success": True}
 
 @router.get("/{template_id}/versions/diff")
 async def get_version_diff(

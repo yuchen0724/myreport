@@ -164,7 +164,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateList } from '@/api/template'
-import { shareTemplate, getSharedTemplates, getTemplateShares } from '@/api/template_share'
+import { shareTemplate, getSharedTemplates, getTemplateShares, unshareTemplate } from '@/api/template_share'
 import { getUserList } from '@/api/user'
 import Layout from '@/components/Layout.vue'
 import Header from '@/components/Header.vue'
@@ -360,15 +360,20 @@ const handleRevokeShare = async (row) => {
       }
     )
 
-    // TODO: 实现取消分享的API调用
-    ElMessage.success('取消分享成功')
-    // 重新加载分享详情
-    if (detailForm.value.template_id) {
-      loadTemplateShares(detailForm.value.template_id)
+    const response = await unshareTemplate(detailForm.value.template_id, row.user_id)
+    if (response.success) {
+      ElMessage.success('取消分享成功')
+      // 重新加载分享详情
+      if (detailForm.value.template_id) {
+        loadTemplateShares(detailForm.value.template_id)
+      }
+    } else {
+      ElMessage.error('取消分享失败')
     }
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error('取消分享失败')
+      console.error('取消分享失败:', error)
+      ElMessage.error(error.response?.data?.detail || '取消分享失败')
     }
   }
 }

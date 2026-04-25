@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Optional
 from app.core.database import get_db
+from app.core.auth_deps import get_current_user_id
 from app.schemas.data_source import (
     DataSourceCreate,
     DataSourceUpdate,
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/datasources", tags=["数据源管理"])
 async def create_data_source(
     ds_data: DataSourceCreate,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """创建数据源"""
     ds_service = DataSourceService(db)
@@ -36,7 +36,7 @@ async def list_data_sources(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user_id: Optional[int] = None  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """列出数据源"""
     ds_service = DataSourceService(db)

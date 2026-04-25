@@ -329,7 +329,7 @@ class TemplateService:
             for share, template, user in shares
         ]
 
-    def get_template_shares(self, template_id: int) -> List[int]:
+    def get_template_shares(self, template_id: int) -> List[dict]:
         """
         获取模板的分享用户列表
 
@@ -337,13 +337,48 @@ class TemplateService:
             template_id: 模板 ID
 
         Returns:
-            用户 ID 列表
+            用户信息列表（包含用户ID、用户名、邮箱、分享时间）
         """
-        shares = self.db.query(TemplateShare.user_id).filter(
+        from app.models.user import User
+
+        shares = self.db.query(TemplateShare, User).join(
+            User, TemplateShare.user_id == User.id
+        ).filter(
             TemplateShare.template_id == template_id
         ).all()
 
-        return [s[0] for s in shares]
+        return [
+            {
+                "user_id": share.user_id,
+                "username": user.username,
+                "email": user.email,
+                "shared_at": share.shared_at
+            }
+            for share, user in shares
+        ]
+
+    def unshare_template(self, template_id: int, user_id: int) -> bool:
+        """
+        取消分享模板
+
+        Args:
+            template_id: 模板 ID
+            user_id: 用户 ID
+
+        Returns:
+            是否成功
+        """
+        share = self.db.query(TemplateShare).filter(
+            TemplateShare.template_id == template_id,
+            TemplateShare.user_id == user_id
+        ).first()
+
+        if not share:
+            return False
+
+        self.db.delete(share)
+        self.db.commit()
+        return True
 
     def get_version_diff(self, template_id: int, version1: int, version2: int) -> dict:
         """

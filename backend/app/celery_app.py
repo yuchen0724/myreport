@@ -21,8 +21,13 @@ def create_celery_app():
         task_track_started=True,
         task_time_limit=30 * 60,
         task_soft_time_limit=25 * 60,
+        worker_prefetch_multiplier=1,
+        worker_max_tasks_per_child=1000,
     )
 
     return celery
 
 celery_app = create_celery_app()
+
+# 导入任务模块以向该 celery_app 注册任务
+from app.tasks import export_tasks  # noqa: E402, F401

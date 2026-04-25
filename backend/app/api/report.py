@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.auth_deps import get_current_user_id
 from app.schemas.report import ExcelExportRequest, ExcelExportResponse
 from app.services.report_service import ReportService
 
@@ -12,7 +13,7 @@ router = APIRouter(prefix="/api/report", tags=["报表"])
 async def export_excel(
     request: ExcelExportRequest,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """导出 Excel 文件"""
     report_service = ReportService(db)
@@ -35,7 +36,7 @@ async def export_excel(
 async def export_excel_async(
     request: ExcelExportRequest,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """异步导出 Excel 文件"""
     report_service = ReportService(db)
@@ -57,7 +58,7 @@ async def export_excel_async(
 async def export_pdf(
     request: ExcelExportRequest,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """导出 PDF 文件"""
     report_service = ReportService(db)

@@ -53,3 +53,17 @@ class SharedTemplateResponse(TemplateResponse):
     shared_by: Optional[int] = None
     shared_by_username: Optional[str] = None
     shared_at: Optional[datetime] = None
+
+class TemplateShareUserResponse(BaseModel):
+    """模板分享用户响应"""
+    user_id: int
+    username: str
+    email: Optional[str] = None
+    shared_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class UnshareRequest(BaseModel):
+    """取消分享请求"""
+    user_id: int

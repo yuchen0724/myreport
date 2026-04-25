@@ -5,7 +5,7 @@ from app.repositories.data_source_repository import DataSourceRepository
 from app.repositories.query_history_repository import QueryHistoryRepository
 from app.schemas.query import SQLQueryRequest, SQLQueryResponse
 from app.utils.sql_validator import SQLValidator
-from app.core.security import verify_password
+from app.core.security import decrypt_password
 from app.services.cache_service import cache_service
 from app.utils.query_optimizer import QueryOptimizer
 
@@ -94,7 +94,7 @@ class QueryService:
                 host=ds.host,
                 port=ds.port,
                 user=ds.username,
-                password=ds.password_encrypted,  # TODO: 解密
+                password=decrypt_password(ds.password_encrypted),
                 database=ds.database,
                 cursorclass=pymysql.cursors.DictCursor
             )
@@ -115,7 +115,7 @@ class QueryService:
                 host=ds.host,
                 port=ds.port,
                 user=ds.username,
-                password=ds.password_encrypted,  # TODO: 解密
+                password=decrypt_password(ds.password_encrypted),
                 database=ds.database
             )
             cursor = conn.cursor()
@@ -136,7 +136,7 @@ class QueryService:
                 host=ds.host,
                 port=ds.port,
                 user=ds.username,
-                password=ds.password_encrypted,  # TODO: 解密
+                password=decrypt_password(ds.password_encrypted),
                 database=ds.database,
                 cursorclass=pymysql.cursors.DictCursor
             )

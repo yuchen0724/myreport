@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
+from app.core.auth_deps import get_current_user_id
 from app.schemas.async_export import AsyncExportRequest, AsyncExportResponse, ExportTaskStatus
 from app.services.async_export_service import AsyncExportService
 
@@ -12,7 +13,7 @@ router = APIRouter(prefix="/api/async-export", tags=["异步导出"])
 async def create_export_task(
     request: AsyncExportRequest,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """创建异步导出任务"""
     service = AsyncExportService(db)
@@ -64,7 +65,7 @@ async def get_user_tasks(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """获取用户的导出任务列表"""
     service = AsyncExportService(db)

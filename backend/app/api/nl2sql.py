@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.auth_deps import get_current_user_id
 from app.schemas.nl2sql import NL2SQLRequest, NL2SQLResponse
 from app.services.nl2sql_service import NL2SQLService
 from app.services.query_service import QueryService
@@ -12,7 +13,7 @@ router = APIRouter(prefix="/api/nl2sql", tags=["NL2SQL"])
 async def parse_question(
     request: NL2SQLRequest,
     db: Session = Depends(get_db),
-    current_user_id: int = 3  # TODO: 从 JWT 获取
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """
     解析自然语言问题并执行查询
