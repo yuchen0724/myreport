@@ -10,7 +10,14 @@ class Settings(BaseSettings):
     debug: bool = True
 
     # 数据库配置
-    database_url: str = "postgresql://zhou@localhost:5433/report_db"
+    database_url: str = "postgresql://zhou@localhost:5432/myreport"
+    
+    # Redis配置
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_db: int = 0
+    redis_password: Optional[str] = None
+    redis_cache_ttl: int = 300  # 缓存生存时间（秒）
 
     # Redis 配置
     redis_url: str = "redis://localhost:6379/0"

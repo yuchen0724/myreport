@@ -199,7 +199,7 @@ class TemplateService:
                 id=v.id,
                 template_id=v.template_id,
                 version=v.version,
-                config=json.loads(v.config),
+                config=json.loads(v.config) if v.config else {},
                 created_by=v.created_by,
                 created_at=v.created_at
             )

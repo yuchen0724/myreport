@@ -1,96 +1,142 @@
-# backend/app/services/cache_service.py
+"""缓存服务 - 用于缓存查询结果"""
+
 import json
+import hashlib
 from typing import Optional, Any
-import redis
-import os
+from datetime import datetime, timedelta
+from app.config import get_settings
+
+settings = get_settings()
+
 
 class CacheService:
+    """缓存服务 - 使用Redis作为缓存后端"""
+    
     def __init__(self):
-        redis_host = os.getenv('REDIS_HOST', 'localhost')
-        redis_port = int(os.getenv('REDIS_PORT', 6379))
-        redis_db = int(os.getenv('REDIS_DB', 0))
-
-        self.redis_client = redis.Redis(
-            host=redis_host,
-            port=redis_port,
-            db=redis_db,
-            decode_responses=True
-        )
-
-    def get(self, key: str) -> Optional[Any]:
-        """获取缓存"""
+        self.redis_client = None
+        self._init_redis()
+    
+    def _init_redis(self):
+        """初始化Redis客户端"""
         try:
-            value = self.redis_client.get(key)
-            if value:
-                return json.loads(value)
-            return None
-        except Exception:
-            return None
-
-    def set(self, key: str, value: Any, expire: int = 3600) -> bool:
-        """设置缓存"""
-        try:
-            return self.redis_client.setex(
-                key,
-                expire,
-                json.dumps(value)
+            import redis
+            self.redis_client = redis.Redis(
+                host=settings.redis_host,
+                port=settings.redis_port,
+                db=settings.redis_db,
+                decode_responses=True
             )
-        except Exception:
+            # 测试连接
+            self.redis_client.ping()
+        except Exception as e:
+            print(f"Redis连接失败: {e}")
+            self.redis_client = None
+    
+    def _generate_cache_key(self, sql: str, params: dict = None) -> str:
+        """生成缓存键"""
+        # 将SQL和参数组合成字符串
+        cache_data = {
+            "sql": sql,
+            "params": params or {}
+        }
+        cache_str = json.dumps(cache_data, sort_keys=True)
+        # 使用MD5哈希生成键
+        return f"query_result:{hashlib.md5(cache_str.encode()).hexdigest()}"
+    
+    def get(self, sql: str, params: dict = None) -> Optional[dict]:
+        """从缓存获取查询结果"""
+        if not self.redis_client:
+            return None
+        
+        try:
+            cache_key = self._generate_cache_key(sql, params)
+            cached_data = self.redis_client.get(cache_key)
+            
+            if cached_data:
+                return json.loads(cached_data)
+            return None
+        except Exception as e:
+            print(f"缓存读取失败: {e}")
+            return None
+    
+    def set(self, sql: str, result: dict, params: dict = None, ttl: int = 300) -> bool:
+        """将查询结果存入缓存
+        
+        Args:
+            sql: SQL语句
+            result: 查询结果
+            params: 查询参数
+            ttl: 缓存过期时间（秒），默认5分钟
+        """
+        if not self.redis_client:
             return False
-
-    def delete(self, key: str) -> bool:
+        
+        try:
+            cache_key = self._generate_cache_key(sql, params)
+            # 添加缓存时间戳
+            cached_data = {
+                "result": result,
+                "cached_at": datetime.now().isoformat(),
+                "ttl": ttl
+            }
+            self.redis_client.setex(
+                cache_key,
+                ttl,
+                json.dumps(cached_data)
+            )
+            return True
+        except Exception as e:
+            print(f"缓存写入失败: {e}")
+            return False
+    
+    def delete(self, sql: str, params: dict = None) -> bool:
         """删除缓存"""
-        try:
-            return self.redis_client.delete(key) > 0
-        except Exception:
+        if not self.redis_client:
             return False
-
-    def exists(self, key: str) -> bool:
-        """检查缓存是否存在"""
+        
         try:
-            return self.redis_client.exists(key) > 0
-        except Exception:
+            cache_key = self._generate_cache_key(sql, params)
+            self.redis_client.delete(cache_key)
+            return True
+        except Exception as e:
+            print(f"缓存删除失败: {e}")
             return False
-
-    def generate_query_key(self, data_source_id: int, sql: str, params: dict) -> str:
-        """生成查询缓存键"""
-        import hashlib
-        key_str = f"query:{data_source_id}:{sql}:{json.dumps(params, sort_keys=True)}"
-        return hashlib.md5(key_str.encode()).hexdigest()
-
-    def generate_template_key(self, template_id: int) -> str:
-        """生成模板缓存键"""
-        return f"template:{template_id}"
-
-    def clear_query_cache(self, data_source_id: Optional[int] = None) -> int:
-        """清除查询缓存"""
+    
+    def clear_pattern(self, pattern: str) -> bool:
+        """根据模式清除缓存
+        
+        Args:
+            pattern: 缓存键模式，如 "query_result:*"
+        """
+        if not self.redis_client:
+            return False
+        
         try:
-            if data_source_id:
-                pattern = f"query:{data_source_id}:*"
-            else:
-                pattern = "query:*"
-
             keys = self.redis_client.keys(pattern)
             if keys:
-                return self.redis_client.delete(*keys)
-            return 0
-        except Exception:
-            return 0
-
-    def clear_template_cache(self, template_id: Optional[int] = None) -> int:
-        """清除模板缓存"""
+                self.redis_client.delete(*keys)
+            return True
+        except Exception as e:
+            print(f"批量缓存删除失败: {e}")
+            return False
+    
+    def get_stats(self) -> dict:
+        """获取缓存统计信息"""
+        if not self.redis_client:
+            return {"status": "disconnected"}
+        
         try:
-            if template_id:
-                pattern = f"template:{template_id}"
-            else:
-                pattern = "template:*"
+            info = self.redis_client.info()
+            query_keys = self.redis_client.keys("query_result:*")
+            return {
+                "status": "connected",
+                "total_keys": info.get("db0", {}).get("keys", 0),
+                "query_cache_count": len(query_keys),
+                "memory_used": info.get("used_memory_human", "N/A")
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
-            keys = self.redis_client.keys(pattern)
-            if keys:
-                return self.redis_client.delete(*keys)
-            return 0
-        except Exception:
-            return 0
 
-# 全局缓存实例
+# 全局缓存服务实例
 cache_service = CacheService()

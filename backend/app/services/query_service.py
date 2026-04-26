@@ -44,17 +44,10 @@ class QueryService:
         if not ds:
             raise ValueError("数据源不存在")
 
-        # 生成缓存键
-        cache_key = cache_service.generate_query_key(
-            request.data_source_id,
-            optimized_sql,
-            request.params or {}
-        )
-
         # 尝试从缓存获取
-        cached_result = cache_service.get(cache_key)
+        cached_result = cache_service.get(optimized_sql, request.params)
         if cached_result:
-            return SQLQueryResponse(**cached_result)
+            return SQLQueryResponse(**cached_result["result"])
 
         # 执行查询
         start_time = time.time()
@@ -80,7 +73,7 @@ class QueryService:
             )
 
             # 缓存结果（5分钟）
-            cache_service.set(cache_key, response.dict(), expire=300)
+            cache_service.set(optimized_sql, response.dict(), params=request.params, ttl=300)
 
             return response
         except Exception as e:

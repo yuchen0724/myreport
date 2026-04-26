@@ -1,8 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
-from app.api import auth, data_sources, query, report, nl2sql, charts, templates, stats, async_export, users
+from app.api import auth, data_sources, query, report, nl2sql, charts, templates, stats, async_export, users, cache, audit_logs
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.error_handler import register_exception_handlers
 
 settings = get_settings()
 
@@ -11,6 +12,9 @@ app = FastAPI(
     version=settings.app_version,
     debug=settings.debug
 )
+
+# 注册异常处理器
+register_exception_handlers(app)
 
 # CORS 配置（从环境变量读取，生产环境请限制具体域名）
 app.add_middleware(
@@ -36,6 +40,8 @@ app.include_router(templates.router)
 app.include_router(stats.router)
 app.include_router(async_export.router)
 app.include_router(users.router)
+app.include_router(cache.router)
+app.include_router(audit_logs.router)
 
 
 @app.get("/")
