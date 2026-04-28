@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
@@ -18,19 +20,26 @@ _fernet: Optional[Fernet] = None
 
 
 def _get_fernet() -> Fernet:
-    """获取 Fernet 加密器实例（惰性初始化）。"""
+    """获取 Fernet 加密器实例（惰性初始化）。
+
+    如果未配置 password_encryption_key，则从 secret_key 派生稳定的密钥，
+    确保加密数据在重启后仍可解密。生产环境仍建议在 .env 中显式设置。
+    """
     global _fernet
     if _fernet is not None:
         return _fernet
     key = settings.password_encryption_key
     if not key:
-        # 未配置加密密钥时，生成一个临时密钥（重启后会失效，仅用于开发/测试）
-        import warnings
-        warnings.warn(
-            "password_encryption_key 未配置，将使用临时密钥。"
-            "生产环境必须在 .env 中设置此值。"
+        # 从 secret_key 派生稳定密钥，重启后仍然有效
+        import base64
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=None,
+            info=b"myreport-encryption-key",
         )
-        key = Fernet.generate_key().decode()
+        derived = hkdf.derive(settings.secret_key.encode())
+        key = base64.urlsafe_b64encode(derived).decode()
     _fernet = Fernet(key.encode() if isinstance(key, str) else key)
     return _fernet
 

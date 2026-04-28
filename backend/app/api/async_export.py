@@ -28,7 +28,8 @@ async def create_export_task(
 @router.get("/task/{task_id}", response_model=ExportTaskStatus)
 async def get_task_status(
     task_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """获取导出任务状态"""
     service = AsyncExportService(db)
@@ -38,6 +39,13 @@ async def get_task_status(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="任务不存在"
+        )
+
+    # 只能查看自己的任务
+    if task.user_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权查看该任务"
         )
 
     # 计算进度
@@ -53,7 +61,7 @@ async def get_task_status(
         file_path=task.file_path,
         error_message=task.error_message,
         row_count=task.row_count,
-        sql=task.sql,  # 添加SQL字段
+        sql=task.sql,
         created_at=task.created_at,
         started_at=task.started_at,
         completed_at=task.completed_at,
@@ -90,7 +98,8 @@ async def get_user_tasks(
 @router.get("/download/{task_id}")
 async def download_export_file(
     task_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """下载导出文件"""
     service = AsyncExportService(db)
@@ -100,6 +109,12 @@ async def download_export_file(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="任务不存在"
+        )
+
+    if task.user_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权下载该文件"
         )
 
     if task.status != "SUCCESS":

@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'add_sql_to_export_tasks'
-down_revision = '3e8cd2300836'
+down_revision = '5a8ea32afe4f'
 branch_labels = None
 depends_on = None
 

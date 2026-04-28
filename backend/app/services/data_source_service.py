@@ -2,7 +2,6 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.repositories.data_source_repository import DataSourceRepository
 from app.schemas.data_source import DataSourceCreate, DataSourceUpdate, DataSourceResponse, DataSourceTestRequest, DataSourceTestResponse
-from app.core.security import verify_password
 
 
 class DataSourceService:
@@ -11,7 +10,6 @@ class DataSourceService:
 
     def create_data_source(self, ds_data: DataSourceCreate, user_id: int) -> DataSourceResponse:
         """创建数据源"""
-        # 测试连接
         test_result = self.test_connection(DataSourceTestRequest(
             type=ds_data.type,
             host=ds_data.host,
@@ -23,39 +21,15 @@ class DataSourceService:
         if not test_result.success:
             raise ValueError(f"连接测试失败: {test_result.message}")
 
-        db_ds = self.ds_repo.create(ds_data.dict(), user_id)
-        return DataSourceResponse(
-            id=db_ds.id,
-            name=db_ds.name,
-            type=db_ds.type,
-            host=db_ds.host,
-            port=db_ds.port,
-            database=db_ds.database,
-            username=db_ds.username,
-            is_active=db_ds.is_active,
-            created_by=db_ds.created_by,
-            created_at=db_ds.created_at,
-            updated_at=db_ds.updated_at,
-        )
+        db_ds = self.ds_repo.create(ds_data.model_dump(), user_id)
+        return DataSourceResponse.model_validate(db_ds)
 
     def get_data_source(self, ds_id: int) -> Optional[DataSourceResponse]:
         """获取数据源"""
         db_ds = self.ds_repo.get_by_id(ds_id)
         if not db_ds:
             return None
-        return DataSourceResponse(
-            id=db_ds.id,
-            name=db_ds.name,
-            type=db_ds.type,
-            host=db_ds.host,
-            port=db_ds.port,
-            database=db_ds.database,
-            username=db_ds.username,
-            is_active=db_ds.is_active,
-            created_by=db_ds.created_by,
-            created_at=db_ds.created_at,
-            updated_at=db_ds.updated_at,
-        )
+        return DataSourceResponse.model_validate(db_ds)
 
     def list_data_sources(self, user_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[DataSourceResponse]:
         """列出数据源"""
@@ -64,22 +38,7 @@ class DataSourceService:
         else:
             db_dss = self.ds_repo.get_all(skip, limit)
 
-        return [
-            DataSourceResponse(
-                id=ds.id,
-                name=ds.name,
-                type=ds.type,
-                host=ds.host,
-                port=ds.port,
-                database=ds.database,
-                username=ds.username,
-                is_active=ds.is_active,
-                created_by=ds.created_by,
-                created_at=ds.created_at,
-                updated_at=ds.updated_at,
-            )
-            for ds in db_dss
-        ]
+        return [DataSourceResponse.model_validate(ds) for ds in db_dss]
 
     def update_data_source(self, ds_id: int, ds_data: DataSourceUpdate) -> Optional[DataSourceResponse]:
         """更新数据源"""
@@ -87,20 +46,8 @@ class DataSourceService:
         if not db_ds:
             return None
 
-        updated_ds = self.ds_repo.update(db_ds, ds_data.dict(exclude_unset=True))
-        return DataSourceResponse(
-            id=updated_ds.id,
-            name=updated_ds.name,
-            type=updated_ds.type,
-            host=updated_ds.host,
-            port=updated_ds.port,
-            database=updated_ds.database,
-            username=updated_ds.username,
-            is_active=updated_ds.is_active,
-            created_by=updated_ds.created_by,
-            created_at=updated_ds.created_at,
-            updated_at=updated_ds.updated_at,
-        )
+        updated_ds = self.ds_repo.update(db_ds, ds_data.model_dump(exclude_unset=True))
+        return DataSourceResponse.model_validate(updated_ds)
 
     def delete_data_source(self, ds_id: int) -> bool:
         """删除数据源"""
@@ -137,7 +84,6 @@ class DataSourceService:
                 conn.close()
                 return DataSourceTestResponse(success=True, message="连接成功")
             elif request.type == "DORIS":
-                # Doris 使用 MySQL 协议
                 import pymysql
                 conn = pymysql.connect(
                     host=request.host,

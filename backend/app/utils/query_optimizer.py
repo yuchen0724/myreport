@@ -1,6 +1,8 @@
 # backend/app/utils/query_optimizer.py
 import re
-from typing import List, Tuple
+from typing import Tuple
+from app.utils.sql_validator import SQLValidator
+
 
 class QueryOptimizer:
     """SQL 查询优化器"""
@@ -35,29 +37,14 @@ class QueryOptimizer:
 
     @staticmethod
     def validate_query(sql: str) -> Tuple[bool, str]:
-        """验证 SQL 查询"""
-        # 检查是否包含危险操作
-        dangerous_keywords = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'CREATE', 'TRUNCATE']
-        for keyword in dangerous_keywords:
-            if re.search(rf'\b{keyword}\b', sql, re.IGNORECASE):
-                return False, f"不允许使用 {keyword} 操作"
-
-        # 检查是否包含注释
-        if '--' in sql or '/*' in sql:
-            return False, "不允许使用 SQL 注释"
-
-        # 检查是否包含分号（防止多语句）
-        if ';' in sql:
-            return False, "不允许使用多语句"
-
-        return True, "验证通过"
+        """验证 SQL 查询安全（委托给 SQLValidator）"""
+        return SQLValidator.validate(sql)
 
     @staticmethod
     def estimate_query_cost(sql: str) -> int:
         """估算查询成本（简单实现）"""
         cost = 0
 
-        # 根据关键字估算
         if 'JOIN' in sql.upper():
             cost += 100
         if 'GROUP BY' in sql.upper():
@@ -67,7 +54,6 @@ class QueryOptimizer:
         if 'HAVING' in sql.upper():
             cost += 20
 
-        # 根据表数量估算
         from_count = sql.upper().count('FROM')
         cost += from_count * 10
 

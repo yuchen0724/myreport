@@ -16,7 +16,7 @@ from app.schemas.template import (
 )
 from app.services.template_service import TemplateService
 
-router = APIRouter(prefix="/api/templates", tags=["Templates"])
+router = APIRouter(prefix="/api/templates", tags=["模板管理"])
 
 @router.post("", response_model=TemplateResponse, status_code=status.HTTP_201_CREATED)
 async def create_template(
@@ -43,7 +43,8 @@ async def get_templates(
 @router.get("/{template_id}", response_model=TemplateResponse)
 async def get_template(
     template_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """获取模板详情"""
     service = TemplateService(db)
@@ -69,7 +70,8 @@ async def update_template(
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_template(
     template_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """删除模板"""
     service = TemplateService(db)
@@ -81,7 +83,8 @@ async def delete_template(
 @router.get("/{template_id}/versions", response_model=List[TemplateVersionResponse])
 async def get_template_versions(
     template_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """获取模板版本列表"""
     service = TemplateService(db)
@@ -131,7 +134,8 @@ async def get_shared_templates(
 @router.get("/{template_id}/shares", response_model=List[TemplateShareUserResponse])
 async def get_template_shares(
     template_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """获取模板的分享用户列表"""
     service = TemplateService(db)
@@ -157,7 +161,8 @@ async def get_version_diff(
     template_id: int,
     version1: int,
     version2: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """获取版本差异"""
     service = TemplateService(db)

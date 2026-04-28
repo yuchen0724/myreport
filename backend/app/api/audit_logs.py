@@ -14,7 +14,6 @@ router = APIRouter(prefix="/api/audit-logs", tags=["审计日志"])
 
 @router.get("", response_model=AuditLogListResponse)
 async def get_audit_logs(
-    user_id: Optional[int] = Query(None, description="用户ID"),
     action: Optional[str] = Query(None, description="操作类型"),
     resource_type: Optional[str] = Query(None, description="资源类型"),
     resource_id: Optional[str] = Query(None, description="资源ID"),
@@ -26,16 +25,11 @@ async def get_audit_logs(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id)
 ):
-    """获取审计日志列表"""
+    """获取当前用户的审计日志列表"""
     audit_service = AuditLogService(db)
-    
-    # 普通用户只能查看自己的日志
-    if user_id and user_id != current_user_id:
-        # TODO: 检查是否为管理员
-        pass
-    
+
     logs = audit_service.get_logs(
-        user_id=user_id or current_user_id,
+        user_id=current_user_id,
         action=action,
         resource_type=resource_type,
         resource_id=resource_id,
@@ -45,7 +39,7 @@ async def get_audit_logs(
         skip=skip,
         limit=limit
     )
-    
+
     return {
         "logs": logs,
         "total": len(logs),
@@ -63,15 +57,14 @@ async def get_audit_log(
     """获取审计日志详情"""
     audit_service = AuditLogService(db)
     log = audit_service.get_log_by_id(log_id)
-    
+
     if not log:
         raise HTTPException(status_code=404, detail="审计日志不存在")
-    
-    # 普通用户只能查看自己的日志
+
+    # 只能查看自己的日志（管理员可查看全部，待实现）
     if log.user_id != current_user_id:
-        # TODO: 检查是否为管理员
-        pass
-    
+        raise HTTPException(status_code=403, detail="无权查看该日志")
+
     return log
 
 
@@ -83,15 +76,13 @@ async def get_user_activity(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id)
 ):
-    """获取用户活动统计"""
-    # 普通用户只能查看自己的活动
+    """获取当前用户的活动统计"""
     if user_id != current_user_id:
-        # TODO: 检查是否为管理员
-        pass
-    
+        raise HTTPException(status_code=403, detail="无权查看该用户的活动统计")
+
     audit_service = AuditLogService(db)
     activity = audit_service.get_user_activity(user_id, start_date, end_date)
-    
+
     return activity
 
 
@@ -102,9 +93,5 @@ async def get_system_stats(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id)
 ):
-    """获取系统统计信息"""
-    # TODO: 检查是否为管理员
-    audit_service = AuditLogService(db)
-    stats = audit_service.get_system_stats(start_date, end_date)
-    
-    return stats
+    """获取系统统计信息（管理员功能，暂未开放）"""
+    raise HTTPException(status_code=403, detail="系统统计功能需要管理员权限")

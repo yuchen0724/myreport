@@ -7,7 +7,7 @@ from app.schemas.chart import ChartRequest, ChartResponse
 from app.services.chart_service import ChartService
 from app.services.query_service import QueryService
 
-router = APIRouter(prefix="/api/charts", tags=["Charts"])
+router = APIRouter(prefix="/api/charts", tags=["图表"])
 
 @router.post("/generate", response_model=ChartResponse)
 async def generate_chart(

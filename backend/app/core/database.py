@@ -5,7 +5,12 @@ from app.config import get_settings
 
 settings = get_settings()
 
-engine = create_engine(settings.database_url)
+# SQLite 需要 check_same_thread=False 以支持多线程访问
+connect_args = {}
+if settings.database_url.startswith("sqlite"):
+    connect_args["check_same_thread"] = False
+
+engine = create_engine(settings.database_url, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

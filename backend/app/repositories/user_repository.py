@@ -50,3 +50,7 @@ class UserRepository:
         if not user or not verify_password(password, user.password_hash):
             return None
         return user
+
+    def get_all(self, skip: int = 0, limit: int = 100) -> list[User]:
+        """获取用户列表"""
+        return self.db.query(User).offset(skip).limit(limit).all()

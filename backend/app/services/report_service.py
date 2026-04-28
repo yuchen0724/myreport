@@ -7,6 +7,8 @@ from app.services.query_service import QueryService
 from app.schemas.query import SQLQueryRequest
 from app.schemas.report import ExcelExportRequest
 from app.utils.pdf_generator import PDFGenerator
+from app.models.export_task import ExportTask
+from datetime import datetime
 
 
 class ReportService:
@@ -81,6 +83,19 @@ class ReportService:
 
     def generate_excel_async(self, request: ExcelExportRequest, user_id: int) -> str:
         """异步生成 Excel 文件（返回任务 ID）"""
+        from app.tasks.export_tasks import export_excel_async
+
         task_id = str(uuid.uuid4())
-        # TODO: 使用 Celery 异步处理
+
+        task = ExportTask(
+            id=task_id,
+            user_id=user_id,
+            status="PENDING",
+            sql=request.sql
+        )
+        self.db.add(task)
+        self.db.commit()
+
+        export_excel_async.delay(task_id, request.data_source_id, request.sql, user_id)
+
         return task_id

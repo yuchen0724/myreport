@@ -5,21 +5,29 @@ from typing import List
 class SQLValidator:
     """SQL 验证器，防止 SQL 注入和危险操作"""
 
-    # 危险关键字
+    # 危险关键字 — 使用 \b 词边界匹配避免误判（如 SELECT * FROM DROP_TABLE）
     DANGER_KEYWORDS = [
         "DROP", "DELETE", "UPDATE", "INSERT", "TRUNCATE", "ALTER",
         "CREATE", "GRANT", "REVOKE", "COMMIT", "ROLLBACK"
     ]
 
+    # 预编译正则
+    _danger_patterns = [
+        re.compile(rf"\b{kw}\b", re.IGNORECASE) for kw in DANGER_KEYWORDS
+    ]
+
     @classmethod
     def validate(cls, sql: str) -> tuple[bool, str]:
-        """验证 SQL 是否安全"""
+        """验证 SQL 是否安全
+
+        使用词边界 \b 进行关键字匹配，避免将 'DELETE' 误判在 'DELETE_LOG' 中。
+        """
         sql_upper = sql.upper()
 
-        # 检查危险关键字
-        for keyword in cls.DANGER_KEYWORDS:
-            if keyword in sql_upper:
-                return False, f"不允许使用 {keyword} 语句"
+        # 检查危险关键字（词边界匹配）
+        for kw, pattern in zip(cls.DANGER_KEYWORDS, cls._danger_patterns):
+            if pattern.search(sql):
+                return False, f"不允许使用 {kw} 语句"
 
         # 检查是否以 SELECT 开头
         if not sql_upper.strip().startswith("SELECT"):
@@ -38,9 +46,8 @@ class SQLValidator:
     @classmethod
     def extract_tables(cls, sql: str) -> List[str]:
         """从 SQL 中提取表名"""
-        # 简单实现，实际应该使用 SQL 解析器
         pattern = r"FROM\s+([^\s,]+)|JOIN\s+([^\s,]+)"
-        matches = re.findall(pattern, sql.upper(), re.IGNORECASE)
+        matches = re.findall(pattern, sql, re.IGNORECASE)
         tables = []
         for match in matches:
             for table in match:

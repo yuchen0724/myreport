@@ -46,7 +46,8 @@ async def list_data_sources(
 @router.get("/{ds_id}", response_model=DataSourceResponse)
 async def get_data_source(
     ds_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """获取数据源详情"""
     ds_service = DataSourceService(db)
@@ -63,7 +64,8 @@ async def get_data_source(
 async def update_data_source(
     ds_id: int,
     ds_data: DataSourceUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """更新数据源"""
     ds_service = DataSourceService(db)
@@ -79,7 +81,8 @@ async def update_data_source(
 @router.delete("/{ds_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_data_source(
     ds_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """删除数据源"""
     ds_service = DataSourceService(db)
@@ -94,7 +97,8 @@ async def delete_data_source(
 @router.post("/test", response_model=DataSourceTestResponse)
 async def test_data_source_connection(
     request: DataSourceTestRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """测试数据源连接"""
     ds_service = DataSourceService(db)

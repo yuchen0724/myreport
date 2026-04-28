@@ -18,8 +18,8 @@ class QueryService:
 
     def execute_sql(self, request: SQLQueryRequest, user_id: int) -> SQLQueryResponse:
         """执行 SQL 查询"""
-        # 验证查询
-        is_valid, message = QueryOptimizer.validate_query(request.sql)
+        # 验证 SQL 安全（SQLValidator.validate 是唯一校验入口）
+        is_valid, message = SQLValidator.validate(request.sql)
         if not is_valid:
             raise ValueError(message)
 
@@ -28,16 +28,9 @@ class QueryService:
 
         # 估算查询成本
         cost = QueryOptimizer.estimate_query_cost(optimized_sql)
-
-        # 如果成本过高，建议异步处理
         if cost > 200:
             # TODO: 提示用户使用异步导出
             pass
-
-        # 验证 SQL
-        is_valid, message = SQLValidator.validate(optimized_sql)
-        if not is_valid:
-            raise ValueError(message)
 
         # 获取数据源
         ds = self.ds_repo.get_by_id(request.data_source_id)

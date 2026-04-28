@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
+from app.core.auth_deps import get_current_user_id
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.services.user_service import UserService
 
@@ -12,7 +13,8 @@ router = APIRouter(prefix="/api/users", tags=["用户管理"])
 async def get_users(
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """获取用户列表"""
     service = UserService(db)
@@ -23,7 +25,8 @@ async def get_users(
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """获取用户详情"""
     service = UserService(db)
@@ -39,7 +42,8 @@ async def get_user(
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
     user_data: UserCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """创建用户"""
     service = UserService(db)
@@ -56,7 +60,8 @@ async def create_user(
 async def update_user(
     user_id: int,
     user_data: UserUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """更新用户"""
     service = UserService(db)
@@ -72,7 +77,8 @@ async def update_user(
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
 ):
     """删除用户"""
     service = UserService(db)

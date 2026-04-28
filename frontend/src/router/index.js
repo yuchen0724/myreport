@@ -105,17 +105,12 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  console.log('路由守卫:', { to: to.path, from: from.path })
   const userStore = useUserStore()
-  console.log('用户状态:', { token: userStore.token, user: userStore.user })
   if (to.meta.requiresAuth && !userStore.token) {
-    console.log('需要认证但未登录，重定向到登录页')
     next("/login")
   } else if (to.path === "/login" && userStore.token) {
-    console.log('已登录但访问登录页，重定向到首页')
     next("/")
   } else {
-    console.log('正常访问')
     next()
   }
 })
