@@ -34,7 +34,7 @@
             v-model="configJson"
             type="textarea"
             :rows="10"
-            placeholder="请输入模板配置（JSON 格式）"
+            placeholder='请输入模板配置（JSON 格式），例如：\n{\n  "data_source_id": 1,\n  "sql": "SELECT * FROM users",\n  "params": {}\n}'
           />
         </el-form-item>
 
@@ -63,15 +63,25 @@
         </template>
         <el-table :data="queryResult.rows" style="width: 100%" max-height="400">
           <el-table-column
-            v-for="column in queryResult.columns"
-            :key="column"
-            :prop="column"
+            v-for="(column, index) in queryResult.columns"
+            :key="index"
+            :prop="index.toString()"
             :label="column"
             :width="150"
           />
         </el-table>
-        <div style="margin-top: 10px; color: #666;">
-          共 {{ queryResult.total }} 条记录，执行时间：{{ queryResult.execution_time_ms }}ms
+        <div class="result-footer">
+          <div class="result-info">共 {{ queryResult.total }} 条记录，执行时间：{{ queryResult.execution_time_ms }}ms</div>
+          <el-pagination
+            background
+            layout="prev, pager, next, sizes, total"
+            :total="queryResult.total"
+            :page-size="pageSize"
+            :page-sizes="[20, 50, 100, 200]"
+            :current-page="currentPage"
+            @current-change="handlePageChange"
+            @update:page-size="(val) => { pageSize = val; handlePageChange(1) }"
+          />
         </div>
       </el-card>
     </el-card>
@@ -95,6 +105,8 @@ const formRef = ref(null)
 const loading = ref(false)
 const previewing = ref(false)
 const queryResult = ref(null)
+const currentPage = ref(1)
+const pageSize = ref(50)
 
 const isEdit = computed(() => !!route.params.id)
 
@@ -133,26 +145,47 @@ const loadTemplate = async () => {
   }
 }
 
+const handlePageChange = (page) => {
+  currentPage.value = page
+  doPreview()
+}
+
 const handlePreview = async () => {
+  currentPage.value = 1
+  await doPreview()
+}
+
+const doPreview = async () => {
   try {
     previewing.value = true
     const config = JSON.parse(configJson.value)
-    
-    if (!config.data_source_id || !config.sql) {
-      ElMessage.warning('模板配置中缺少数据源ID或SQL语句')
+
+    if (!config.data_source_id && !config.sql) {
+      ElMessage.warning('模板配置中缺少 data_source_id（数据源ID）和 sql（SQL语句）')
+      return
+    }
+    if (!config.data_source_id) {
+      ElMessage.warning('模板配置中缺少 data_source_id（数据源ID）')
+      return
+    }
+    if (!config.sql) {
+      ElMessage.warning('模板配置中缺少 sql（SQL语句）')
       return
     }
 
     const response = await executeQuery({
       data_source_id: config.data_source_id,
       sql: config.sql,
-      params: config.params || {}
+      params: config.params || {},
+      page: currentPage.value,
+      page_size: pageSize.value
     })
-    
+
     queryResult.value = response
     ElMessage.success('查询成功')
   } catch (error) {
-    ElMessage.error('查询失败：' + (error.message || '未知错误'))
+    const msg = error.response?.data?.message || error.response?.data?.detail || error.message || '未知错误'
+    ElMessage.error('查询失败：' + msg)
   } finally {
     previewing.value = false
   }

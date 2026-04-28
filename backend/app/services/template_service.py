@@ -27,7 +27,15 @@ class TemplateService:
 
         Returns:
             模板响应
+
+        Raises:
+            ValueError: 配置中缺少必要字段
         """
+        config = template_data.config
+        if not config.get("data_source_id"):
+            raise ValueError("模板配置缺少 data_source_id（数据源ID）")
+        if not config.get("sql"):
+            raise ValueError("模板配置缺少 sql（SQL语句）")
         # 创建模板
         template = Template(
             name=template_data.name,
@@ -125,6 +133,9 @@ class TemplateService:
 
         Returns:
             模板响应
+
+        Raises:
+            ValueError: 配置中缺少必要字段
         """
         template = self.template_repo.get_by_id(template_id)
         if not template:
@@ -136,6 +147,11 @@ class TemplateService:
         if template_data.description is not None:
             template.description = template_data.description
         if template_data.config is not None:
+            config = template_data.config
+            if not config.get("data_source_id"):
+                raise ValueError("模板配置缺少 data_source_id（数据源ID）")
+            if not config.get("sql"):
+                raise ValueError("模板配置缺少 sql（SQL语句）")
             template.config = json.dumps(template_data.config)
         if template_data.is_public is not None:
             template.is_public = template_data.is_public

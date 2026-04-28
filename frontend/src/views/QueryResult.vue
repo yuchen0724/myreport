@@ -19,9 +19,18 @@
             :label="col"
           />
         </el-table>
-        <div class="result-info">
-          <p>执行时间: {{ result.execution_time_ms }}ms</p>
-          <p>行数: {{ result.total }}</p>
+        <div class="result-footer">
+          <div class="result-info">执行时间: {{ result.execution_time_ms }}ms，共 {{ result.total }} 条记录</div>
+          <el-pagination
+            background
+            layout="prev, pager, next, sizes, total"
+            :total="result.total"
+            :page-size="pageSize"
+            :page-sizes="[20, 50, 100, 200]"
+            :current-page="currentPage"
+            @current-change="(page) => { currentPage = page; /* TODO: 重新查询 */ }"
+            @update:page-size="(val) => { pageSize = val; currentPage = 1 }"
+          />
         </div>
         <div class="export-buttons">
           <el-button @click="handleExportExcel" :loading="exportingExcel">导出 Excel</el-button>
@@ -39,6 +48,7 @@ import Layout from '@/components/Layout.vue'
 import Header from '@/components/Header.vue'
 import Sidebar from '@/components/Sidebar.vue'
 import { exportExcel, exportPDF } from '@/api/report'
+import { executeSQL } from '@/api/query'
 
 export default {
   name: 'QueryResult',
@@ -47,10 +57,14 @@ export default {
     const loading = ref(false)
     const exportingExcel = ref(false)
     const exportingPDF = ref(false)
+    const currentPage = ref(1)
+    const pageSize = ref(50)
     const result = ref({
       columns: [],
       rows: [],
       total: 0,
+      page: 1,
+      page_size: 50,
       execution_time_ms: 0
     })
 
@@ -142,6 +156,19 @@ export default {
 
 .result-info p {
   margin: 5px 0;
+  color: #666;
+}
+
+.result-footer {
+  margin-top: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.result-info {
   color: #666;
 }
 

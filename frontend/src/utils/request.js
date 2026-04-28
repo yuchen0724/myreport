@@ -35,7 +35,7 @@ request.interceptors.response.use(
         userStore.logout()
         window.location.href = "/login"
       }
-      ElMessage.error(data.detail || "请求失败")
+      ElMessage.error(data.message || data.detail || "请求失败")
     } else {
       ElMessage.error("网络错误")
     }

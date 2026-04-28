@@ -10,7 +10,7 @@ def test_create_template(db_session):
     template_data = TemplateCreate(
         name="测试模板",
         description="这是一个测试模板",
-        config={"sql": "SELECT * FROM users"},
+        config={"data_source_id": 1, "sql": "SELECT * FROM users"},
         is_public=False
     )
 
@@ -28,7 +28,7 @@ def test_get_template(db_session):
     template_data = TemplateCreate(
         name="测试模板",
         description="这是一个测试模板",
-        config={"sql": "SELECT * FROM users"},
+        config={"data_source_id": 1, "sql": "SELECT * FROM users"},
         is_public=False
     )
     created = service.create_template(template_data, user_id=3)
@@ -48,7 +48,7 @@ def test_update_template(db_session):
     template_data = TemplateCreate(
         name="测试模板",
         description="这是一个测试模板",
-        config={"sql": "SELECT * FROM users"},
+        config={"data_source_id": 1, "sql": "SELECT * FROM users"},
         is_public=False
     )
     created = service.create_template(template_data, user_id=3)
@@ -73,7 +73,7 @@ def test_delete_template(db_session):
     template_data = TemplateCreate(
         name="测试模板",
         description="这是一个测试模板",
-        config={"sql": "SELECT * FROM users"},
+        config={"data_source_id": 1, "sql": "SELECT * FROM users"},
         is_public=False
     )
     created = service.create_template(template_data, user_id=3)

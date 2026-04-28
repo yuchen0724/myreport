@@ -6,7 +6,7 @@ def test_create_template(client, auth_headers):
         json={
             "name": "新模板",
             "description": "新模板描述",
-            "config": {"sql": "SELECT * FROM users"},
+            "config": {"data_source_id": 1, "sql": "SELECT * FROM users"},
             "is_public": False
         }
     )

@@ -26,8 +26,14 @@ async def create_template(
 ):
     """创建模板"""
     service = TemplateService(db)
-    template = service.create_template(template_data, current_user_id)
-    return template
+    try:
+        template = service.create_template(template_data, current_user_id)
+        return template
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 @router.get("", response_model=List[TemplateResponse])
 async def get_templates(
@@ -62,10 +68,16 @@ async def update_template(
 ):
     """更新模板"""
     service = TemplateService(db)
-    template = service.update_template(template_id, template_data, current_user_id)
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
-    return template
+    try:
+        template = service.update_template(template_id, template_data, current_user_id)
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+        return template
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_template(

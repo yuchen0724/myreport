@@ -40,7 +40,20 @@ class QueryService:
         # 尝试从缓存获取
         cached_result = cache_service.get(optimized_sql, request.params)
         if cached_result:
-            return SQLQueryResponse(**cached_result["result"])
+            cached = SQLQueryResponse(**cached_result["result"])
+            # 从缓存全量结果中切片
+            page = request.page
+            page_size = request.page_size
+            start = (page - 1) * page_size
+            paginated_rows = cached.rows[start:start + page_size]
+            return SQLQueryResponse(
+                columns=cached.columns,
+                rows=paginated_rows,
+                total=cached.total,
+                page=page,
+                page_size=page_size,
+                execution_time_ms=cached.execution_time_ms,
+            )
 
         # 执行查询
         start_time = time.time()
@@ -58,19 +71,44 @@ class QueryService:
                 "row_count": result["total"],
             })
 
+            # 分页
+            all_rows = result["rows"]
+            total = result["total"]
+            page = request.page
+            page_size = request.page_size
+            start = (page - 1) * page_size
+            paginated_rows = all_rows[start:start + page_size]
+
             response = SQLQueryResponse(
                 columns=result["columns"],
-                rows=result["rows"],
-                total=result["total"],
+                rows=paginated_rows,
+                total=total,
+                page=page,
+                page_size=page_size,
                 execution_time_ms=execution_time_ms,
             )
 
-            # 缓存结果（5分钟）
-            cache_service.set(optimized_sql, response.dict(), params=request.params, ttl=300)
+            # 缓存全量结果（5分钟），用 page=1&page_size=999999 作为缓存 key 后缀
+            cache_service.set(
+                optimized_sql,
+                SQLQueryResponse(
+                    columns=result["columns"],
+                    rows=all_rows,
+                    total=total,
+                    page=1,
+                    page_size=999999,
+                    execution_time_ms=execution_time_ms,
+                ).dict(),
+                params=request.params,
+                ttl=300,
+            )
 
             return response
         except Exception as e:
-            raise ValueError(f"查询执行失败: {str(e)}")
+            error_msg = str(e)
+            if not error_msg:
+                error_msg = f"{type(e).__name__}"
+            raise ValueError(f"查询执行失败: {error_msg}")
 
     def _execute_query(self, ds, sql: str, params: Optional[dict]) -> dict:
         """执行查询并返回结果"""

@@ -7,7 +7,7 @@ def test_complete_template_workflow(client, auth_headers):
         json={
             "name": "工作流测试模板",
             "description": "测试完整工作流",
-            "config": {"sql": "SELECT * FROM users"},
+            "config": {"data_source_id": 1, "sql": "SELECT * FROM users"},
             "is_public": False
         }
     )
