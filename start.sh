@@ -15,17 +15,23 @@ PROJECT_ROOT="/home/zhou/myreport"
 BACKEND_DIR="$PROJECT_ROOT/backend"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 
+# PostgreSQL 版本
+PG_VERSION=16
+PG_CLUSTER="16 main"
+
 # 日志目录
 LOG_DIR="$PROJECT_ROOT/logs"
 mkdir -p "$LOG_DIR"
 
 # PID文件
+PG_PID="$LOG_DIR/postgresql.pid"
 REDIS_PID="$LOG_DIR/redis.pid"
 CELERY_PID="$LOG_DIR/celery.pid"
 BACKEND_PID="$LOG_DIR/backend.pid"
 FRONTEND_PID="$LOG_DIR/frontend.pid"
 
 # 端口配置
+PG_PORT=5432
 REDIS_PORT=6379
 BACKEND_PORT=8000
 FRONTEND_PORT=3000
@@ -46,9 +52,37 @@ check_port() {
     return 0
 }
 
+# 启动PostgreSQL
+start_postgresql() {
+    echo -e "${GREEN}[1/5] 启动 PostgreSQL 数据库...${NC}"
+
+    if pg_isready -q -p $PG_PORT 2>/dev/null; then
+        echo -e "${YELLOW}PostgreSQL 已在运行 (端口: $PG_PORT)${NC}"
+        return 0
+    fi
+
+    # 检查是否有 stale pid 文件
+    PG_PIDFILE="/var/lib/postgresql/$PG_VERSION/main/postmaster.pid"
+    if [ -f "$PG_PIDFILE" ] && ! pg_isready -q -p $PG_PORT 2>/dev/null; then
+        sudo pg_ctlcluster $PG_VERSION main start 2>&1
+    else
+        sudo pg_ctlcluster $PG_VERSION main start 2>&1
+    fi
+
+    sleep 2
+
+    if pg_isready -q -p $PG_PORT; then
+        echo -e "${GREEN}✓ PostgreSQL 启动成功 (端口: $PG_PORT)${NC}"
+    else
+        echo -e "${RED}✗ PostgreSQL 启动失败${NC}"
+        sudo pg_ctlcluster $PG_VERSION main status 2>&1 || true
+        return 1
+    fi
+}
+
 # 启动Redis
 start_redis() {
-    echo -e "${GREEN}[1/4] 启动 Redis 服务...${NC}"
+    echo -e "${GREEN}[2/5] 启动 Redis 服务...${NC}"
     
     if check_port $REDIS_PORT "Redis"; then
         redis-server --daemonize yes --port $REDIS_PORT --logfile "$LOG_DIR/redis.log"
@@ -68,7 +102,7 @@ start_redis() {
 
 # 启动Celery Worker
 start_celery() {
-    echo -e "${GREEN}[2/4] 启动 Celery Worker...${NC}"
+    echo -e "${GREEN}[3/5] 启动 Celery Worker...${NC}"
     
     cd $BACKEND_DIR
     export PYTHONPATH=$BACKEND_DIR:$PYTHONPATH
@@ -95,7 +129,7 @@ start_celery() {
 
 # 启动后端服务
 start_backend() {
-    echo -e "${GREEN}[3/4] 启动后端服务...${NC}"
+    echo -e "${GREEN}[4/5] 启动后端服务...${NC}"
     
     if check_port $BACKEND_PORT "后端服务"; then
         cd $BACKEND_DIR
@@ -119,7 +153,7 @@ start_backend() {
 
 # 启动前端服务
 start_frontend() {
-    echo -e "${GREEN}[4/4] 启动前端服务...${NC}"
+    echo -e "${GREEN}[5/5] 启动前端服务...${NC}"
     
     if check_port $FRONTEND_PORT "前端服务"; then
         cd $FRONTEND_DIR
@@ -150,28 +184,48 @@ stop_all() {
         rm -f "$FRONTEND_PID"
     fi
     pkill -f "npm.*dev" || true
-    
+
     # 停止后端
     if [ -f "$BACKEND_PID" ]; then
         kill $(cat "$BACKEND_PID") 2>/dev/null || true
         rm -f "$BACKEND_PID"
     fi
     pkill -f "uvicorn.*main:app" || true
-    
+
     # 停止Celery
     if [ -f "$CELERY_PID" ]; then
         kill $(cat "$CELERY_PID") 2>/dev/null || true
         rm -f "$CELERY_PID"
     fi
     pkill -f "celery.*worker" || true
-    
+
     # 停止Redis
     if [ -f "$REDIS_PID" ]; then
         kill $(cat "$REDIS_PID") 2>/dev/null || true
         rm -f "$REDIS_PID"
     fi
     redis-cli -p $REDIS_PORT shutdown 2>/dev/null || true
-    
+
+    # 停止PostgreSQL
+    if pg_isready -q -p $PG_PORT 2>/dev/null; then
+        echo -e "${YELLOW}停止 PostgreSQL...${NC}"
+        sudo pg_ctlcluster $PG_VERSION main stop 2>/dev/null || true
+        # 等待进程退出
+        for i in {1..10}; do
+            if ! pg_isready -q -p $PG_PORT 2>/dev/null; then
+                break
+            fi
+            sleep 1
+        done
+        if pg_isready -q -p $PG_PORT 2>/dev/null; then
+            echo -e "${RED}✗ PostgreSQL 停止超时${NC}"
+        else
+            echo -e "${GREEN}✓ PostgreSQL 已停止${NC}"
+        fi
+    else
+        echo -e "${YELLOW}PostgreSQL 未运行${NC}"
+    fi
+
     echo -e "${GREEN}✓ 所有服务已停止${NC}"
 }
 
@@ -180,7 +234,14 @@ status() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}  服务状态${NC}"
     echo -e "${BLUE}========================================${NC}"
-    
+
+    # PostgreSQL
+    if pg_isready -q -p $PG_PORT 2>/dev/null; then
+        echo -e "${GREEN}✓ PostgreSQL${NC} - 运行中 (端口: $PG_PORT)"
+    else
+        echo -e "${RED}✗ PostgreSQL${NC} - 未运行"
+    fi
+
     # Redis
     if redis-cli -p $REDIS_PORT ping >/dev/null 2>&1; then
         echo -e "${GREEN}✓ Redis${NC} - 运行中 (端口: $REDIS_PORT)"
@@ -223,6 +284,10 @@ logs() {
     local service=$1
     
     case $service in
+        postgresql|pg)
+            journalctl -u postgresql@$PG_VERSION-main -f --no-pager 2>/dev/null || \
+            sudo tail -f /var/log/postgresql/postgresql-$PG_VERSION-main.log
+            ;;
         redis)
             tail -f "$LOG_DIR/redis.log"
             ;;
@@ -236,7 +301,7 @@ logs() {
             tail -f "$LOG_DIR/frontend.log"
             ;;
         *)
-            echo "用法: $0 logs [redis|celery|backend|frontend]"
+            echo "用法: $0 logs [postgresql|redis|celery|backend|frontend]"
             ;;
     esac
 }
@@ -245,6 +310,7 @@ logs() {
 main() {
     case "$1" in
         start)
+            start_postgresql
             start_redis
             start_celery
             start_backend
@@ -261,6 +327,7 @@ main() {
         restart)
             stop_all
             sleep 2
+            start_postgresql
             start_redis
             start_celery
             start_backend
@@ -281,7 +348,7 @@ main() {
             echo "  stop    - 停止所有服务"
             echo "  restart - 重启所有服务"
             echo "  status  - 查看服务状态"
-            echo "  logs    - 查看日志 (redis|celery|backend|frontend)"
+            echo "  logs    - 查看日志 (postgresql|redis|celery|backend|frontend)"
             echo ""
             echo "示例:"
             echo "  $0 start"
