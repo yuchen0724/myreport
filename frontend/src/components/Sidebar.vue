@@ -1,5 +1,6 @@
 <template>
-  <div class="sidebar">
+  <!-- 登录页不渲染侧边栏 -->
+  <div v-if="!isLoginPage" class="sidebar">
     <el-menu
       :default-active="activeMenu"
       background-color="#304156"
