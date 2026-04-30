@@ -35,12 +35,13 @@ request.interceptors.response.use(
       const { status, data } = error.response
       console.error('API Error:', status, data)
       
-      // 401 未授权：清除 token 并跳转登录页（用户需要重新登录）
+      // 401 未授权：清除 token 并跳转登录页
       if (status === 401) {
         const userStore = useUserStore()
         userStore.logout()
-        // 不自动跳转，避免无限循环，让用户手动登录
-        console.warn('登录过期请重新登录')
+        // 跳转到登录页，让用户重新登录
+        window.location.href = '/login'
+        console.warn('登录过期，请重新登录')
       }
       
       // 429 限流：提示但不重试

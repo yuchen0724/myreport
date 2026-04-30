@@ -83,7 +83,8 @@ def decode_access_token(token: str) -> Optional[dict]:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         return payload
-    except JWTError:
+    except Exception:
+        # 捕获所有 JWT 相关异常：过期、格式错误、签名错误等
         return None
 
 
