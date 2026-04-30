@@ -26,7 +26,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/store'
 import { ElMessage } from 'element-plus'
-import { login } from '@/api/auth'
+import { login, getCurrentUser } from '@/api/auth'
 
 export default {
   name: 'Login',
@@ -64,9 +64,13 @@ export default {
         userStore.setToken(response.access_token)
         console.log('Token 已设置:', userStore.token)
         
-        // 再设置用户信息
-        userStore.setUser({ username: loginForm.value.username })
-        console.log('用户已设置:', userStore.user)
+        // 获取完整用户信息（包含 role_id）
+        const userResponse = await getCurrentUser()
+        console.log('用户信息:', userResponse)
+        
+        // 设置用户信息（setUser 会自动转换 role_id -> role）
+        userStore.setUser(userResponse)
+        console.log('用户已设置:', userStore.user, 'role:', userStore.role)
         
         ElMessage.success('登录成功')
         console.log('准备跳转到首页...')
