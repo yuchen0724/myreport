@@ -1,13 +1,6 @@
 <!-- frontend/src/views/TemplateVersionHistory.vue -->
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="template-version-history">
+  <div class="template-version-history">
       <el-card>
         <template #header>
           <div class="card-header">
@@ -79,18 +72,13 @@
         :version2="version2"
         @close="handleCloseVersionDiff"
       />
-    </div>
-  </Layout>
-</template>
+    </div></template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateVersions, rollbackTemplate, getVersionDiff } from '@/api/template'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
 import VersionDiff from '@/components/VersionDiff.vue'
 
 const route = useRoute()

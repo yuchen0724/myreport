@@ -1,12 +1,5 @@
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="query-editor">
+  <div class="query-editor">
       <el-row :gutter="20">
         <el-col :span="12">
           <el-card>
@@ -64,23 +57,18 @@
           </el-card>
         </el-col>
       </el-row>
-    </div>
-  </Layout>
-</template>
+    </div></template>
 
 <script>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
 import { getDataSourceList } from '@/api/data_source'
 import { executeSQL } from '@/api/query'
 import { exportExcel } from '@/api/report'
 
 export default {
   name: 'QueryEditor',
-  components: { Layout, Header, Sidebar },
+  components: { },
   setup() {
     const loading = ref(false)
     const dataSources = ref([])

@@ -1,13 +1,6 @@
 <!-- frontend/src/views/TemplateDetail.vue -->
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="template-detail">
+  <div class="template-detail">
       <el-card v-if="template">
         <template #header>
           <div class="card-header">
@@ -86,9 +79,7 @@
       <el-card v-else>
         <el-empty description="加载中..." />
       </el-card>
-    </div>
-  </Layout>
-</template>
+    </div></template>
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
@@ -96,10 +87,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getTemplate } from '@/api/template'
 import { executeQuery } from '@/api/query'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
-
 const router = useRouter()
 const route = useRoute()
 const template = ref(null)

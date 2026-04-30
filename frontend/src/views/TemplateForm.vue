@@ -1,13 +1,6 @@
 <!-- frontend/src/views/TemplateForm.vue -->
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="template-form">
+  <div class="template-form">
       <el-card>
         <template #header>
           <div class="card-header">
@@ -85,9 +78,7 @@
         </div>
       </el-card>
     </el-card>
-  </div>
-  </Layout>
-</template>
+  </div></template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
@@ -95,10 +86,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getTemplate, createTemplate, updateTemplate } from '@/api/template'
 import { executeQuery } from '@/api/query'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
-
 const router = useRouter()
 const route = useRoute()
 const formRef = ref(null)

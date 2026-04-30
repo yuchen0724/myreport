@@ -1,13 +1,6 @@
 <!-- frontend/src/views/TemplateList.vue -->
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="template-list">
+  <div class="template-list">
       <el-card>
         <template #header>
           <div class="card-header">
@@ -69,9 +62,7 @@
         <el-button type="primary" @click="handleConfirmShare">确定</el-button>
       </template>
     </el-dialog>
-  </div>
-  </Layout>
-</template>
+  </div></template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
@@ -79,10 +70,6 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateList, deleteTemplate } from '@/api/template'
 import { shareTemplate, getSharedTemplates } from '@/api/template_share'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
-
 const router = useRouter()
 const templates = ref([])
 const shareDialogVisible = ref(false)

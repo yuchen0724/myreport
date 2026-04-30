@@ -1,12 +1,5 @@
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="datasource-form">
+  <div class="datasource-form">
       <el-card>
         <template #header>
           <h2>{{ isEdit ? '编辑数据源' : '新建数据源' }}</h2>
@@ -44,22 +37,17 @@
           </el-form-item>
         </el-form>
       </el-card>
-    </div>
-  </Layout>
-</template>
+    </div></template>
 
 <script>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
 import { createDataSource, updateDataSource, testDataSourceConnection, getDataSource } from '@/api/data_source'
 
 export default {
   name: 'DataSourceForm',
-  components: { Layout, Header, Sidebar },
+  components: { },
   setup() {
     const router = useRouter()
     const route = useRoute()

@@ -1,13 +1,6 @@
 <!-- frontend/src/views/NL2SQLEditor.vue -->
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="nl2sql-editor">
+  <div class="nl2sql-editor">
       <el-card>
         <template #header>
           <div class="card-header">
@@ -75,19 +68,13 @@
         </div>
       </div>
     </el-card>
-  </div>
-  </Layout>
-</template>
+  </div></template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { parseQuestion } from '@/api/nl2sql'
 import { getDataSourceList } from '@/api/data_source'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
-
 const form = ref({
   data_source_id: null,
   question: ''

@@ -1,17 +1,40 @@
 <template>
   <div id="app">
-    <router-view />
+    <!-- 登录页不需要布局 -->
+    <router-view v-if="isLoginPage" />
+    
+    <!-- 其他页面使用全局布局 -->
+    <div v-else class="layout">
+      <div class="header">
+        <Header />
+      </div>
+      <div class="main">
+        <div class="sidebar">
+          <Sidebar />
+        </div>
+        <div class="content">
+          <router-view />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useUserStore } from '@/store'
+import Header from '@/components/Header.vue'
+import Sidebar from '@/components/Sidebar.vue'
 
 export default {
   name: 'App',
+  components: { Header, Sidebar },
   setup() {
+    const route = useRoute()
     const userStore = useUserStore()
+
+    const isLoginPage = computed(() => route.path === '/login')
 
     onMounted(() => {
       const token = localStorage.getItem('token')
@@ -22,7 +45,7 @@ export default {
       }
     })
 
-    return { userStore }
+    return { isLoginPage }
   }
 }
 </script>
@@ -41,5 +64,35 @@ body {
 #app {
   height: 100vh;
   overflow: hidden;
+}
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.header {
+  height: 60px;
+  background: #409eff;
+  color: white;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 200px;
+  background: #304156;
+  color: white;
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  background: #f0f2f5;
 }
 </style>

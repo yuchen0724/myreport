@@ -1,13 +1,6 @@
 <!-- frontend/src/views/TemplateShare.vue -->
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="template-share">
+  <div class="template-share">
       <el-card>
         <template #header>
           <div class="card-header">
@@ -155,9 +148,7 @@
           </el-tab-pane>
         </el-tabs>
       </el-card>
-    </div>
-  </Layout>
-</template>
+    </div></template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
@@ -166,10 +157,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateList } from '@/api/template'
 import { shareTemplate, getSharedTemplates, getTemplateShares, unshareTemplate } from '@/api/template_share'
 import { getUserList } from '@/api/user'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
-
 const router = useRouter()
 const activeTab = ref('share')
 const shareFormRef = ref(null)

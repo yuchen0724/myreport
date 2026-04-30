@@ -1,13 +1,6 @@
 <!-- frontend/src/views/AsyncExport.vue -->
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="async-export">
+  <div class="async-export">
       <el-card>
         <template #header>
           <div class="card-header">
@@ -106,16 +99,11 @@
           </el-table-column>
         </el-table>
       </el-card>
-    </div>
-  </Layout>
-</template>
+    </div></template>
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
 import { createExportTask, getTaskStatus, getUserTasks, downloadExportFile } from '@/api/async_export'
 import { getDataSourceList } from '@/api/data_source'
 

@@ -1,94 +1,86 @@
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="dashboard-content">
-      <div class="dashboard-toolbar">
-        <el-button :type="isEditMode ? 'primary' : 'default'" @click="toggleEditMode">
-          {{ isEditMode ? '完成编辑' : '自定义布局' }}
-        </el-button>
-        <el-button v-if="isEditMode" type="success" @click="saveLayout" :loading="saving">
-          保存布局
-        </el-button>
-        <el-button v-if="isEditMode" @click="resetLayout">重置</el-button>
+  <div class="dashboard-content">
+    <div class="dashboard-toolbar">
+      <el-button :type="isEditMode ? 'primary' : 'default'" @click="toggleEditMode">
+        {{ isEditMode ? '完成编辑' : '自定义布局' }}
+      </el-button>
+      <el-button v-if="isEditMode" type="success" @click="saveLayout" :loading="saving">
+        保存布局
+      </el-button>
+      <el-button v-if="isEditMode" @click="resetLayout">重置</el-button>
+    </div>
+
+    <div v-if="loading" class="loading-container">
+      <el-skeleton :rows="3" animated />
+    </div>
+
+    <el-alert
+      v-else-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      closable
+      @close="error = ''"
+    />
+
+    <div v-else-if="!isEditMode" class="widget-grid">
+      <div
+        v-for="w in visibleWidgets"
+        :key="w.widget_type"
+        class="widget-grid-item"
+        :class="'widget-' + w.widget_type"
+      >
+        <DashboardWidget :widget="w" :dashboard-data="dashboardData" />
       </div>
+    </div>
 
-      <div v-if="loading" class="loading-container">
-        <el-skeleton :rows="3" animated />
-      </div>
+    <div v-else class="edit-mode">
+      <p class="edit-hint">拖拽手柄调整顺序，点击眼睛图标切换显隐</p>
 
-      <el-alert
-        v-else-if="error"
-        :title="error"
-        type="error"
-        show-icon
-        closable
-        @close="error = ''"
-      />
-
-      <div v-else-if="!isEditMode" class="widget-grid">
-        <div
-          v-for="w in visibleWidgets"
-          :key="w.widget_type"
-          class="widget-grid-item"
-          :class="'widget-' + w.widget_type"
-        >
-          <DashboardWidget :widget="w" :dashboard-data="dashboardData" />
-        </div>
-      </div>
-
-      <div v-else class="edit-mode">
-        <p class="edit-hint">拖拽手柄调整顺序，点击眼睛图标切换显隐</p>
-
-        <draggable
-          v-model="editingWidgets"
-          item-key="widget_type"
-          handle=".drag-handle"
-          :animation="200"
-          ghost-class="ghost"
-        >
-          <template #item="{ element, index }">
-            <div class="edit-item">
-              <div class="drag-handle">
-                <el-icon><Rank /></el-icon>
-              </div>
-              <div class="edit-item-preview">
-                <DashboardWidget :widget="element" :dashboard-data="dashboardData" />
-              </div>
-              <el-tooltip :content="element.visible ? '点击隐藏' : '点击显示'" placement="top">
-                <el-button
-                  :icon="element.visible ? View : Hide"
-                  :type="element.visible ? 'warning' : 'info'"
-                  circle
-                  size="small"
-                  @click="toggleVisibility(index)"
-                />
-              </el-tooltip>
+      <draggable
+        v-model="editingWidgets"
+        item-key="widget_type"
+        handle=".drag-handle"
+        :animation="200"
+        ghost-class="ghost"
+      >
+        <template #item="{ element, index }">
+          <div class="edit-item">
+            <div class="drag-handle">
+              <el-icon><Rank /></el-icon>
             </div>
-          </template>
-        </draggable>
-
-        <div v-if="hiddenWidgetTypes.length" class="add-widget-section">
-          <el-divider />
-          <h4>已隐藏的组件</h4>
-          <div class="hidden-widgets">
-            <el-tag
-              v-for="w in hiddenWidgetTypes"
-              :key="w.widget_type"
-              closable
-              @close="addWidget(w.widget_type)"
-            >
-              {{ w.title }}
-            </el-tag>
+            <div class="edit-item-preview">
+              <DashboardWidget :widget="element" :dashboard-data="dashboardData" />
+            </div>
+            <el-tooltip :content="element.visible ? '点击隐藏' : '点击显示'" placement="top">
+              <el-button
+                :icon="element.visible ? View : Hide"
+                :type="element.visible ? 'warning' : 'info'"
+                circle
+                size="small"
+                @click="toggleVisibility(index)"
+              />
+            </el-tooltip>
           </div>
+        </template>
+      </draggable>
+
+      <div v-if="hiddenWidgetTypes.length" class="add-widget-section">
+        <el-divider />
+        <h4>已隐藏的组件</h4>
+        <div class="hidden-widgets">
+          <el-tag
+            v-for="w in hiddenWidgetTypes"
+            :key="w.widget_type"
+            closable
+            @close="addWidget(w.widget_type)"
+          >
+            {{ w.title }}
+          </el-tag>
         </div>
       </div>
     </div>
-  </Layout>
+  </div>
 </template>
 
 <script>
@@ -96,9 +88,6 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Rank, View, Hide } from '@element-plus/icons-vue'
 import draggable from 'vuedraggable'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
 import DashboardWidget from '@/components/DashboardWidget.vue'
 import { getWidgetConfig, saveWidgetConfig, getDashboardData } from '@/api/dashboard'
 
@@ -113,7 +102,7 @@ const ALL_WIDGET_META = {
 
 export default {
   name: 'Dashboard',
-  components: { Layout, Header, Sidebar, DashboardWidget, draggable },
+  components: { DashboardWidget, draggable },
   setup() {
     const isEditMode = ref(false)
     const loading = ref(true)

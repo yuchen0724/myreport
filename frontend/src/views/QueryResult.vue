@@ -1,12 +1,5 @@
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="query-result">
+  <div class="query-result">
       <el-card>
         <template #header>
           <h3>查询结果</h3>
@@ -37,22 +30,17 @@
           <el-button @click="handleExportPDF" :loading="exportingPDF">导出 PDF</el-button>
         </div>
       </el-card>
-    </div>
-  </Layout>
-</template>
+    </div></template>
 
 <script>
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
 import { exportExcel, exportPDF } from '@/api/report'
 import { executeSQL } from '@/api/query'
 
 export default {
   name: 'QueryResult',
-  components: { Layout, Header, Sidebar },
+  components: { },
   setup() {
     const loading = ref(false)
     const exportingExcel = ref(false)

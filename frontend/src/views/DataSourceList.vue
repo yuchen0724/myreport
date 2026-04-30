@@ -1,12 +1,5 @@
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="datasource-list">
+  <div class="datasource-list">
       <div class="toolbar">
         <el-button type="primary" @click="handleCreate">新建数据源</el-button>
       </div>
@@ -30,22 +23,17 @@
           </template>
         </el-table-column>
       </el-table>
-    </div>
-  </Layout>
-</template>
+    </div></template>
 
 <script>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
 import { getDataSourceList, deleteDataSource } from '@/api/data_source'
 
 export default {
   name: 'DataSourceList',
-  components: { Layout, Header, Sidebar },
+  components: { },
   setup() {
     const router = useRouter()
     const loading = ref(false)

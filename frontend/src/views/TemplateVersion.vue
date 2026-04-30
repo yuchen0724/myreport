@@ -1,13 +1,6 @@
 <!-- frontend/src/views/TemplateVersion.vue -->
 <template>
-  <Layout>
-    <template #header>
-      <Header />
-    </template>
-    <template #sidebar>
-      <Sidebar />
-    </template>
-    <div class="template-version">
+  <div class="template-version">
       <el-card>
         <template #header>
           <div class="card-header">
@@ -38,19 +31,13 @@
           <pre>{{ currentConfig }}</pre>
         </el-dialog>
       </el-card>
-    </div>
-  </Layout>
-</template>
+    </div></template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateVersions, rollbackTemplate } from '@/api/template'
-import Layout from '@/components/Layout.vue'
-import Header from '@/components/Header.vue'
-import Sidebar from '@/components/Sidebar.vue'
-
 const router = useRouter()
 const route = useRoute()
 const versions = ref([])
