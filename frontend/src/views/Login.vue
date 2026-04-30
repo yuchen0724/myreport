@@ -22,7 +22,7 @@
 </template>
 
 <script>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/store'
 import { ElMessage } from 'element-plus'
@@ -43,6 +43,14 @@ export default {
       username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
       password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
     }
+
+    // 检查并清理过期 token
+    onMounted(() => {
+      if (userStore.token) {
+        // 清除可能过期的 token，让用户重新登录
+        userStore.logout()
+      }
+    })
 
     const handleLogin = async () => {
       await loginFormRef.value.validate()
