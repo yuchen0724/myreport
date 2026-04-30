@@ -8,6 +8,7 @@ from app.core.database import Base, get_db
 from app.core.security import create_access_token
 from app.models.user import User
 from app.models.template import Template
+from app.middleware.rate_limit import RateLimitMiddleware
 
 # 测试数据库
 TEST_DATABASE_URL = "sqlite:///./test.db"
@@ -33,6 +34,12 @@ def client(db_session):
             yield db_session
         finally:
             pass
+    
+    # 禁用限流中间件（测试环境）
+    app.user_middleware = [
+        m for m in app.user_middleware 
+        if m.cls != RateLimitMiddleware
+    ]
     
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as test_client:

@@ -2,6 +2,8 @@
 
 import json
 import hashlib
+import threading
+import time
 from typing import Optional, Any, Dict
 from datetime import datetime
 from app.config import get_settings
@@ -9,11 +11,66 @@ from app.config import get_settings
 settings = get_settings()
 
 
+class CacheStats:
+    """缓存统计"""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.hits = 0
+        self.misses = 0
+        self.sets = 0
+        self.evictions = 0
+        self._start_time = time.time()
+    
+    def record_hit(self):
+        with self._lock:
+            self.hits += 1
+    
+    def record_miss(self):
+        with self._lock:
+            self.misses += 1
+    
+    def record_set(self):
+        with self._lock:
+            self.sets += 1
+    
+    def record_eviction(self):
+        with self._lock:
+            self.evictions += 1
+    
+    def get_stats(self) -> dict:
+        with self._lock:
+            total = self.hits + self.misses
+            hit_rate = (self.hits / total * 100) if total > 0 else 0
+            return {
+                "hits": self.hits,
+                "misses": self.misses,
+                "sets": self.sets,
+                "hit_rate_percent": round(hit_rate, 2),
+                "uptime_seconds": round(time.time() - self._start_time, 2)
+            }
+    
+    def reset(self):
+        with self._lock:
+            self.hits = 0
+            self.misses = 0
+            self.sets = 0
+            self.evictions = 0
+
+
 class CacheService:
     """缓存服务 - 使用Redis作为缓存后端"""
+    
+    # 基于数据源的默认 TTL（秒）
+    DEFAULT_TTL_BY_SOURCE = {
+        "DORIS": 300,      # 5分钟
+        "HIVE": 600,      # 10分钟
+        "MYSQL": 300,     # 5分钟
+        "POSTGRESQL": 300,
+    }
 
     def __init__(self, redis_client=None):
         self.redis_client = redis_client
+        self.stats = CacheStats()
         if redis_client is None:
             self._init_redis()
 
@@ -44,15 +101,19 @@ class CacheService:
     def get(self, sql: str, params: dict = None) -> Optional[dict]:
         """从缓存获取查询结果"""
         if not self.redis_client:
+            self.stats.record_miss()
             return None
         try:
             cache_key = self._generate_cache_key(sql, params)
             cached_data = self.redis_client.get(cache_key)
             if cached_data:
+                self.stats.record_hit()
                 return json.loads(cached_data)
+            self.stats.record_miss()
             return None
         except Exception as e:
             print(f"缓存读取失败: {e}")
+            self.stats.record_miss()
             return None
 
     def set(self, sql: str, result: dict, params: dict = None, ttl: int = 300) -> bool:
@@ -71,10 +132,17 @@ class CacheService:
                 ttl,
                 json.dumps(cached_data)
             )
+            self.stats.record_set()
             return True
         except Exception as e:
             print(f"缓存写入失败: {e}")
             return False
+    
+    def get_stats_extended(self) -> dict:
+        """获取扩展缓存统计信息"""
+        base_stats = self.stats.get_stats()
+        redis_stats = self.get_stats()
+        return {**base_stats, "redis": redis_stats}
 
     def delete(self, sql: str, params: dict = None) -> bool:
         """删除缓存"""

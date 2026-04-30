@@ -2,11 +2,9 @@
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from sqlalchemy.orm import Session
-from app.core.database import get_db
+from app.core.database import SessionLocal
 from app.services.audit_log_service import AuditLogService
 from app.core.auth_deps import get_current_user_id
-import json
 
 
 class AuditLogMiddleware(BaseHTTPMiddleware):
@@ -48,8 +46,8 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
         if request.url.path in self.SKIP_PATHS:
             return await call_next(request)
         
-        # 获取数据库会话
-        db = next(get_db())
+        # 使用 SessionLocal 直接创建会话（避免 next(get_db()) 问题）
+        db = SessionLocal()
         
         try:
             # 获取用户ID
@@ -62,9 +60,6 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             except:
                 # 未认证用户
                 pass
-            
-            # 记录请求开始时间
-            start_time = None
             
             # 执行请求
             response = await call_next(request)

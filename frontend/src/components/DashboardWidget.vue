@@ -45,13 +45,7 @@ export default {
     const isStatCard = computed(() => STAT_CARD_TYPES.includes(props.widget.widget_type))
 
     const statValue = computed(() => {
-      const map = {
-        data_source_count: 'data_source_count',
-        query_count: 'query_count',
-        export_count: 'export_count',
-        template_count: 'template_count'
-      }
-      return props.dashboardData[map[props.widget.widget_type]] ?? 0
+      return props.dashboardData[props.widget.widget_type] ?? 0
     })
 
     const recentQueries = computed(() => props.dashboardData.recent_queries || [])

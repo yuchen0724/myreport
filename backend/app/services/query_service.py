@@ -98,7 +98,7 @@ class QueryService:
                     page=1,
                     page_size=999999,
                     execution_time_ms=execution_time_ms,
-                ).dict(),
+                ).model_dump(),
                 params=request.params,
                 ttl=300,
             )
@@ -111,69 +111,65 @@ class QueryService:
             raise ValueError(f"查询执行失败: {error_msg}")
 
     def _execute_query(self, ds, sql: str, params: Optional[dict]) -> dict:
-        """执行查询并返回结果"""
+        """执行查询并返回结果（带连接池和超时）"""
+        import pymysql
+        import psycopg2
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.pool import QueuePool
+        
+        # 查询超时时间（秒）
+        QUERY_TIMEOUT = 30
+        
+        # 构建连接 URL
         if ds.type == "MYSQL":
-            import pymysql
-            conn = pymysql.connect(
-                host=ds.host,
-                port=ds.port,
-                user=ds.username,
-                password=decrypt_password(ds.password_encrypted),
-                database=ds.database,
-                cursorclass=pymysql.cursors.DictCursor
+            conn_url = f"mysql+pymysql://{ds.username}:{decrypt_password(ds.password_encrypted)}@{ds.host}:{ds.port}/{ds.database}"
+            engine = create_engine(
+                conn_url,
+                poolclass=QueuePool,
+                pool_size=5,
+                max_overflow=10,
+                pool_pre_ping=True,
+                pool_recycle=3600,
             )
-            cursor = conn.cursor()
-            cursor.execute(sql)
-            columns = [desc[0] for desc in cursor.description]
-            rows = cursor.fetchall()
-            cursor.close()
-            conn.close()
-            return {
-                "columns": columns,
-                "rows": [list(row.values()) for row in rows],
-                "total": len(rows),
-            }
         elif ds.type == "POSTGRESQL":
-            import psycopg2
-            conn = psycopg2.connect(
-                host=ds.host,
-                port=ds.port,
-                user=ds.username,
-                password=decrypt_password(ds.password_encrypted),
-                database=ds.database
+            conn_url = f"postgresql://{ds.username}:{decrypt_password(ds.password_encrypted)}@{ds.host}:{ds.port}/{ds.database}"
+            engine = create_engine(
+                conn_url,
+                poolclass=QueuePool,
+                pool_size=5,
+                max_overflow=10,
+                pool_pre_ping=True,
+                pool_recycle=3600,
             )
-            cursor = conn.cursor()
-            cursor.execute(sql)
-            columns = [desc[0] for desc in cursor.description]
-            rows = cursor.fetchall()
-            cursor.close()
-            conn.close()
-            return {
-                "columns": columns,
-                "rows": [list(row) for row in rows],
-                "total": len(rows),
-            }
         elif ds.type == "DORIS":
             # Doris 使用 MySQL 协议
-            import pymysql
-            conn = pymysql.connect(
-                host=ds.host,
-                port=ds.port,
-                user=ds.username,
-                password=decrypt_password(ds.password_encrypted),
-                database=ds.database,
-                cursorclass=pymysql.cursors.DictCursor
+            conn_url = f"mysql+pymysql://{ds.username}:{decrypt_password(ds.password_encrypted)}@{ds.host}:{ds.port}/{ds.database}"
+            engine = create_engine(
+                conn_url,
+                poolclass=QueuePool,
+                pool_size=5,
+                max_overflow=10,
+                pool_pre_ping=True,
+                pool_recycle=3600,
             )
-            cursor = conn.cursor()
-            cursor.execute(sql)
-            columns = [desc[0] for desc in cursor.description]
-            rows = cursor.fetchall()
-            cursor.close()
-            conn.close()
-            return {
-                "columns": columns,
-                "rows": [list(row.values()) for row in rows],
-                "total": len(rows),
-            }
         else:
             raise ValueError(f"不支持的数据源类型: {ds.type}")
+        
+        # 使用连接池执行查询（带超时）
+        with engine.connect() as conn:
+            # 根据数据库类型设置查询超时
+            if ds.type == "MYSQL" or ds.type == "DORIS":
+                conn.execute(text(f"SET SESSION MAX_EXECUTION_TIME = {QUERY_TIMEOUT*1000}"))
+            elif ds.type == "POSTGRESQL":
+                conn.execute(text(f"SET SESSION STATEMENT_TIMEOUT = '{QUERY_TIMEOUT}s'"))
+            result = conn.execute(text(sql))
+            columns = list(result.keys())
+            rows = [list(row) for row in result.fetchall()]
+        
+        engine.dispose()
+        
+        return {
+            "columns": columns,
+            "rows": rows,
+            "total": len(rows),
+        }

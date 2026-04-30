@@ -1,6 +1,25 @@
 import { createRouter, createWebHistory } from "vue-router"
 import { useUserStore } from "@/store"
 
+// 路由守卫：检查登录和权限
+function requireAuth(to, from, next) {
+  const userStore = useUserStore()
+  
+  if (!userStore.token) {
+    next("/login")
+    return
+  }
+  
+  // 检查角色权限
+  if (to.meta.roles && !userStore.hasRole(to.meta.roles)) {
+    // 无权限，跳转到首页
+    next("/")
+    return
+  }
+  
+  next()
+}
+
 const routes = [
   {
     path: "/login",
@@ -17,37 +36,37 @@ const routes = [
     path: "/datasources",
     name: "DataSourceList",
     component: () => import("@/views/DataSourceList.vue"),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, roles: ["admin", "editor"] }
   },
   {
     path: "/datasources/create",
     name: "DataSourceCreate",
     component: () => import("@/views/DataSourceForm.vue"),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, roles: ["admin"] }
   },
   {
     path: "/datasources/:id/edit",
     name: "DataSourceEdit",
     component: () => import("@/views/DataSourceForm.vue"),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, roles: ["admin"] }
   },
   {
     path: "/query",
     name: "QueryEditor",
     component: () => import("@/views/QueryEditor.vue"),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, roles: ["admin", "editor", "user"] }
   },
   {
     path: "/nl2sql",
     name: "NL2SQL",
     component: () => import("@/views/NL2SQLEditor.vue"),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, roles: ["admin", "editor", "user"] }
   },
   {
     path: "/charts",
     name: "Charts",
     component: () => import("@/views/ChartViewer.vue"),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, roles: ["admin", "editor", "user"] }
   },
   {
     path: "/templates",
@@ -96,6 +115,18 @@ const routes = [
     name: "TemplateShare",
     component: () => import("@/views/TemplateShare.vue"),
     meta: { requiresAuth: true }
+  },
+  {
+    path: "/menus",
+    name: "MenuList",
+    component: () => import("@/views/MenuList.vue"),
+    meta: { requiresAuth: true, roles: ["admin"] }
+  },
+  {
+    path: "/report/:id",
+    name: "ReportView",
+    component: () => import("@/views/ReportView.vue"),
+    meta: { requiresAuth: true }
   }
 ]
 
@@ -106,13 +137,27 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
+  
+  // 检查登录状态
   if (to.meta.requiresAuth && !userStore.token) {
     next("/login")
-  } else if (to.path === "/login" && userStore.token) {
-    next("/")
-  } else {
-    next()
+    return
   }
+  
+  // 已登录用户访问登录页，跳转到首页
+  if (to.path === "/login" && userStore.token) {
+    next("/")
+    return
+  }
+  
+  // 检查角色权限
+  if (to.meta.roles && !userStore.hasRole(to.meta.roles)) {
+    // 无权限，跳转到首页
+    next("/")
+    return
+  }
+  
+  next()
 })
 
 export default router

@@ -7,6 +7,7 @@ from app.models.data_source import DataSource
 from app.models.query_history import QueryHistory
 from app.models.export_task import ExportTask
 from app.models.template import Template
+from app.utils.metrics import metrics_collector
 
 router = APIRouter(prefix="/api/stats", tags=["统计"])
 
@@ -32,3 +33,22 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
         "export_count": export_count,
         "template_count": template_count
     }
+
+
+@router.get("/metrics")
+async def get_metrics():
+    """获取性能指标"""
+    return metrics_collector.get_summary()
+
+
+@router.get("/metrics/recent")
+async def get_recent_metrics(limit: int = 50):
+    """获取最近的请求指标"""
+    return {"metrics": metrics_collector.get_recent_metrics(limit)}
+
+
+@router.post("/metrics/reset")
+async def reset_metrics():
+    """重置性能指标"""
+    metrics_collector.reset()
+    return {"status": "reset"}

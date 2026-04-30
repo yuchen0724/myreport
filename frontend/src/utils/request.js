@@ -12,6 +12,9 @@ request.interceptors.request.use(
     const userStore = useUserStore()
     if (userStore.token) {
       config.headers.Authorization = `Bearer ${userStore.token}`
+      console.log('Request:', config.method, config.url, 'Token:', userStore.token.substring(0, 20) + '...')
+    } else {
+      console.log('Request:', config.method, config.url, 'NO TOKEN')
     }
     return config
   },
@@ -30,6 +33,7 @@ request.interceptors.response.use(
   (error) => {
     if (error.response) {
       const { status, data } = error.response
+      console.error('API Error:', status, data)
       if (status === 401) {
         const userStore = useUserStore()
         userStore.logout()
@@ -37,6 +41,7 @@ request.interceptors.response.use(
       }
       ElMessage.error(data.message || data.detail || "请求失败")
     } else {
+      console.error('Network Error:', error)
       ElMessage.error("网络错误")
     }
     return Promise.reject(error)
