@@ -17,8 +17,14 @@ export const useUserStore = defineStore("user", () => {
   }
 
   function setUser(newUser) {
-    user.value = newUser
-    localStorage.setItem("user", JSON.stringify(newUser))
+    // 将 role_id (数字) 转换为角色名称 (字符串)
+    const roleMap = { 1: 'admin', 2: 'editor', 3: 'user' }
+    const userWithRole = {
+      ...newUser,
+      role: roleMap[newUser.role_id] || 'user'
+    }
+    user.value = userWithRole
+    localStorage.setItem("user", JSON.stringify(userWithRole))
   }
 
   function logout() {
