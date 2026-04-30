@@ -119,7 +119,9 @@ export default {
     const isLoginPage = computed(() => route.path === '/login')
     const activeMenu = computed(() => route.path)
     const isAdmin = computed(() => {
-      return userStore.hasRole(['admin'])
+      const result = userStore.hasRole(['admin'])
+      console.log('isAdmin check:', result, 'user:', userStore.user, 'role:', userStore.role)
+      return result
     })
     
     // 直接从 store 获取菜单（只有在非登录页才加载）
