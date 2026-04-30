@@ -137,22 +137,22 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
+  const hasToken = !!userStore.token
   
-  // 检查登录状态
-  if (to.meta.requiresAuth && !userStore.token) {
-    next("/login")
+  // 已登录用户访问登录页，跳转到首页
+  if (to.path === "/login" && hasToken) {
+    next("/")
     return
   }
   
-  // 已登录用户访问登录页，跳转到首页
-  if (to.path === "/login" && userStore.token) {
-    next("/")
+  // 检查登录状态（但登录页不需要）
+  if (to.meta.requiresAuth && !hasToken) {
+    next("/login")
     return
   }
   
   // 检查角色权限
   if (to.meta.roles && !userStore.hasRole(to.meta.roles)) {
-    // 无权限，跳转到首页
     next("/")
     return
   }
