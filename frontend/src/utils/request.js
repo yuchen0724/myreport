@@ -35,25 +35,35 @@ request.interceptors.response.use(
       const { status, data } = error.response
       console.error('API Error:', status, data)
       
-      // 401 未授权：清除 token 并跳转登录页
+      // 401 未授权：清除 token
       if (status === 401) {
         const userStore = useUserStore()
         userStore.logout()
-        // 跳转到登录页，让用户重新登录
-        window.location.href = '/login'
+        // 只有不在登录页时才跳转
+        if (!window.location.pathname.includes('/login')) {
+          window.location.href = '/login'
+        }
         console.warn('登录过期，请重新登录')
       }
       
       // 429 限流：提示但不重试
       if (status === 429) {
-        ElMessage.warning('请求过于频繁请稍后再试')
+        // 登录页不显示限流提示，避免干扰
+        if (!window.location.pathname.includes('/login')) {
+          ElMessage.warning('请求过于频繁请稍后再试')
+        }
         return Promise.reject(error)
       }
       
-      ElMessage.error(data.message || data.detail || "请求失败")
+      // 登录页不显示其他错误提示
+      if (!window.location.pathname.includes('/login')) {
+        ElMessage.error(data.message || data.detail || "请求失败")
+      }
     } else {
       console.error('Network Error:', error)
-      ElMessage.error("网络错误")
+      if (!window.location.pathname.includes('/login')) {
+        ElMessage.error("网络错误")
+      }
     }
     return Promise.reject(error)
   }
