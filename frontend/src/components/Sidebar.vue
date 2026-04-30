@@ -114,23 +114,28 @@ export default {
     const userStore = useUserStore()
     const menuStore = useMenuStore()
     
+    // 判断是否在登录页
+    const isLoginPage = computed(() => route.path === '/login')
     const activeMenu = computed(() => route.path)
     const isAdmin = computed(() => {
       return userStore.hasRole(['admin'])
     })
     
-    // 直接从 store 获取菜单
+    // 直接从 store 获取菜单（只有在非登录页才加载）
     const reportMenus = computed(() => menuStore.menus)
     
-    // 首次加载菜单
+    // 首次加载菜单（非登录页才加载）
     onMounted(() => {
-      menuStore.loadMenus()
+      if (!isLoginPage.value) {
+        menuStore.loadMenus()
+      }
     })
     
     return { 
       activeMenu, 
       reportMenus, 
-      isAdmin 
+      isAdmin,
+      isLoginPage
     }
   }
 }

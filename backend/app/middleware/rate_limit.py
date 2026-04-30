@@ -98,8 +98,15 @@ class RateLimiter:
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """限流中间件"""
     
-    # 跳过限流的路径
-    SKIP_PATHS = {"/health", "/metrics", "/api/stats/metrics", "/docs", "/openapi.json"}
+    # 跳过限流的路径（登录页、静态资源、健康检查等）
+    SKIP_PATHS = {
+        "/health", "/metrics", "/api/stats/metrics", 
+        "/docs", "/openapi.json", "/redoc",
+        "/api/auth/login", "/api/auth/register",
+        "/login", "/register",
+    }
+    # 跳过限流的路径前缀
+    SKIP_PREFIXES = ["/static", "/assets", "/_nuxt", "/node_modules"]
     
     def __init__(self, app):
         super().__init__(app)
@@ -110,10 +117,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         )
     
     async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        
         # 跳过特定路径
-        if request.url.path in self.SKIP_PATHS:
+        if path in self.SKIP_PATHS:
             return await call_next(request)
         
+        # 跳过特定路径前缀（静态资源等）
+        for prefix in self.SKIP_PREFIXES:
+            if path.startswith(prefix):
+                return await call_next(request)
+        
+        # 认证失败返回 401 的请求不计入限流（避免无限重试）
         client_ip = self._get_client_ip(request)
         key = f"rate_limit:{client_ip}"
         

@@ -34,11 +34,20 @@ request.interceptors.response.use(
     if (error.response) {
       const { status, data } = error.response
       console.error('API Error:', status, data)
+      
+      // 401 未授权：不弹窗，不重试，静默处理
       if (status === 401) {
-        const userStore = useUserStore()
-        userStore.logout()
-        window.location.href = "/login"
+        console.warn('未登录，跳过错误提示')
+        // 不调用 ElMessage，避免频繁弹窗
+        return Promise.reject(new Error('Unauthorized'))
       }
+      
+      // 429 限流：提示但不重试
+      if (status === 429) {
+        ElMessage.warning('请求过于频繁，请稍后再试')
+        return Promise.reject(error)
+      }
+      
       ElMessage.error(data.message || data.detail || "请求失败")
     } else {
       console.error('Network Error:', error)
