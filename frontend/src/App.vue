@@ -36,12 +36,26 @@ export default {
 
     const isLoginPage = computed(() => route.path === '/login')
 
+    // 初始化时检查 token
     onMounted(() => {
-      const token = localStorage.getItem('token')
-      const user = localStorage.getItem('user')
-      if (token && user) {
-        userStore.setToken(token)
-        userStore.setUser(JSON.parse(user))
+      // 登录页：始终清除可能过期的 token
+      if (isLoginPage.value) {
+        const token = localStorage.getItem('token')
+        if (token) {
+          localStorage.removeItem('token')
+          localStorage.removeItem('user')
+          userStore.token = ''
+          userStore.user = null
+          console.log('已清除过期 token')
+        }
+      } else {
+        // 非登录页：恢复 token
+        const token = localStorage.getItem('token')
+        const user = localStorage.getItem('user')
+        if (token && user) {
+          userStore.setToken(token)
+          userStore.setUser(JSON.parse(user))
+        }
       }
     })
 
