@@ -6,6 +6,7 @@ from app.models.query_history import QueryHistory
 from app.models.export_task import ExportTask
 from app.models.associations import role_permissions
 from app.models.dashboard_widget import DashboardWidgetConfig
+from app.models.menu import Menu
 
 __all__ = [
     "User",
@@ -15,5 +16,6 @@ __all__ = [
     "QueryHistory",
     "ExportTask",
     "DashboardWidgetConfig",
+    "Menu",
     "role_permissions",
 ]

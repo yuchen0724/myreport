@@ -30,7 +30,6 @@ class Menu(Base):
     
     # 关系
     parent = relationship("Menu", remote_side=[id], backref="children")
-    template = relationship("Template", backref="menus")
     
     def __repr__(self):
         return f"<Menu {self.name}>"
