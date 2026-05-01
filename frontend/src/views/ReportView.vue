@@ -108,7 +108,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Download, Document, Search } from '@element-plus/icons-vue'
-import { getMenuWithTemplate } from '@/api/menu'
+import { getMenus, getMenuWithTemplate } from '@/api/menu'
 import { executeQuery } from '@/api/query'
 import { exportExcel, exportPDF } from '@/api/report'
 
@@ -125,9 +125,21 @@ const pageSize = ref(20)
 const params = reactive({})
 const templateParams = ref([])
 
+// 通过 path 查找菜单（当路由参数不是数字ID时）
+const findMenuIdByPath = async (path) => {
+  try {
+    const menus = await getMenus({ skip: 0, limit: 1000 })
+    const menuList = Array.isArray(menus) ? menus : (menus.data || [])
+    const matched = menuList.find(m => m.path === path)
+    return matched ? matched.id : null
+  } catch {
+    return null
+  }
+}
+
 // 加载菜单和模板信息
 const loadMenuInfo = async () => {
-  const menuId = route.params.id
+  let menuId = route.params.id
   if (!menuId) {
     ElMessage.error('缺少菜单ID')
     return
@@ -135,13 +147,25 @@ const loadMenuInfo = async () => {
 
   try {
     loading.value = true
+
+    // 如果路由参数不是纯数字（如 /report/sales），先按 path 查找菜单
+    if (!/^\d+$/.test(menuId)) {
+      const resolvedId = await findMenuIdByPath('/report/' + menuId)
+      if (resolvedId) {
+        menuId = resolvedId
+      } else {
+        ElMessage.error('未找到对应菜单')
+        return
+      }
+    }
+
     const res = await getMenuWithTemplate(menuId)
-    menuInfo.value = res.data.menu
-    templateInfo.value = res.data.template
+    menuInfo.value = res
+    templateInfo.value = res.template
 
     // 解析模板参数
-    if (res.data.template?.config?.params) {
-      templateParams.value = res.data.template.config.params
+    if (templateInfo.value?.config?.params) {
+      templateParams.value = templateInfo.value.config.params
       // 设置默认值
       templateParams.value.forEach(p => {
         if (p.default) {
@@ -161,6 +185,17 @@ const loadMenuInfo = async () => {
   }
 }
 
+// 构建带参数的 SQL
+const buildSqlWithParams = () => {
+  const config = templateInfo.value?.config
+  if (!config?.sql) return ''
+  let sql = config.sql
+  Object.entries(params).forEach(([key, value]) => {
+    sql = sql.replace(new RegExp(`\\$\\{${key}\\}|:${key}`, 'g'), value ?? '')
+  })
+  return sql
+}
+
 // 加载数据
 const loadData = async () => {
   if (!templateInfo.value) {
@@ -168,18 +203,33 @@ const loadData = async () => {
     return
   }
 
+  const config = templateInfo.value.config
+  if (!config) {
+    ElMessage.error('模板缺少配置信息')
+    return
+  }
+  if (!config.data_source_id) {
+    ElMessage.error('模板缺少数据源配置')
+    return
+  }
+  if (!config.sql) {
+    ElMessage.error('模板缺少 SQL 配置')
+    return
+  }
+
   try {
     loading.value = true
     const res = await executeQuery({
-      template_id: templateInfo.value.id,
-      params: { ...params },
+      data_source_id: config.data_source_id,
+      sql: buildSqlWithParams(),
       page: currentPage.value,
       page_size: pageSize.value
     })
 
-    data.value = res.data.data || []
-    columns.value = res.data.columns || []
-    total.value = res.data.total || 0
+    // executeQuery 调用 /api/query/sql，返回 SQLQueryResponse { columns, rows, total, ... }
+    data.value = res.rows || []
+    columns.value = res.columns || []
+    total.value = res.total || 0
   } catch (error) {
     ElMessage.error('查询失败：' + (error.response?.data?.detail || error.message || '未知错误'))
   } finally {
@@ -197,15 +247,18 @@ const handleExport = async (format) => {
   try {
     exporting.value = true
     
+    const config = templateInfo.value.config
+    const sql = buildSqlWithParams()
+
     // 使用异步导出 API
     const exportFn = format === 'pdf' ? exportPDF : exportExcel
     const res = await exportFn({
-      template_id: templateInfo.value.id,
-      params: { ...params }
+      data_source_id: config.data_source_id,
+      sql: sql
     })
 
     // 轮询任务状态
-    const taskId = res.data?.task_id
+    const taskId = res?.task_id
     if (!taskId) {
       ElMessage.error('导出任务创建失败')
       return
@@ -219,7 +272,7 @@ const handleExport = async (format) => {
       await new Promise(resolve => setTimeout(resolve, 2000))
       
       const statusRes = await import('@/api/report').then(m => m.getExportTask(taskId))
-      taskStatus = statusRes.data?.status
+      taskStatus = statusRes?.status
       
       maxAttempts--
       if (maxAttempts <= 0) {
@@ -252,12 +305,16 @@ const handleExport = async (format) => {
 }
 
 // 监听路由变化
-watch(() => route.params.id, () => {
-  loadMenuInfo()
-}, { immediate: true })
+watch(() => route.params.id, (newId) => {
+  if (newId) {
+    loadMenuInfo()
+  }
+})
 
 onMounted(() => {
-  loadMenuInfo()
+  if (route.params.id) {
+    loadMenuInfo()
+  }
 })
 </script>
 

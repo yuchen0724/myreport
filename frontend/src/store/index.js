@@ -91,7 +91,8 @@ export const useMenuStore = defineStore("menu", () => {
     loading.value = true
     try {
       const res = await getMenuTree()
-      const menuList = res.data || []
+      // 响应拦截器已提取 data，res 直接是数组
+      const menuList = Array.isArray(res) ? res : (res.data || [])
       menus.value = filterEnabledMenus(menuList)
       loaded.value = true
       return menus.value

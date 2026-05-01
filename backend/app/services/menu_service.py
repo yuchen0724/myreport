@@ -1,6 +1,7 @@
 """
 菜单服务层
 """
+import json
 from typing import List, Optional, Dict
 from sqlalchemy.orm import Session
 from app.repositories.menu_repository import MenuRepository
@@ -108,6 +109,7 @@ class MenuService:
                 "id": menu.template.id,
                 "name": menu.template.name,
                 "description": menu.template.description,
+                "config": json.loads(menu.template.config) if isinstance(menu.template.config, str) else menu.template.config,
             }
         
         return result
