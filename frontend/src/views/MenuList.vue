@@ -194,7 +194,8 @@ const parentMenuOptions = computed(() => {
 const loadMenus = async () => {
   try {
     const res = await getMenuTree()
-    menuTree.value = res.data || []
+    // 响应拦截器已提取 data，res 直接是数组
+    menuTree.value = Array.isArray(res) ? res : (res.data || [])
   } catch (error) {
     ElMessage.error('加载菜单失败：' + (error.message || '未知错误'))
   }
