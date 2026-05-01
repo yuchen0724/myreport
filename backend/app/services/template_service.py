@@ -95,17 +95,19 @@ class TemplateService:
             updated_at=template.updated_at
         )
 
-    def get_templates(self, user_id: Optional[int] = None) -> List[TemplateResponse]:
+    def get_templates(self, user_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[TemplateResponse]:
         """
         获取模板列表
 
         Args:
             user_id: 用户 ID（可选）
+            skip: 跳过数量
+            limit: 限制数量
 
         Returns:
             模板响应列表
         """
-        templates = self.template_repo.get_all(user_id)
+        templates = self.template_repo.get_all(user_id, skip=skip, limit=limit)
 
         return [
             TemplateResponse(

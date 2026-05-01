@@ -20,12 +20,14 @@ class TemplateRepository:
         """根据 ID 获取模板"""
         return self.db.query(Template).filter(Template.id == template_id).first()
 
-    def get_all(self, user_id: Optional[int] = None) -> List[Template]:
-        """获取所有模板"""
+    def get_all(self, user_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[Template]:
+        """获取所有模板（支持分页）"""
         query = self.db.query(Template)
         if user_id:
+            # 如果指定了用户ID，只返回该用户创建的模板
             query = query.filter(Template.created_by == user_id)
-        return query.all()
+        # 支持分页参数
+        return query.offset(skip).limit(limit).all()
 
     def update(self, template: Template) -> Template:
         """更新模板"""

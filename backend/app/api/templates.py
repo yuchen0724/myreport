@@ -37,13 +37,20 @@ async def create_template(
 
 @router.get("", response_model=List[TemplateResponse])
 async def get_templates(
-    user_id: int = None,
+    skip: int = 0,
+    limit: int = 100,
+    page: int = 1,
+    page_size: int = 100,
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id)
 ):
-    """获取模板列表"""
+    """获取模板列表（支持分页）"""
     service = TemplateService(db)
-    templates = service.get_templates(user_id or current_user_id)
+    # 优先使用 page/page_size 参数
+    if page > 0 and page_size > 0:
+        skip = (page - 1) * page_size
+        limit = page_size
+    templates = service.get_templates(current_user_id, skip=skip, limit=limit)
     return templates
 
 @router.get("/{template_id}", response_model=TemplateResponse)

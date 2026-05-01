@@ -203,7 +203,8 @@ const loadMenus = async () => {
 const loadTemplate = async () => {
   try {
     const res = await getTemplateList({ page: 1, page_size: 1000 })
-    templates.value = res.data.items || []
+    // 后端直接返回数组，不需要取 items
+    templates.value = Array.isArray(res) ? res : (res.data || [])
   } catch (error) {
     console.error('加载模板失败：', error)
   }
