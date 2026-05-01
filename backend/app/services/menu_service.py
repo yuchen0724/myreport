@@ -33,40 +33,39 @@ class MenuService:
         return [MenuResponse.model_validate(m) for m in menus]
     
     def get_tree(self) -> List[Dict]:
-        """获取菜单树"""
+        """获取菜单树（含模板名称）"""
         all_menus = self.repo.get_enabled_menus()
         
-        # 构建树形结构
-        menu_map = {m.id: m for m in all_menus}
-        tree = []
-        
+        # 构建所有菜单的字典（含模板名称）
+        menu_dict = {}
         for menu in all_menus:
-            if menu.parent_id is None:
-                tree.append(self._build_tree(menu, menu_map))
+            template_name = menu.template.name if menu.template else None
+            menu_dict[menu.id] = {
+                "id": menu.id,
+                "name": menu.name,
+                "path": menu.path,
+                "icon": menu.icon,
+                "sort_order": menu.sort_order,
+                "parent_id": menu.parent_id,
+                "template_id": menu.template_id,
+                "template_name": template_name,
+                "is_enabled": menu.is_enabled,
+                "is_visible": menu.is_visible,
+                "remark": menu.remark,
+                "children": []
+            }
+        
+        # 组装树形结构
+        tree = []
+        for menu in all_menus:
+            if menu.parent_id:
+                parent = menu_dict.get(menu.parent_id)
+                if parent:
+                    parent["children"].append(menu_dict[menu.id])
+            else:
+                tree.append(menu_dict[menu.id])
         
         return tree
-    
-    def _build_tree(self, menu: Menu, menu_map: Dict) -> Dict:
-        """递归构建菜单树"""
-        children = []
-        for m in menu_map.values():
-            if m.parent_id == menu.id:
-                children.append(self._build_tree(m, menu_map))
-        
-        result = {
-            "id": menu.id,
-            "name": menu.name,
-            "path": menu.path,
-            "icon": menu.icon,
-            "sort_order": menu.sort_order,
-            "parent_id": menu.parent_id,
-            "template_id": menu.template_id,
-            "is_enabled": menu.is_enabled,
-            "is_visible": menu.is_visible,
-            "remark": menu.remark,
-            "children": children
-        }
-        return result
     
     def create(self, data: MenuCreate) -> MenuResponse:
         """创建菜单"""
