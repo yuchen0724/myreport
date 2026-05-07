@@ -1,5 +1,7 @@
 # backend/app/api/async_export.py
+import os
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
@@ -128,9 +130,6 @@ async def download_export_file(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="文件不存在"
         )
-
-    from fastapi.responses import FileResponse
-    import os
 
     if not os.path.exists(task.file_path):
         raise HTTPException(

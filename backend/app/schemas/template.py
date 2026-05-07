@@ -67,3 +67,12 @@ class TemplateShareUserResponse(BaseModel):
 class UnshareRequest(BaseModel):
     """取消分享请求"""
     user_id: int
+
+
+class PaginatedTemplateResponse(BaseModel):
+    """分页模板响应"""
+    items: List[TemplateResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

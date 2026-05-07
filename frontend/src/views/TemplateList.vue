@@ -69,7 +69,9 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateList, deleteTemplate } from '@/api/template'
-import { shareTemplate, getSharedTemplates } from '@/api/template_share'
+import { shareTemplate } from '@/api/template_share'
+import { getUserList } from '@/api/user'
+
 const router = useRouter()
 const templates = ref([])
 const shareDialogVisible = ref(false)
@@ -77,11 +79,8 @@ const shareForm = ref({
   template_id: null,
   user_ids: []
 })
-const users = ref([
-  { id: 1, username: 'admin' },
-  { id: 2, username: 'user1' },
-  { id: 3, username: 'user2' }
-])
+const users = ref([])
+const usersLoading = ref(false)
 
 onMounted(async () => {
   await loadTemplates()
@@ -89,19 +88,23 @@ onMounted(async () => {
 
 const loadTemplates = async () => {
   try {
-    console.log('开始加载模板列表...')
     const response = await getTemplateList()
-    console.log('模板列表响应:', response)
     templates.value = response
-    console.log('模板列表已更新，共', templates.value.length, '个模板')
   } catch (error) {
-    console.error('加载模板列表失败:', error)
-    console.error('错误详情:', {
-      message: error.message,
-      response: error.response,
-      request: error.request
-    })
     ElMessage.error('加载模板列表失败：' + (error.message || '未知错误'))
+  }
+}
+
+const loadUsers = async () => {
+  if (usersLoading.value || users.value.length > 0) return
+  usersLoading.value = true
+  try {
+    const response = await getUserList()
+    users.value = response
+  } catch (error) {
+    ElMessage.error('加载用户列表失败：' + (error.message || '未知错误'))
+  } finally {
+    usersLoading.value = false
   }
 }
 
@@ -110,66 +113,41 @@ const handleCreate = () => {
 }
 
 const handleView = (row) => {
-  console.log('查看模板 - row对象:', row)
-  console.log('查看模板 - row.id:', row.id)
-  
-  if (!row || !row.id) {
-    console.error('row对象或row.id为空')
+  if (!row?.id) {
     ElMessage.error('模板数据异常，无法查看')
     return
   }
-  
-  console.log('准备跳转到模板详情页面，ID:', row.id)
   router.push(`/templates/${row.id}`).catch(err => {
-    console.error('路由跳转失败:', err)
     ElMessage.error('无法查看模板：' + (err.message || '未知错误'))
   })
 }
 
 const handleEdit = (row) => {
-  console.log('编辑模板 - row对象:', row)
-  console.log('编辑模板 - row.id:', row.id)
-  
-  if (!row || !row.id) {
-    console.error('row对象或row.id为空')
+  if (!row?.id) {
     ElMessage.error('模板数据异常，无法编辑')
     return
   }
-  
-  console.log('准备跳转到模板编辑页面，ID:', row.id)
   router.push(`/templates/${row.id}/edit`).catch(err => {
-    console.error('路由跳转失败:', err)
     ElMessage.error('无法编辑模板：' + (err.message || '未知错误'))
   })
 }
 
 const handleVersions = (row) => {
-  console.log('查看版本历史 - row对象:', row)
-  console.log('查看版本历史 - row.id:', row.id)
-  
-  if (!row || !row.id) {
-    console.error('row对象或row.id为空')
+  if (!row?.id) {
     ElMessage.error('模板数据异常，无法查看版本')
     return
   }
-  
-  console.log('准备跳转到版本历史页面，ID:', row.id)
   router.push(`/templates/${row.id}/versions`).catch(err => {
-    console.error('路由跳转失败:', err)
     ElMessage.error('无法查看版本：' + (err.message || '未知错误'))
   })
 }
 
 const handleDelete = async (row) => {
-  console.log('删除模板 - row对象:', row)
-  console.log('删除模板 - row.id:', row.id)
-  
-  if (!row || !row.id) {
-    console.error('row对象或row.id为空')
+  if (!row?.id) {
     ElMessage.error('模板数据异常，无法删除')
     return
   }
-  
+
   try {
     await ElMessageBox.confirm('确定要删除该模板吗？', '提示', {
       confirmButtonText: '确定',
@@ -177,12 +155,10 @@ const handleDelete = async (row) => {
       type: 'warning'
     })
 
-    console.log('开始删除模板，ID:', row.id)
     await deleteTemplate(row.id)
     ElMessage.success('删除成功')
     await loadTemplates()
   } catch (error) {
-    console.error('删除模板失败:', error)
     if (error !== 'cancel') {
       ElMessage.error('删除失败：' + (error.message || '未知错误'))
     }
@@ -194,39 +170,30 @@ const formatDate = (date) => {
 }
 
 const handleShare = (row) => {
-  console.log('分享模板 - row对象:', row)
-  console.log('分享模板 - row.id:', row.id)
-  
-  if (!row || !row.id) {
-    console.error('row对象或row.id为空')
+  if (!row?.id) {
     ElMessage.error('模板数据异常，无法分享')
     return
   }
-  
-  console.log('准备打开分享对话框，模板ID:', row.id)
+
   shareForm.value.template_id = row.id
   shareForm.value.user_ids = []
   shareDialogVisible.value = true
+  loadUsers()
 }
 
 const handleConfirmShare = async () => {
-  console.log('确认分享模板 - shareForm:', shareForm.value)
-  
   if (!shareForm.value.template_id) {
-    console.error('template_id为空')
     ElMessage.error('模板ID异常，无法分享')
     return
   }
-  
+
   try {
-    console.log('开始分享模板，ID:', shareForm.value.template_id, '用户IDs:', shareForm.value.user_ids)
     await shareTemplate(shareForm.value.template_id, {
       user_ids: shareForm.value.user_ids
     })
     ElMessage.success('分享成功')
     shareDialogVisible.value = false
   } catch (error) {
-    console.error('分享模板失败:', error)
     ElMessage.error('分享失败：' + (error.message || '未知错误'))
   }
 }

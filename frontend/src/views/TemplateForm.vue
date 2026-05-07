@@ -210,7 +210,6 @@ const handleSubmit = async () => {
 }
 
 const handleCancel = () => {
-  console.log('取消编辑，返回上一页')
   // 尝试返回上一页，如果没有历史记录则返回模板列表
   if (window.history.length > 1) {
     router.back()

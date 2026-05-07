@@ -42,7 +42,6 @@ export default {
       if (newVal) {
         // 进入登录页，清除 token
         userStore.logout()
-        console.log('路由切换到登录页，已清除 token')
       }
     }, { immediate: true })
 

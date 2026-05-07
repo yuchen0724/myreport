@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.security import decode_access_token
 from app.schemas.auth import Token
 from app.services.auth_service import AuthService
 
@@ -34,8 +35,6 @@ async def get_current_user_info(
     db: Session = Depends(get_db)
 ):
     """获取当前用户信息"""
-    from app.core.security import decode_access_token
-
     payload = decode_access_token(token)
     if payload is None:
         raise HTTPException(

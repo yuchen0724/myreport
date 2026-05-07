@@ -1,10 +1,11 @@
 # backend/app/services/template_service.py
 from typing import List, Optional, Dict, Any
 import json
-from app.schemas.template import TemplateCreate, TemplateUpdate, TemplateResponse, TemplateVersionResponse, TemplateShareRequest, SharedTemplateResponse
+from app.schemas.template import TemplateCreate, TemplateUpdate, TemplateResponse, TemplateVersionResponse, TemplateShareRequest, SharedTemplateResponse, PaginatedTemplateResponse
 from app.models.template import Template
 from app.models.template_version import TemplateVersion
 from app.models.template_share import TemplateShare
+from app.models.user import User
 from app.repositories.template_repository import TemplateRepository
 from app.repositories.template_version_repository import TemplateVersionRepository
 from sqlalchemy.orm import Session
@@ -97,7 +98,7 @@ class TemplateService:
 
     def get_templates(self, user_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[TemplateResponse]:
         """
-        获取模板列表
+        获取模板列表（无分页元数据，兼容旧调用）
 
         Args:
             user_id: 用户 ID（可选）
@@ -123,6 +124,45 @@ class TemplateService:
             )
             for t in templates
         ]
+
+    def get_templates_paginated(self, user_id: Optional[int] = None, page: int = 1, page_size: int = 100) -> PaginatedTemplateResponse:
+        """
+        获取模板列表（带分页元数据）
+
+        Args:
+            user_id: 用户 ID（可选）
+            page: 页码（从 1 开始）
+            page_size: 每页数量
+
+        Returns:
+            分页模板响应，包含 items / total / page / page_size / total_pages
+        """
+        skip = (page - 1) * page_size
+        total = self.template_repo.count(user_id)
+        templates = self.template_repo.get_all(user_id, skip=skip, limit=page_size)
+
+        items = [
+            TemplateResponse(
+                id=t.id,
+                name=t.name,
+                description=t.description,
+                config=json.loads(t.config),
+                version=t.version,
+                is_public=t.is_public,
+                created_by=t.created_by,
+                created_at=t.created_at,
+                updated_at=t.updated_at
+            )
+            for t in templates
+        ]
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        return PaginatedTemplateResponse(
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+        )
 
     def update_template(self, template_id: int, template_data: TemplateUpdate, user_id: int) -> Optional[TemplateResponse]:
         """
@@ -318,8 +358,6 @@ class TemplateService:
         Returns:
             模板响应列表
         """
-        from app.models.user import User
-
         # 查询分享记录和模板信息
         shares = self.db.query(TemplateShare, Template, User).join(
             Template, TemplateShare.template_id == Template.id
@@ -357,8 +395,6 @@ class TemplateService:
         Returns:
             用户信息列表（包含用户ID、用户名、邮箱、分享时间）
         """
-        from app.models.user import User
-
         shares = self.db.query(TemplateShare, User).join(
             User, TemplateShare.user_id == User.id
         ).filter(
@@ -410,8 +446,6 @@ class TemplateService:
         Returns:
             版本差异
         """
-        from app.models.template_version import TemplateVersion
-
         v1 = self.db.query(TemplateVersion).filter(
             TemplateVersion.template_id == template_id,
             TemplateVersion.version == version1

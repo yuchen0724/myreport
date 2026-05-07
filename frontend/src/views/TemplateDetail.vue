@@ -103,12 +103,9 @@ onMounted(async () => {
 
 const loadTemplate = async () => {
   try {
-    console.log('加载模板详情，ID:', route.params.id)
     const response = await getTemplate(route.params.id)
-    console.log('模板数据:', response)
     template.value = response
   } catch (error) {
-    console.error('加载模板失败:', error)
     ElMessage.error('加载模板失败：' + (error.message || '未知错误'))
   }
 }
@@ -122,16 +119,12 @@ const formatConfig = (config) => {
 }
 
 const handleEdit = () => {
-  console.log('编辑模板:', template.value.id)
   router.push(`/templates/${template.value.id}/edit`).catch(err => {
-    console.error('路由跳转失败:', err)
     ElMessage.error('无法编辑模板')
   })
 }
 
 const handleBack = () => {
-  console.log('返回上一页')
-  // 尝试返回上一页，如果没有历史记录则返回模板列表
   if (window.history.length > 1) {
     router.back()
   } else {
@@ -178,7 +171,6 @@ const doPreview = async () => {
     queryResult.value = response
     ElMessage.success('查询成功')
   } catch (error) {
-    console.error('查询失败:', error)
     const msg = error.response?.data?.message || error.response?.data?.detail || error.message || '未知错误'
     ElMessage.error('查询失败：' + msg)
   } finally {

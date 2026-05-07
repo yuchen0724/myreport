@@ -120,7 +120,6 @@ export default {
     const activeMenu = computed(() => route.path)
     const isAdmin = computed(() => {
       const result = userStore.hasRole(['admin'])
-      console.log('isAdmin check:', result, 'user:', userStore.user, 'role:', userStore.role)
       return result
     })
     

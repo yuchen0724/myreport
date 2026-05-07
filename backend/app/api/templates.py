@@ -12,7 +12,8 @@ from app.schemas.template import (
     TemplateShareRequest,
     SharedTemplateResponse,
     TemplateShareUserResponse,
-    UnshareRequest
+    UnshareRequest,
+    PaginatedTemplateResponse,
 )
 from app.services.template_service import TemplateService
 
@@ -39,19 +40,24 @@ async def create_template(
 async def get_templates(
     skip: int = 0,
     limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
+):
+    """获取模板列表（原始分页，无元数据）"""
+    service = TemplateService(db)
+    templates = service.get_templates(current_user_id, skip=skip, limit=limit)
+    return templates
+
+@router.get("/paginated", response_model=PaginatedTemplateResponse)
+async def get_templates_paginated(
     page: int = 1,
     page_size: int = 100,
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id)
 ):
-    """获取模板列表（支持分页）"""
+    """获取模板列表（带分页元数据：total / page / page_size / total_pages）"""
     service = TemplateService(db)
-    # 优先使用 page/page_size 参数
-    if page > 0 and page_size > 0:
-        skip = (page - 1) * page_size
-        limit = page_size
-    templates = service.get_templates(current_user_id, skip=skip, limit=limit)
-    return templates
+    return service.get_templates_paginated(current_user_id, page=page, page_size=page_size)
 
 @router.get("/{template_id}", response_model=TemplateResponse)
 async def get_template(

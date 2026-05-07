@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+import logging
 import threading
 import time
 from typing import Optional, Any, Dict
@@ -9,6 +10,7 @@ from datetime import datetime
 from app.config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 class CacheStats:
@@ -86,7 +88,7 @@ class CacheService:
             )
             self.redis_client.ping()
         except Exception as e:
-            print(f"Redis连接失败: {e}")
+            logger.warning("Redis连接失败: %s", e)
             self.redis_client = None
 
     def _generate_cache_key(self, sql: str, params: dict = None) -> str:
@@ -112,7 +114,7 @@ class CacheService:
             self.stats.record_miss()
             return None
         except Exception as e:
-            print(f"缓存读取失败: {e}")
+            logger.warning("缓存读取失败: %s", e)
             self.stats.record_miss()
             return None
 
@@ -135,7 +137,7 @@ class CacheService:
             self.stats.record_set()
             return True
         except Exception as e:
-            print(f"缓存写入失败: {e}")
+            logger.warning("缓存写入失败: %s", e)
             return False
     
     def get_stats_extended(self) -> dict:
@@ -153,7 +155,7 @@ class CacheService:
             self.redis_client.delete(cache_key)
             return True
         except Exception as e:
-            print(f"缓存删除失败: {e}")
+            logger.warning("缓存删除失败: %s", e)
             return False
 
     def exists(self, sql: str, params: dict = None) -> bool:
@@ -164,7 +166,7 @@ class CacheService:
             cache_key = self._generate_cache_key(sql, params)
             return bool(self.redis_client.exists(cache_key))
         except Exception as e:
-            print(f"缓存检查失败: {e}")
+            logger.warning("缓存检查失败: %s", e)
             return False
 
     def clear_pattern(self, pattern: str) -> bool:
@@ -177,7 +179,7 @@ class CacheService:
                 self.redis_client.delete(*keys)
             return True
         except Exception as e:
-            print(f"批量缓存删除失败: {e}")
+            logger.warning("批量缓存删除失败: %s", e)
             return False
 
     def get_stats(self) -> dict:

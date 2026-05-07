@@ -138,9 +138,7 @@ const router = createRouter({
 router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
   const hasToken = !!userStore.token
-  
-  console.log('路由守卫:', to.path, 'hasToken:', hasToken, 'user:', userStore.user, 'role:', userStore.role)
-  
+
   // 已登录用户访问登录页，跳转到首页
   if (to.path === "/login" && hasToken) {
     next("/")
@@ -155,7 +153,6 @@ router.beforeEach((to, from, next) => {
   
   // 检查角色权限
   if (to.meta.roles && !userStore.hasRole(to.meta.roles)) {
-    console.log('角色权限不足，跳转首页', 'required:', to.meta.roles, 'actual:', userStore.role)
     next("/")
     return
   }

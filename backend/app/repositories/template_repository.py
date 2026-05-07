@@ -35,6 +35,13 @@ class TemplateRepository:
         self.db.refresh(template)
         return template
 
+    def count(self, user_id: Optional[int] = None) -> int:
+        """获取模板总数"""
+        query = self.db.query(Template)
+        if user_id:
+            query = query.filter(Template.created_by == user_id)
+        return query.count()
+
     def delete(self, template: Template) -> bool:
         """删除模板"""
         self.db.delete(template)

@@ -12,9 +12,6 @@ request.interceptors.request.use(
     const userStore = useUserStore()
     if (userStore.token) {
       config.headers.Authorization = `Bearer ${userStore.token}`
-      console.log('Request:', config.method, config.url, 'Token:', userStore.token.substring(0, 20) + '...')
-    } else {
-      console.log('Request:', config.method, config.url, 'NO TOKEN')
     }
     return config
   },
@@ -33,8 +30,7 @@ request.interceptors.response.use(
   (error) => {
     if (error.response) {
       const { status, data } = error.response
-      console.error('API Error:', status, data)
-      
+
       // 401 未授权：清除 token
       if (status === 401) {
         const userStore = useUserStore()
@@ -43,7 +39,6 @@ request.interceptors.response.use(
         if (!window.location.pathname.includes('/login')) {
           window.location.href = '/login'
         }
-        console.warn('登录过期，请重新登录')
       }
       
       // 429 限流：提示但不重试
@@ -60,7 +55,6 @@ request.interceptors.response.use(
         ElMessage.error(data.message || data.detail || "请求失败")
       }
     } else {
-      console.error('Network Error:', error)
       if (!window.location.pathname.includes('/login')) {
         ElMessage.error("网络错误")
       }

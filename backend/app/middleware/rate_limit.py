@@ -2,6 +2,7 @@
 
 基于 IP 地址的请求频率限制。
 支持内存模式和 Redis 模式（生产环境推荐）。
+当 Redis 可用时自动切换至 Redis 后端以支持多 worker 场景。
 """
 
 import time
@@ -17,131 +18,163 @@ from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 from app.config import get_settings
 
 
-class RateLimiter:
-    """限流核心逻辑"""
-    
-    # 路径分组配置：不同路径有不同的限流策略
-    PATH_GROUPS = {
-        # 查询接口限流更严格
-        "/api/query": {"max_requests": 30, "window": 60},
-        "/api/nl2sql": {"max_requests": 20, "window": 60},
-        "/api/report": {"max_requests": 10, "window": 60},
-        
-        # 数据源操作更严格
-        "/api/datasources": {"max_requests": 50, "window": 60},
-        
-        # 只读接口限流较宽松
-        "/api/templates": {"max_requests": 100, "window": 60},
-        "/api/stats": {"max_requests": 60, "window": 60},
-    }
-    
-    def __init__(self, max_requests: int = 100, window: int = 60):
+_PATH_GROUPS = {
+    "/api/query": {"max_requests": 30, "window": 60},
+    "/api/nl2sql": {"max_requests": 20, "window": 60},
+    "/api/report": {"max_requests": 10, "window": 60},
+    "/api/datasources": {"max_requests": 50, "window": 60},
+    "/api/templates": {"max_requests": 100, "window": 60},
+    "/api/stats": {"max_requests": 60, "window": 60},
+}
+
+
+def _get_path_config(path: str) -> Dict:
+    """获取路径对应的限流配置"""
+    for prefix, config in _PATH_GROUPS.items():
+        if path.startswith(prefix):
+            return config
+    return {"max_requests": 100, "window": 60}
+
+
+class MemoryRateLimiterBackend:
+    """内存限流后端（单 worker 场景）"""
+
+    def __init__(self, max_requests: int, window: int):
         self.default_max_requests = max_requests
         self.default_window = window
-        self.requests: Dict[str, list] = defaultdict(list)
+        self._requests: Dict[str, list] = defaultdict(list)
         self._lock = threading.Lock()
-        
-        # Redis 连接（可选，生产环境建议使用）
-        self._redis_client = None
-    
-    def _get_path_config(self, path: str) -> Dict:
-        """获取路径对应的限流配置"""
-        for prefix, config in self.PATH_GROUPS.items():
-            if path.startswith(prefix):
-                return config
-        return {"max_requests": self.default_max_requests, "window": self.default_window}
-    
-    def _clean_expired(self, key: str, now: float, window: int):
-        with self._lock:
-            self.requests[key] = [
-                ts for ts in self.requests[key] if now - ts < window
-            ]
-    
-    def is_allowed(self, key: str, path: str = "/") -> bool:
-        """判断请求是否被允许"""
-        config = self._get_path_config(path)
-        max_requests = config["max_requests"]
+
+    def is_allowed(self, key: str, path: str) -> bool:
+        config = _get_path_config(path)
+        max_r = config["max_requests"]
         window = config["window"]
-        
         now = time.time()
-        self._clean_expired(key, now, window)
-        
         with self._lock:
-            if len(self.requests[key]) >= max_requests:
+            self._requests[key] = [ts for ts in self._requests[key] if now - ts < window]
+            if len(self._requests[key]) >= max_r:
                 return False
-            self.requests[key].append(now)
+            self._requests[key].append(now)
             return True
-    
-    def get_remaining(self, key: str, path: str = "/") -> int:
-        """获取剩余可用请求数"""
-        config = self._get_path_config(path)
-        max_requests = config["max_requests"]
+
+    def get_remaining(self, key: str, path: str) -> int:
+        config = _get_path_config(path)
+        max_r = config["max_requests"]
         window = config["window"]
-        
         now = time.time()
-        self._clean_expired(key, now, window)
-        
         with self._lock:
-            return max(0, max_requests - len(self.requests[key]))
-    
-    def get_limit(self, path: str = "/") -> int:
-        """获取路径的限流阈值"""
-        config = self._get_path_config(path)
-        return config["max_requests"]
-    
+            self._requests[key] = [ts for ts in self._requests[key] if now - ts < window]
+            return max(0, max_r - len(self._requests[key]))
+
+    def get_limit(self, path: str) -> int:
+        return _get_path_config(path)["max_requests"]
+
     def clear(self):
-        """清空限流记录（测试用）"""
         with self._lock:
-            self.requests.clear()
+            self._requests.clear()
+
+
+class RedisRateLimiterBackend:
+    """Redis 限流后端（多 worker 场景，滑动窗口）"""
+
+    def __init__(self, redis_client, max_requests: int, window: int):
+        self._redis = redis_client
+        self.default_max_requests = max_requests
+        self.default_window = window
+
+    def _redis_key(self, key: str, path: str) -> str:
+        config = _get_path_config(path)
+        # 不同路径组使用不同后缀以确保键的分布
+        return f"{key}:{hash(path) % 100}"
+
+    def is_allowed(self, key: str, path: str) -> bool:
+        config = _get_path_config(path)
+        max_r = config["max_requests"]
+        window = config["window"]
+        rkey = self._redis_key(key, path)
+        now = time.time()
+        pipe = self._redis.pipeline()
+        # 移除窗口外的记录
+        pipe.zremrangebyscore(rkey, 0, now - window)
+        # 添加当前请求
+        pipe.zadd(rkey, {str(now): now})
+        # 设置过期时间
+        pipe.expire(rkey, window + 10)
+        # 统计窗口内请求数
+        pipe.zcard(rkey)
+        results = pipe.execute()
+        count = results[3]
+        return count <= max_r
+
+    def get_remaining(self, key: str, path: str) -> int:
+        config = _get_path_config(path)
+        max_r = config["max_requests"]
+        window = config["window"]
+        rkey = self._redis_key(key, path)
+        now = time.time()
+        self._redis.zremrangebyscore(rkey, 0, now - window)
+        count = self._redis.zcard(rkey)
+        return max(0, max_r - count)
+
+    def get_limit(self, path: str) -> int:
+        return _get_path_config(path)["max_requests"]
+
+    def clear(self):
+        """清空所有限流键（测试用）"""
+        keys = self._redis.keys("rate_limit:*")
+        if keys:
+            self._redis.delete(*keys)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """限流中间件"""
-    
-    # 跳过限流的路径（登录页、静态资源、健康检查等）
+
     SKIP_PATHS = {
-        "/health", "/metrics", "/api/stats/metrics", 
+        "/health", "/metrics", "/api/stats/metrics",
         "/docs", "/openapi.json", "/redoc",
         "/api/auth/login", "/api/auth/register",
         "/login", "/register",
     }
-    # 跳过限流的路径前缀
     SKIP_PREFIXES = ["/static", "/assets", "/_nuxt", "/node_modules"]
-    
+
     def __init__(self, app):
         super().__init__(app)
         settings = get_settings()
-        self.limiter = RateLimiter(
-            max_requests=getattr(settings, 'rate_limit_max_requests', 100),
-            window=getattr(settings, 'rate_limit_window', 60)
-        )
-    
+        max_r = getattr(settings, 'rate_limit_max_requests', 100)
+        window = getattr(settings, 'rate_limit_window', 60)
+
+        # 尝试使用 Redis 后端，不可用时回退到内存后端
+        self._backend = self._init_backend(max_r, window)
+
+    def _init_backend(self, max_r: int, window: int):
+        try:
+            from app.core.redis import redis_client
+            redis_client.ping()
+            return RedisRateLimiterBackend(redis_client, max_r, window)
+        except Exception:
+            return MemoryRateLimiterBackend(max_r, window)
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        
-        # 跳过特定路径
+
         if path in self.SKIP_PATHS:
             return await call_next(request)
-        
-        # 跳过特定路径前缀（静态资源等）
+
         for prefix in self.SKIP_PREFIXES:
             if path.startswith(prefix):
                 return await call_next(request)
-        
-        # 认证失败返回 401 的请求不计入限流（避免无限重试）
+
         client_ip = self._get_client_ip(request)
         key = f"rate_limit:{client_ip}"
-        
-        # 检查是否允许
-        if not self.limiter.is_allowed(key, request.url.path):
-            limit = self.limiter.get_limit(request.url.path)
-            remaining = 0
+
+        if not self._backend.is_allowed(key, request.url.path):
+            limit = self._backend.get_limit(request.url.path)
             return JSONResponse(
                 status_code=HTTP_429_TOO_MANY_REQUESTS,
                 content={
                     "detail": "请求过于频繁，请稍后再试",
                     "limit": limit,
-                    "remaining": remaining,
+                    "remaining": 0,
                     "retry_after": 60,
                 },
                 headers={
@@ -151,28 +184,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     "Retry-After": "60",
                 },
             )
-        
+
         response = await call_next(request)
-        
-        # 添加限流响应头
-        limit = self.limiter.get_limit(request.url.path)
-        remaining = self.limiter.get_remaining(key, request.url.path)
+
+        limit = self._backend.get_limit(request.url.path)
+        remaining = self._backend.get_remaining(key, request.url.path)
         response.headers["X-RateLimit-Limit"] = str(limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
-        
+
         return response
-    
+
     def _get_client_ip(self, request: Request) -> str:
-        """获取客户端真实 IP（支持代理）"""
-        # 优先从 X-Forwarded-For 获取
         forwarded_for = request.headers.get("X-Forwarded-For")
         if forwarded_for:
             return forwarded_for.split(",")[0].strip()
-        
-        # 其次从 X-Real-IP 获取
         real_ip = request.headers.get("X-Real-IP")
         if real_ip:
             return real_ip
-        
-        # 最后使用原始客户端 IP
         return request.client.host if request.client else "unknown"

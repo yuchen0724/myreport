@@ -1,6 +1,6 @@
 """安全工具：密码哈希、JWT 令牌、对称加密"""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from cryptography.fernet import Fernet
@@ -59,11 +59,6 @@ def get_password_hash(password: str) -> str:
 
 
 # ---------- JWT ----------
-from datetime import datetime, timezone, timedelta
-import jwt
-from app.config import get_settings
-
-settings = get_settings()
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

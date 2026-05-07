@@ -97,11 +97,7 @@ export const useMenuStore = defineStore("menu", () => {
       loaded.value = true
       return menus.value
     } catch (error) {
-      console.error('加载菜单失败:', error)
-      // 如果是 401，静默失败
-      if (error.response?.status !== 401) {
-        // 其他错误也静默失败
-      }
+      // 静默失败，菜单加载失败不影响页面基本功能
       return []
     } finally {
       loading.value = false

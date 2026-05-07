@@ -56,32 +56,24 @@ export default {
       await loginFormRef.value.validate()
       loading.value = true
       try {
-        console.log('开始登录...', loginForm.value)
         const response = await login(loginForm.value.username, loginForm.value.password)
-        console.log('登录响应:', response)
-        
+
         // 先设置 token
         userStore.setToken(response.access_token)
-        console.log('Token 已设置:', userStore.token)
-        
+
         // 获取完整用户信息（包含 role_id）
         const userResponse = await getCurrentUser()
-        console.log('用户信息:', userResponse)
-        
+
         // 设置用户信息（setUser 会自动转换 role_id -> role）
         userStore.setUser(userResponse)
-        console.log('用户已设置:', userStore.user, 'role:', userStore.role)
-        
+
         ElMessage.success('登录成功')
-        console.log('准备跳转到首页...')
-        
-        // 使用 nextTick 确保 DOM 更新后再跳转
+
+        // 保证 DOM 更新后再跳转
         await new Promise(resolve => setTimeout(resolve, 100))
-        
+
         await router.push('/')
-        console.log('跳转完成')
       } catch (error) {
-        console.error('登录失败:', error)
         ElMessage.error('登录失败: ' + (error.message || '未知错误'))
       } finally {
         loading.value = false
