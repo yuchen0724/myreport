@@ -195,28 +195,16 @@ class QueryService:
                 
                 engine.dispose()
                 
-                # 获取总数（对于第一页，使用 COUNT(*) 获取总行数）
+                # 获取总数
+                # 如果返回行数等于 page_size，说明可能还有更多数据
                 total = len(rows)
-                if page == 1 and total > 0:
-                    try:
-                        # 构造 COUNT 查询
-                        count_sql = sql.strip()
-                        # 移除末尾的分号和 LIMIT
-                        count_sql = re.sub(r';?\s*LIMIT\s+\d+\s*$', '', count_sql, flags=re.IGNORECASE)
-                        count_sql = f"SELECT COUNT(*) as cnt FROM ({count_sql}) as _subquery"
-                        
-                        with engine.connect() as conn2:
-                            count_result = conn2.execute(text(count_sql))
-                            total = count_result.scalar() or 0
-                        conn2.close()
-                    except Exception:
-                        # COUNT 失败时使用行数
-                        pass
+                has_more = len(rows) >= page_size
                 
                 return {
                     "columns": columns,
                     "rows": rows,
                     "total": total,
+                    "has_more": has_more,  # 告知前端是否还有更多数据
                 }
                 
             except OperationalError as e:
