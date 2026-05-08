@@ -254,11 +254,12 @@ const autodetectParams = () => {
   const placeholders = new Set()
   const regex1 = /\$\{(\w+)\}/g
   let match
-  while ((match = regex1.exec(form.sql)) !== null) {
+  const sql = form.value.sql
+  while ((match = regex1.exec(sql)) !== null) {
     placeholders.add(match[1])
   }
   const regex2 = /(?<!['"\w]):(\w+)/g
-  while ((match = regex2.exec(form.sql)) !== null) {
+  while ((match = regex2.exec(sql)) !== null) {
     placeholders.add(match[1])
   }
 
