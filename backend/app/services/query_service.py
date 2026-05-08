@@ -157,6 +157,8 @@ class QueryService:
             raise ValueError(f"不支持的数据源类型: {ds.type}")
         
         # 使用连接池执行查询（带超时）
+        import re
+        
         with engine.connect() as conn:
             # 根据数据库类型设置查询超时
             if ds.type == "MYSQL" or ds.type == "DORIS":
@@ -164,13 +166,16 @@ class QueryService:
             elif ds.type == "POSTGRESQL":
                 conn.execute(text(f"SET SESSION STATEMENT_TIMEOUT = '{QUERY_TIMEOUT}s'"))
             
+            # 将 ${xxx} 格式转换为 :xxx 格式（SQLAlchemy 参数绑定格式）
+            converted_sql = re.sub(r'\$\{(\w+)\}', r':\1', sql)
+            
             # 执行查询，支持参数绑定（缺少参数时忽略）
             if params:
                 # 过滤掉 None 和空字符串的参数
                 filtered_params = {k: v for k, v in params.items() if v is not None and v != ''}
-                result = conn.execute(text(sql), filtered_params)
+                result = conn.execute(text(converted_sql), filtered_params)
             else:
-                result = conn.execute(text(sql))
+                result = conn.execute(text(converted_sql))
             
             columns = list(result.keys())
             rows = [list(row) for row in result.fetchall()]
