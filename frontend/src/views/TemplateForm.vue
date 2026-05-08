@@ -23,7 +23,14 @@
         </el-form-item>
 
         <el-form-item label="数据源" prop="data_source_id">
-          <el-select v-model.number="form.data_source_id" clearable filterable placeholder="选择数据源" style="width: 100%">
+          <el-select 
+            v-model.number="form.data_source_id" 
+            clearable 
+            filterable 
+            placeholder="选择数据源" 
+            style="width: 100%"
+            :value-key="'id'"
+          >
             <el-option v-for="ds in dataSources" :key="ds.id" :label="ds.name" :value="ds.id" />
           </el-select>
         </el-form-item>
@@ -268,18 +275,28 @@ const removeParam = (index) => {
 const loadTemplate = async () => {
   try {
     const response = await getTemplate(route.params.id)
-    // 🎯 统一数据模型：所有表单字段都由 form 对象管理
-    form.value = {
-      data_source_id: null,
-      sql: '',
-      params: [],
-      ...response.config,
-      name: response.name,
-      description: response.description,
-      is_public: response.is_public
-    }
-    restoreFromConfig(response.config)
+    
+    // 直接从后端加载配置覆盖表单
+    form.value.name = response.name || ''
+    form.value.description = response.description || ''
+    form.value.is_public = response.is_public || false
+    form.value.data_source_id = response.config?.data_source_id || null
+    form.value.sql = response.config?.sql || ''
+    form.value.params = response.config?.params || []
+    
+    // 重建参数编辑列表
+    paramList.value = (response.config?.params || []).map(p => ({
+      name: p.name || '',
+      label: p.label || p.name || '',
+      type: p.type || 'string',
+      default: p.default || '',
+      required: p.required || false,
+      optionsStr: Array.isArray(p.options) ? p.options.join(',') : ''
+    }))
+    
+    console.log('[TemplateForm] 模板加载成功, SQL:', form.value.sql?.substring(0, 50))
   } catch (error) {
+    console.error('[TemplateForm] 加载模板失败:', error)
     ElMessage.error('加载模板失败')
   }
 }
@@ -361,7 +378,7 @@ const handleSubmit = async () => {
     loading.value = true
 
     if (isEdit.value) {
-      console.log('[TemplateForm] 调用 updateTemplate, id:', route.params.id)
+      console.log('[TemplateForm] 调用 updateTemplate, id:', route.params.id, 'payload.config.sql:', payload.config.sql?.substring(0, 30))
       await updateTemplate(route.params.id, payload)
       ElMessage.success('更新成功')
     } else {
