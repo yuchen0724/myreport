@@ -91,15 +91,11 @@ class SQLValidator:
         if ";" in sql:
             return False, "不允许使用分号"
         
-        # 7. 检查是否包含非 ASCII 字符（可能有编码绕过）
-        if re.search(r'[^\x00-\x7F]', sql):
-            return False, "不允许使用非 ASCII 字符"
-        
-        # 8. 检查括号匹配（防止语法错误）
+        # 7. 检查括号匹配（防止语法错误）
         if sql.count("(") != sql.count(")"):
             return False, "括号不匹配"
         
-        # 9. 检查 SQL 长度（防止过长的恶意查询）
+        # 8. 检查 SQL 长度（防止过长的恶意查询）
         if len(sql) > 10000:
             return False, "SQL 语句过长"
         
