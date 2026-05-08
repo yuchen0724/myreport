@@ -178,39 +178,35 @@ start_frontend() {
 stop_all() {
     echo -e "${YELLOW}停止所有服务...${NC}"
     
-    # 停止前端
-    if [ -f "$FRONTEND_PID" ]; then
-        kill $(cat "$FRONTEND_PID") 2>/dev/null || true
-        rm -f "$FRONTEND_PID"
-    fi
+    # ===== 强制停止占用端口的进程 =====
+    
+    # 前端 - 强制杀掉占用 3000 端口的进程
+    echo -e "${YELLOW}停止前端服务 (端口: $FRONTEND_PORT)...${NC}"
+    fuser -k $FRONTEND_PORT/tcp 2>/dev/null || true
+    pkill -f "vite.*$FRONTEND_PORT" || true
     pkill -f "npm.*dev" || true
-
-    # 停止后端
-    if [ -f "$BACKEND_PID" ]; then
-        kill $(cat "$BACKEND_PID") 2>/dev/null || true
-        rm -f "$BACKEND_PID"
-    fi
+    pkill -f "node.*vite" || true
+    
+    # 后端 - 强制杀掉占用 8000 端口的进程
+    echo -e "${YELLOW}停止后端服务 (端口: $BACKEND_PORT)...${NC}"
+    fuser -k $BACKEND_PORT/tcp 2>/dev/null || true
     pkill -f "uvicorn.*main:app" || true
-
-    # 停止Celery
-    if [ -f "$CELERY_PID" ]; then
-        kill $(cat "$CELERY_PID") 2>/dev/null || true
-        rm -f "$CELERY_PID"
-    fi
+    pkill -f "python.*uvicorn" || true
+    
+    # Celery
+    echo -e "${YELLOW}停止 Celery Worker...${NC}"
     pkill -f "celery.*worker" || true
-
-    # 停止Redis
-    if [ -f "$REDIS_PID" ]; then
-        kill $(cat "$REDIS_PID") 2>/dev/null || true
-        rm -f "$REDIS_PID"
-    fi
+    pkill -9 -f "celery" || true
+    
+    # Redis
+    echo -e "${YELLOW}停止 Redis 服务...${NC}"
     redis-cli -p $REDIS_PORT shutdown 2>/dev/null || true
-
-    # 停止PostgreSQL
+    fuser -k $REDIS_PORT/tcp 2>/dev/null || true
+    
+    # PostgreSQL
     if pg_isready -q -p $PG_PORT 2>/dev/null; then
         echo -e "${YELLOW}停止 PostgreSQL...${NC}"
         sudo pg_ctlcluster $PG_VERSION main stop 2>/dev/null || true
-        # 等待进程退出
         for i in {1..10}; do
             if ! pg_isready -q -p $PG_PORT 2>/dev/null; then
                 break
@@ -218,14 +214,27 @@ stop_all() {
             sleep 1
         done
         if pg_isready -q -p $PG_PORT 2>/dev/null; then
-            echo -e "${RED}✗ PostgreSQL 停止超时${NC}"
-        else
-            echo -e "${GREEN}✓ PostgreSQL 已停止${NC}"
+            echo -e "${RED}✗ PostgreSQL 停止超时，强制终止...${NC}"
+            sudo pg_ctlcluster $PG_VERSION main stop -m fast 2>/dev/null || true
+            sleep 2
         fi
-    else
-        echo -e "${YELLOW}PostgreSQL 未运行${NC}"
     fi
-
+    
+    # ===== 等待端口释放 =====
+    sleep 2
+    
+    # 验证端口已释放
+    for port in $FRONTEND_PORT $BACKEND_PORT $REDIS_PORT; do
+        if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+            echo -e "${RED}警告: 端口 $port 仍未释放，强制杀掉...${NC}"
+            fuser -k -9 $port/tcp 2>/dev/null || true
+        fi
+    done
+    
+    # 清理 PID 文件
+    rm -f "$FRONTEND_PID" "$BACKEND_PID" "$CELERY_PID" "$REDIS_PID"
+    
+    sleep 1
     echo -e "${GREEN}✓ 所有服务已停止${NC}"
 }
 
