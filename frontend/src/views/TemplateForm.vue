@@ -24,14 +24,18 @@
 
         <el-form-item label="数据源" prop="data_source_id">
           <el-select 
-            v-model.number="form.data_source_id" 
+            v-model="form.data_source_id" 
             clearable 
             filterable 
-            placeholder="选择数据源" 
+            placeholder="选择数据源（加载中...）" 
             style="width: 100%"
-            :value-key="'id'"
           >
-            <el-option v-for="ds in dataSources" :key="ds.id" :label="ds.name" :value="ds.id" />
+            <el-option 
+              v-for="ds in dataSources" 
+              :key="ds.id" 
+              :label="ds.name" 
+              :value="ds.id" 
+            />
           </el-select>
         </el-form-item>
 
@@ -210,6 +214,8 @@ const restoreFromConfig = (config) => {
 
 // 从表单构建 config
 const buildConfig = () => {
+  console.log('[buildConfig] form.data_source_id:', form.data_source_id, 'form.sql:', form.sql?.substring(0, 30))
+  
   const upperSql = (form.sql || '').toUpperCase().trim()
   if (/\b(DROP\s+TABLE|DROP\s+DATABASE|TRUNCATE\s+TABLE|ALTER\s+TABLE)\b/i.test(upperSql)) {
     ElMessage.error('SQL 包含危险操作（DROP/TRUNCATE/ALTER），已拒绝')
@@ -294,7 +300,7 @@ const loadTemplate = async () => {
       optionsStr: Array.isArray(p.options) ? p.options.join(',') : ''
     }))
     
-    console.log('[TemplateForm] 模板加载成功, SQL:', form.value.sql?.substring(0, 50))
+    console.log('[TemplateForm] 模板加载成功, data_source_id:', form.value.data_source_id, 'sql:', form.value.sql?.substring(0, 30))
   } catch (error) {
     console.error('[TemplateForm] 加载模板失败:', error)
     ElMessage.error('加载模板失败')
@@ -361,7 +367,8 @@ const handleSubmit = async () => {
 
     const config = buildConfig()
     if (!config) {
-      console.error('[TemplateForm] buildConfig 返回 null')
+      console.error('[TemplateForm] buildConfig 返回 null, form:', form.value)
+      ElMessage.error('请检查表单：数据源和SQL不能为空')
       return
     }
     console.log('[TemplateForm] 构建的 config:', config)
@@ -403,10 +410,12 @@ const handleCancel = () => {
   }
 }
 
-onMounted(() => {
-  loadDataSources()
+onMounted(async () => {
+  // 先加载数据源
+  await loadDataSources()
+  // 再加载模板（如果是编辑模式）
   if (isEdit.value) {
-    loadTemplate()
+    await loadTemplate()
   }
 })
 </script>
