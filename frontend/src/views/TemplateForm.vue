@@ -175,9 +175,7 @@ const form = ref({
   is_public: false
 })
 
-// 表单化字段
-const dataSourceId = ref(null)
-const sqlText = ref('')
+// 参数编辑列表
 const paramList = ref([])
 const dataSources = ref([])
 
@@ -289,9 +287,12 @@ const loadTemplate = async () => {
 const loadDataSources = async () => {
   try {
     const res = await getDataSourceList({ page: 1, page_size: 100 })
+    // 后端直接返回数组，无需 res.items
     dataSources.value = Array.isArray(res) ? res : (res.items || [])
-  } catch {
-    // 忽略加载失败
+    console.log('[TemplateForm] 数据源加载成功:', dataSources.value.length, '条')
+  } catch (error) {
+    console.error('[TemplateForm] 数据源加载失败:', error)
+    ElMessage.error('加载数据源失败，请刷新页面重试')
   }
 }
 
@@ -342,7 +343,11 @@ const handleSubmit = async () => {
     await formRef.value.validate()
 
     const config = buildConfig()
-    if (!config) return
+    if (!config) {
+      console.error('[TemplateForm] buildConfig 返回 null')
+      return
+    }
+    console.log('[TemplateForm] 构建的 config:', config)
 
     // 构建后端期望的 payload 结构
     const payload = {
@@ -351,10 +356,12 @@ const handleSubmit = async () => {
       config: config,
       is_public: form.value.is_public
     }
+    console.log('[TemplateForm] 提交的 payload:', payload)
 
     loading.value = true
 
     if (isEdit.value) {
+      console.log('[TemplateForm] 调用 updateTemplate, id:', route.params.id)
       await updateTemplate(route.params.id, payload)
       ElMessage.success('更新成功')
     } else {
@@ -364,6 +371,7 @@ const handleSubmit = async () => {
 
     router.push('/templates')
   } catch (error) {
+    console.error('[TemplateForm] 保存失败:', error)
     ElMessage.error('保存失败：' + (error.message || '未知错误'))
   } finally {
     loading.value = false
