@@ -169,10 +169,17 @@ class QueryService:
             # 将 ${xxx} 格式转换为 :xxx 格式（SQLAlchemy 参数绑定格式）
             converted_sql = re.sub(r'\$\{(\w+)\}', r':\1', sql)
             
-            # 执行查询，支持参数绑定（缺少参数时忽略）
+# 执行查询，支持参数绑定（缺少参数时设为空字符串）
             if params:
-                # 过滤掉 None 和空字符串的参数
-                filtered_params = {k: v for k, v in params.items() if v is not None and v != ''}
+                # 对于缺失的参数，使用空字符串替代（避免 SQLAlchemy 报错）
+                all_placeholders = set(re.findall(r':(\w+)', converted_sql))
+                filtered_params = {}
+                for placeholder in all_placeholders:
+                    if placeholder in params and params[placeholder] is not None and params[placeholder] != '':
+                        filtered_params[placeholder] = params[placeholder]
+                    else:
+                        # 参数缺失时设置为空字符串
+                        filtered_params[placeholder] = ''
                 result = conn.execute(text(converted_sql), filtered_params)
             else:
                 result = conn.execute(text(converted_sql))
