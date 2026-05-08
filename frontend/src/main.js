@@ -2,7 +2,13 @@ import { createApp } from "vue"
 import { createPinia } from "pinia"
 import ElementPlus from "element-plus"
 import "element-plus/dist/index.css"
-import * as ElementPlusIconsVue from "@element-plus/icons-vue"
+import {
+  Edit, Delete, Search, Plus, Refresh,
+  Download, Upload, Back, Check, Close,
+  ArrowDown, ArrowUp, User, Lock, Setting,
+  Document, Folder, DataAnalysis, PieChart,
+  TrendCharts, Histogram
+} from "@element-plus/icons-vue"
 import App from "./App.vue"
 import router from "./router"
 import "./style.css"
@@ -24,7 +30,15 @@ window.addEventListener('unhandledrejection', (event) => {
 
 const pinia = createPinia()
 
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+// 按需注册常用图标
+const icons = {
+  Edit, Delete, Search, Plus, Refresh,
+  Download, Upload, Back, Check, Close,
+  ArrowDown, ArrowUp, User, Lock, Setting,
+  Document, Folder, DataAnalysis, PieChart,
+  TrendCharts, Histogram
+}
+for (const [key, component] of Object.entries(icons)) {
   app.component(key, component)
 }
 

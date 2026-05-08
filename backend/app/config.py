@@ -1,73 +1,76 @@
-"""应用配置
+"""
+Application configuration.
 
-使用 pydantic-settings 进行配置管理
+Uses pydantic-settings to load from environment/.env.
 """
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """应用配置"""
-    
+    """Application settings loaded from environment/.env."""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore"  # 忽略未知环境变量
+        extra="ignore",
     )
-    
-    # 应用配置
+
+    # App
     app_name: str = "Custom Report System"
     app_version: str = "1.0.0"
     debug: bool = True
 
-    # 数据库配置（必须配置）
-    database_url: str = "postgresql://user:password@localhost:5432/report_db"
+    # Database
+    database_url: str = "sqlite:///./app.db"
 
-    # Redis 配置
+    # Redis
     redis_host: str = "localhost"
     redis_port: int = 6379
-    redis_db: int = 0
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: Optional[str] = None
 
-    # JWT 认证配置（必须配置）
-    secret_key: str = "your-secret-key-change-here"
+    # JWT
+    secret_key: str = "change-me-in-production-please"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
+    access_token_expire_minutes: int = 1440
 
-    # 密码加密
-    password_encryption_key: str = "your-encryption-key-change-here"
+    # Encryption for data source passwords
+    password_encryption_key: str = ""
 
-    # CORS 配置
-    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:5173"]
-    cors_origins_prod: str = ""  # 生产环境用逗号分隔的域名列表
+    # CORS
+    cors_origins: List[str] = ["http://localhost:5173"]
+    cors_origins_prod: Optional[str] = None
 
-    # 限流配置
+    # Rate limiting
     rate_limit_enabled: bool = True
     rate_limit_max_requests: int = 100
-    rate_limit_window: int = 60
+    rate_limit_window_seconds: int = 60
 
-    # Celery 配置
-    celery_broker_url: str = "redis://localhost:6379/0"
-    celery_result_backend: str = "redis://localhost:6379/0"
+    # LLM / NL2SQL
+    llm_api_base: str = "https://api.openai.com/v1"
+    llm_api_key: str = ""
+    llm_model: str = "gpt-3.5-turbo"
 
-    @field_validator("database_url", "secret_key", "password_encryption_key")
+    @field_validator("database_url", "secret_key")
     @classmethod
     def validate_required(cls, v: str) -> str:
-        """验证必须配置项"""
+        """Validate required fields are not empty or placeholder."""
         if not v:
-            raise ValueError("配置项不能为空")
-        # 检查是否是明显的占位符
+            raise ValueError("Config value cannot be empty")
         if v in ("changeme", "your-secret-key", "your-encryption-key"):
-            raise ValueError(f"配置项未正确设置: {v}")
+            raise ValueError(f"Config value is a placeholder: {v}")
         return v
-    
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, v) -> List[str]:
-        """解析 CORS 源列表"""
+        """Parse CORS origins from comma-separated string or list."""
+        if isinstance(v, list):
+            return v
         if isinstance(v, str):
             return [o.strip() for o in v.split(",") if o.strip()]
         return v
@@ -75,5 +78,5 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    """获取配置单例（带缓存）"""
+    """Return cached settings singleton."""
     return Settings()
