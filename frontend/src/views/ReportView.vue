@@ -219,6 +219,7 @@ const loadData = async () => {
     const res = await executeQuery({
       data_source_id: config.data_source_id,
       sql: buildSqlWithParams(),
+      params: {},  // 前端已替换占位符，后端无需再处理
       page: currentPage.value,
       page_size: pageSize.value
     })
