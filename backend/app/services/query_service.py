@@ -28,9 +28,7 @@ class QueryService:
 
         # 估算查询成本
         cost = QueryOptimizer.estimate_query_cost(optimized_sql)
-        if cost > 200:
-            # TODO: 提示用户使用异步导出
-            pass
+        suggest_async = cost > 200
 
         # 获取数据源
         ds = self.ds_repo.get_by_id(request.data_source_id)
@@ -53,6 +51,7 @@ class QueryService:
                 page=page,
                 page_size=page_size,
                 execution_time_ms=cached.execution_time_ms,
+                suggest_async=suggest_async,
             )
 
         # 执行查询
@@ -86,6 +85,7 @@ class QueryService:
                 page=page,
                 page_size=page_size,
                 execution_time_ms=execution_time_ms,
+                suggest_async=suggest_async,
             )
 
             # 缓存全量结果（5分钟），用 page=1&page_size=999999 作为缓存 key 后缀
@@ -98,6 +98,7 @@ class QueryService:
                     page=1,
                     page_size=999999,
                     execution_time_ms=execution_time_ms,
+                    suggest_async=suggest_async,
                 ).model_dump(),
                 params=request.params,
                 ttl=300,

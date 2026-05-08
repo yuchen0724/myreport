@@ -18,6 +18,7 @@ class SQLQueryResponse(BaseModel):
     page: int
     page_size: int
     execution_time_ms: int
+    suggest_async: bool = False  # 查询成本超过阈值时建议用户走异步导出
 
 
 class QueryHistoryResponse(BaseModel):
