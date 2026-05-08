@@ -23,14 +23,14 @@
         </el-form-item>
 
         <el-form-item label="数据源" prop="data_source_id">
-          <el-select v-model.number="dataSourceId" clearable filterable placeholder="选择数据源" style="width: 100%">
+          <el-select v-model.number="form.data_source_id" clearable filterable placeholder="选择数据源" style="width: 100%">
             <el-option v-for="ds in dataSources" :key="ds.id" :label="ds.name" :value="ds.id" />
           </el-select>
         </el-form-item>
 
         <el-form-item label="SQL 语句" prop="sql">
           <el-input
-            v-model="sqlText"
+            v-model="form.sql"
             type="textarea"
             :rows="8"
             placeholder='输入 SQL 语句，使用 ${param_name} 或 :param_name 作为参数占位符&#10;示例：SELECT * FROM orders WHERE date >= ${start_date}'
@@ -169,7 +169,9 @@ const isEdit = computed(() => !!route.params.id)
 const form = ref({
   name: '',
   description: '',
-  config: {},
+  data_source_id: null,
+  sql: '',
+  params: [],
   is_public: false
 })
 
@@ -189,8 +191,8 @@ const rules = {
 
 // 从 config 还原到表单
 const restoreFromConfig = (config) => {
-  dataSourceId.value = config.data_source_id || null
-  sqlText.value = config.sql || ''
+  form.data_source_id = config.data_source_id || null
+  form.sql = config.sql || ''
   paramList.value = (config.params || []).map(p => ({
     name: p.name || '',
     label: p.label || p.name || '',
@@ -203,7 +205,7 @@ const restoreFromConfig = (config) => {
 
 // 从表单构建 config
 const buildConfig = () => {
-  const upperSql = sqlText.value.toUpperCase().trim()
+  const upperSql = (form.sql || '').toUpperCase().trim()
   if (/\b(DROP\s+TABLE|DROP\s+DATABASE|TRUNCATE\s+TABLE|ALTER\s+TABLE)\b/i.test(upperSql)) {
     ElMessage.error('SQL 包含危险操作（DROP/TRUNCATE/ALTER），已拒绝')
     return null
@@ -224,8 +226,8 @@ const buildConfig = () => {
     })
 
   return {
-    data_source_id: dataSourceId.value,
-    sql: sqlText.value,
+    data_source_id: form.data_source_id,
+    sql: form.sql,
     params: params.length > 0 ? params : []
   }
 }
@@ -235,11 +237,11 @@ const autodetectParams = () => {
   const placeholders = new Set()
   const regex1 = /\$\{(\w+)\}/g
   let match
-  while ((match = regex1.exec(sqlText.value)) !== null) {
+  while ((match = regex1.exec(form.sql)) !== null) {
     placeholders.add(match[1])
   }
   const regex2 = /(?<!['"\w]):(\w+)/g
-  while ((match = regex2.exec(sqlText.value)) !== null) {
+  while ((match = regex2.exec(form.sql)) !== null) {
     placeholders.add(match[1])
   }
 
@@ -268,10 +270,14 @@ const removeParam = (index) => {
 const loadTemplate = async () => {
   try {
     const response = await getTemplate(route.params.id)
+    // 🎯 统一数据模型：所有表单字段都由 form 对象管理
     form.value = {
+      data_source_id: null,
+      sql: '',
+      params: [],
+      ...response.config,
       name: response.name,
       description: response.description,
-      config: response.config,
       is_public: response.is_public
     }
     restoreFromConfig(response.config)
@@ -338,14 +344,21 @@ const handleSubmit = async () => {
     const config = buildConfig()
     if (!config) return
 
-    form.value.config = config
+    // 构建后端期望的 payload 结构
+    const payload = {
+      name: form.value.name,
+      description: form.value.description,
+      config: config,
+      is_public: form.value.is_public
+    }
+
     loading.value = true
 
     if (isEdit.value) {
-      await updateTemplate(route.params.id, form.value)
+      await updateTemplate(route.params.id, payload)
       ElMessage.success('更新成功')
     } else {
-      await createTemplate(form.value)
+      await createTemplate(payload)
       ElMessage.success('创建成功')
     }
 
