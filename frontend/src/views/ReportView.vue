@@ -188,7 +188,24 @@ const buildSqlWithParams = () => {
   if (!config?.sql) return ''
   let sql = config.sql
   Object.entries(params).forEach(([key, value]) => {
-    sql = sql.replace(new RegExp(`\\$\\{${key}\\}|:${key}`, 'g'), value ?? '')
+    let replaceValue = value
+    // 处理 Date 对象，转换为 YYYYMMDD 格式
+    if (value instanceof Date) {
+      const year = value.getFullYear()
+      const month = String(value.getMonth() + 1).padStart(2, '0')
+      const day = String(value.getDate()).padStart(2, '0')
+      replaceValue = `${year}${month}${day}`
+    }
+    // 处理日期范围数组 [startDate, endDate]
+    else if (Array.isArray(value) && value[0] instanceof Date) {
+      replaceValue = value.map(d => {
+        const year = d.getFullYear()
+        const month = String(d.getMonth() + 1).padStart(2, '0')
+        const day = String(d.getDate()).padStart(2, '0')
+        return `${year}${month}${day}`
+      }).join(',')
+    }
+    sql = sql.replace(new RegExp(`\\$\\{${key}\\}|:${key}`, 'g'), replaceValue ?? '')
   })
   return sql
 }
