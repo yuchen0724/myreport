@@ -22,8 +22,8 @@
         </div>
       
 
-      <!-- 参数输入区域 -->
-      <div v-if="templateParams.length > 0" class="params-section">
+      <!-- 查询条件区域 -->
+      <div v-if="templateInfo" class="params-section">
         <el-form :model="params" inline class="params-form">
           <el-form-item
             v-for="param in templateParams"
@@ -174,10 +174,7 @@ const loadMenuInfo = async () => {
       })
     }
 
-    // 自动加载数据（如果无参数）
-    if (templateParams.value.length === 0) {
-      await loadData()
-    }
+    // 无论有无参数都等待用户主动点击查询，不自动加载数据
   } catch (error) {
     ElMessage.error('加载报表失败：' + (error.message || '未知错误'))
   } finally {
