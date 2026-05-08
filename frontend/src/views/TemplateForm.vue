@@ -349,12 +349,21 @@ const doPreview = async () => {
     return
   }
 
+  // 将 params 数组转换为 dict 格式
+  const paramsDict = {}
+  if (config.params && config.params.length > 0) {
+    config.params.forEach(p => {
+      // 使用默认值（如果有）
+      paramsDict[p.name] = p.default || null
+    })
+  }
+
   try {
     previewing.value = true
     const response = await executeQuery({
       data_source_id: config.data_source_id,
       sql: config.sql,
-      params: config.params || {},
+      params: paramsDict,
       page: currentPage.value,
       page_size: pageSize.value
     })
