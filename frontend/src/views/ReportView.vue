@@ -65,22 +65,72 @@
         </el-form>
       </div>
 
+      <!-- 数据表格工具栏 -->
+      <div v-if="data.length > 0" class="table-toolbar">
+        <el-popover
+          placement="bottom-start"
+          :width="200"
+          trigger="click"
+        >
+          <template #reference>
+            <el-button size="small">
+              <el-icon><Grid /></el-icon>
+              列展示
+            </el-button>
+          </template>
+          <div class="column-visibility">
+            <el-checkbox
+              v-model="checkAllColumns"
+              :indeterminate="isIndeterminate"
+              @change="handleCheckAllColumns"
+            >
+              全选
+            </el-checkbox>
+            <el-checkbox-group v-model="visibleColumns" @change="handleCheckedColumns">
+              <el-checkbox
+                v-for="col in columns"
+                :key="col"
+                :label="col"
+                :value="col"
+              >
+                {{ col }}
+              </el-checkbox>
+            </el-checkbox-group>
+          </div>
+        </el-popover>
+        
+        <el-input
+          v-model="searchText"
+          placeholder="搜索表格数据..."
+          clearable
+          size="small"
+          style="width: 200px; margin-left: 10px"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+      </div>
+
       <!-- 数据表格 -->
       <el-table
-        v-if="data.length > 0"
-        :data="data"
+        v-if="filteredData.length > 0"
+        :data="paginatedData"
         border
         stripe
+        :default-sort="{ prop: sortProp, order: sortOrder }"
+        @sort-change="handleSortChange"
         max-height="500"
         style="width: 100%"
       >
         <el-table-column
-          v-for="col in columns"
+          v-for="col in visibleColumns"
           :key="col"
           :prop="col"
           :label="col"
           min-width="120"
           show-overflow-tooltip
+          sortable="custom"
         />
       </el-table>
 
@@ -93,10 +143,10 @@
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
           :page-sizes="[10, 20, 50, 100]"
-          :total="total"
+          :total="filteredData.length"
           layout="total, sizes, prev, pager, next, jumper"
-          @size-change="loadData"
-          @current-change="loadData"
+          @size-change="handlePageChange"
+          @current-change="handlePageChange"
         />
       </div>
     </el-card>
@@ -107,7 +157,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Download, Document, Search } from '@element-plus/icons-vue'
+import { Download, Document, Search, Grid } from '@element-plus/icons-vue'
 import { getMenus, getMenuWithTemplate } from '@/api/menu'
 import { executeQuery } from '@/api/query'
 import { exportExcel, exportPDF } from '@/api/report'
@@ -124,6 +174,77 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const params = reactive({})
 const templateParams = ref([])
+
+// 表格增强功能
+const searchText = ref('')
+const visibleColumns = ref([])
+const checkAllColumns = ref(true)
+const isIndeterminate = ref(false)
+const sortProp = ref('')
+const sortOrder = ref(null)
+
+// 初始化可见列
+watch(columns, (newCols) => {
+  visibleColumns.value = [...newCols]
+}, { immediate: true })
+
+// 筛选数据
+const filteredData = computed(() => {
+  if (!searchText.value) return data.value
+  const keyword = searchText.value.toLowerCase()
+  return data.value.filter(row => {
+    return Object.values(row).some(val => 
+      String(val).toLowerCase().includes(keyword)
+    )
+  })
+})
+
+// 分页数据
+const paginatedData = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return filteredData.value.slice(start, end)
+})
+
+// 更新总数
+watch(filteredData, (newData) => {
+  total.value = newData.length
+  currentPage.value = 1  // 筛选后回到第一页
+})
+
+// 列展示控制
+const handleCheckAllColumns = (val) => {
+  visibleColumns.value = val ? [...columns.value] : []
+  isIndeterminate.value = false
+}
+
+const handleCheckedColumns = (value) => {
+  const checkedCount = value.length
+  checkAllColumns.value = checkedCount === columns.value.length
+  isIndeterminate.value = checkedCount > 0 && checkedCount < columns.value.length
+}
+
+// 排序处理
+const handleSortChange = ({ prop, order }) => {
+  sortProp.value = prop
+  sortOrder.value = order
+  if (!prop || !order) {
+    // 取消排序，恢复原始顺序
+    return
+  }
+  const multiplier = order === 'ascending' ? 1 : -1
+  data.value.sort((a, b) => {
+    const valA = a[prop]
+    const valB = b[prop]
+    if (valA === valB) return 0
+    if (valA === null || valA === undefined) return 1
+    if (valB === null || valB === undefined) return -1
+    if (typeof valA === 'number' && typeof valB === 'number') {
+      return (valA - valB) * multiplier
+    }
+    return String(valA).localeCompare(String(valB)) * multiplier
+  })
+}
 
 // 通过 path 查找菜单（当路由参数不是数字ID时）
 const findMenuIdByPath = async (path) => {
@@ -260,6 +381,11 @@ const loadData = async () => {
 }
 
 // 导出 - 使用异步导出
+const handlePageChange = () => {
+  // 分页变化时不需要重新请求后端，前端分页已处理
+}
+
+// 导出
 const handleExport = async (format) => {
   if (!templateInfo.value) {
     ElMessage.warning('未关联报表模板')
