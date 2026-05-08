@@ -156,41 +156,59 @@ class QueryService:
         else:
             raise ValueError(f"不支持的数据源类型: {ds.type}")
         
-        # 使用连接池执行查询（带超时）
+        # 使用连接池执行查询（带超时和重试）
         import re
+        from sqlalchemy.exc import OperationalError
         
-        with engine.connect() as conn:
-            # 根据数据库类型设置查询超时
-            if ds.type == "MYSQL" or ds.type == "DORIS":
-                conn.execute(text(f"SET SESSION MAX_EXECUTION_TIME = {QUERY_TIMEOUT*1000}"))
-            elif ds.type == "POSTGRESQL":
-                conn.execute(text(f"SET SESSION STATEMENT_TIMEOUT = '{QUERY_TIMEOUT}s'"))
-            
-            # 将 ${xxx} 格式转换为 :xxx 格式（SQLAlchemy 参数绑定格式）
-            converted_sql = re.sub(r'\$\{(\w+)\}', r':\1', sql)
-            
-# 执行查询，支持参数绑定（缺少参数时设为空字符串）
-            if params:
-                # 对于缺失的参数，使用空字符串替代（避免 SQLAlchemy 报错）
-                all_placeholders = set(re.findall(r':(\w+)', converted_sql))
-                filtered_params = {}
-                for placeholder in all_placeholders:
-                    if placeholder in params and params[placeholder] is not None and params[placeholder] != '':
-                        filtered_params[placeholder] = params[placeholder]
+        max_retries = 3
+        retry_delay = 1  # 秒
+        
+        for attempt in range(max_retries):
+            try:
+                with engine.connect() as conn:
+                    # 根据数据库类型设置查询超时
+                    if ds.type == "MYSQL" or ds.type == "DORIS":
+                        conn.execute(text(f"SET SESSION MAX_EXECUTION_TIME = {QUERY_TIMEOUT*1000}"))
+                    elif ds.type == "POSTGRESQL":
+                        conn.execute(text(f"SET SESSION STATEMENT_TIMEOUT = '{QUERY_TIMEOUT}s'"))
+                    
+                    # 将 ${xxx} 格式转换为 :xxx 格式（SQLAlchemy 参数绑定格式）
+                    converted_sql = re.sub(r'\$\{(\w+)\}', r':\1', sql)
+                    
+                    # 执行查询，支持参数绑定（缺少参数时设为空字符串）
+                    if params:
+                        # 对于缺失的参数，使用空字符串替代（避免 SQLAlchemy 报错）
+                        all_placeholders = set(re.findall(r':(\w+)', converted_sql))
+                        filtered_params = {}
+                        for placeholder in all_placeholders:
+                            if placeholder in params and params[placeholder] is not None and params[placeholder] != '':
+                                filtered_params[placeholder] = params[placeholder]
+                            else:
+                                # 参数缺失时设置为空字符串
+                                filtered_params[placeholder] = ''
+                        result = conn.execute(text(converted_sql), filtered_params)
                     else:
-                        # 参数缺失时设置为空字符串
-                        filtered_params[placeholder] = ''
-                result = conn.execute(text(converted_sql), filtered_params)
-            else:
-                result = conn.execute(text(converted_sql))
-            
-            columns = list(result.keys())
-            rows = [list(row) for row in result.fetchall()]
+                        result = conn.execute(text(converted_sql))
+                    
+                    columns = list(result.keys())
+                    rows = [list(row) for row in result.fetchall()]
+                
+                engine.dispose()
+                
+                return {
+                    "columns": columns,
+                    "rows": rows,
+                    "total": len(rows),
+                }
+                
+            except OperationalError as e:
+                error_msg = str(e)
+                if "fail to send batch" in error_msg or "network" in error_msg.lower():
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(retry_delay * (attempt + 1))  # 递增等待时间
+                        continue
+                raise ValueError(f"查询执行失败: {error_msg}")
         
-        engine.dispose()
-        
-        return {
-            "columns": columns,
-            "rows": rows,
-            "total": len(rows),
-        }
+        # 不应该到达这里
+        raise ValueError("查询重试失败")

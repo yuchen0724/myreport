@@ -359,7 +359,7 @@ const loadData = async () => {
       sql: buildSqlWithParams(),
       params: {},  // 前端已替换占位符，后端无需再处理
       page: currentPage.value,
-      page_size: pageSize.value
+      page_size: Math.min(pageSize.value, 5000)  // 限制最大返回5000条
     })
 
     // executeQuery 调用 /api/query/sql，返回 SQLQueryResponse { columns, rows, total, ... }
