@@ -77,15 +77,20 @@ class CacheService:
             self._init_redis()
 
     def _init_redis(self):
-        """初始化Redis客户端"""
+        """初始化Redis客户端（带连接池）"""
         try:
             import redis
-            self.redis_client = redis.Redis(
+            pool = redis.ConnectionPool(
                 host=settings.redis_host,
                 port=settings.redis_port,
                 db=settings.redis_db,
-                decode_responses=True
+                max_connections=settings.redis_pool_size,
+                decode_responses=True,
+                socket_keepalive=True,
+                socket_connect_timeout=5,
+                retry_on_timeout=True,
             )
+            self.redis_client = redis.Redis(connection_pool=pool)
             self.redis_client.ping()
         except Exception as e:
             logger.warning("Redis连接失败: %s", e)

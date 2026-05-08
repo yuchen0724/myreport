@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     # Redis
     redis_host: str = "localhost"
     redis_port: int = 6379
+    redis_db: int = 0
+    redis_pool_size: int = 10
     redis_url: Optional[str] = None
 
     # JWT

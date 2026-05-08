@@ -227,8 +227,15 @@ const loadData = async () => {
     })
 
     // executeQuery 调用 /api/query/sql，返回 SQLQueryResponse { columns, rows, total, ... }
-    data.value = res.rows || []
-    columns.value = res.columns || []
+    // rows 是二维数组 [[val1, val2], ...]，需转换为对象数组适配 el-table
+    const cols = res.columns || []
+    const rawRows = res.rows || []
+    data.value = rawRows.map(row => {
+      const obj = {}
+      cols.forEach((col, i) => { obj[col] = row[i] })
+      return obj
+    })
+    columns.value = cols
     total.value = res.total || 0
   } catch (error) {
     ElMessage.error('查询失败：' + (error.response?.data?.detail || error.message || '未知错误'))

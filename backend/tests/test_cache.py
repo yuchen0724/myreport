@@ -64,8 +64,10 @@ def test_cache_exists(mock_redis):
 
 
 def test_cache_no_redis_fallback():
-    """测试无 Redis 连接时的降级行为"""
+    """测试无 Redis 连接时的降级行为 — mock redis ping 失败"""
     cache = CacheService(redis_client=None)
+    # 手动设置 redis_client=None 来模拟连接失败后已降级场景
+    cache.redis_client = None
 
     assert cache.get("SELECT 1") is None
     assert cache.set("SELECT 1", {}) is False
