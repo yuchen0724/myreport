@@ -214,7 +214,13 @@ const restoreFromConfig = (config) => {
 
 // 从表单构建 config
 const buildConfig = () => {
-  console.log('[buildConfig] form.data_source_id:', form.data_source_id, 'form.sql:', form.sql?.substring(0, 30))
+  console.log('[buildConfig] form.value:', JSON.stringify(form.value))
+  
+  const dsId = form.value.data_source_id
+  const sql = form.value.sql
+  
+  console.log('[buildConfig] dsId:', dsId, 'typeof:', typeof dsId, 'Boolean:', Boolean(dsId))
+  console.log('[buildConfig] sql:', sql, 'Boolean:', Boolean(sql))
   
   const upperSql = (form.sql || '').toUpperCase().trim()
   if (/\b(DROP\s+TABLE|DROP\s+DATABASE|TRUNCATE\s+TABLE|ALTER\s+TABLE)\b/i.test(upperSql)) {
@@ -237,8 +243,8 @@ const buildConfig = () => {
     })
 
   return {
-    data_source_id: form.data_source_id,
-    sql: form.sql,
+    data_source_id: form.value.data_source_id,
+    sql: form.value.sql,
     params: params.length > 0 ? params : []
   }
 }
@@ -363,7 +369,9 @@ const doPreview = async () => {
 
 const handleSubmit = async () => {
   try {
+    console.log('[handleSubmit] 开始提交, form:', form.value)
     await formRef.value.validate()
+    console.log('[handleSubmit] 表单验证通过')
 
     const config = buildConfig()
     if (!config) {
@@ -396,7 +404,9 @@ const handleSubmit = async () => {
     router.push('/templates')
   } catch (error) {
     console.error('[TemplateForm] 保存失败:', error)
-    ElMessage.error('保存失败：' + (error.message || '未知错误'))
+    // 尝试获取后端返回的具体错误信息
+    const detail = error.response?.data?.detail || error.message || '未知错误'
+    ElMessage.error('保存失败：' + detail)
   } finally {
     loading.value = false
   }
