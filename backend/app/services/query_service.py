@@ -57,7 +57,7 @@ class QueryService:
         # 执行查询
         start_time = time.time()
         try:
-            result = self._execute_query(ds, optimized_sql, request.params, request.page)
+            result = self._execute_query(ds, optimized_sql, request.params, request.page, request.page_size)
             execution_time_ms = int((time.time() - start_time) * 1000)
 
             # 保存查询历史
@@ -111,7 +111,7 @@ class QueryService:
                 error_msg = f"{type(e).__name__}"
             raise ValueError(f"查询执行失败: {error_msg}")
 
-    def _execute_query(self, ds, sql: str, params: Optional[dict], page: int = 1) -> dict:
+    def _execute_query(self, ds, sql: str, params: Optional[dict], page: int = 1, page_size: int = 100) -> dict:
         """执行查询并返回结果（带连接池和超时）"""
         import pymysql
         import psycopg2
