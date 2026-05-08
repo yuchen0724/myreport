@@ -1,5 +1,8 @@
 import time
 import logging
+import hashlib
+import json
+from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.repositories.data_source_repository import DataSourceRepository
@@ -39,27 +42,33 @@ class QueryService:
             raise ValueError("数据源不存在")
 
         # 尝试从缓存获取（全量数据）
-        cache_key_base = f"{optimized_sql}:full"
-        cached_full = full_cache_service.get(cache_key_base, request.params)
+        # 直接使用 redis key，不依赖 cache_service 的 get 方法
+        cache_key = f"query_full:{hashlib.md5((optimized_sql + json.dumps(request.params or {}, sort_keys=True)).encode()).hexdigest()}"
         
-        if cached_full:
-            # 从缓存全量数据中切片
-            all_rows = cached_full["rows"]
-            total = len(all_rows)
-            page = request.page
-            page_size = request.page_size
-            start = (page - 1) * page_size
-            paginated_rows = all_rows[start:start + page_size]
-            logger.info(f"缓存命中，从全量数据切片: page={page}, start={start}, size={len(paginated_rows)}")
-            return SQLQueryResponse(
-                columns=cached_full["columns"],
-                rows=paginated_rows,
-                total=total,
-                page=page,
-                page_size=page_size,
-                execution_time_ms=cached_full["execution_time_ms"],
-                suggest_async=suggest_async,
-            )
+        try:
+            if full_cache_service.redis_client:
+                cached_data = full_cache_service.redis_client.get(cache_key)
+                if cached_data:
+                    cached = json.loads(cached_data)
+                    result_data = cached.get("result", cached)
+                    all_rows = result_data.get("rows", [])
+                    total = len(all_rows)
+                    page = request.page
+                    page_size = request.page_size
+                    start = (page - 1) * page_size
+                    paginated_rows = all_rows[start:start + page_size]
+                    logger.info(f"缓存命中，从全量数据切片: page={page}, start={start}, size={len(paginated_rows)}, total={total}")
+                    return SQLQueryResponse(
+                        columns=result_data.get("columns", []),
+                        rows=paginated_rows,
+                        total=total,
+                        page=page,
+                        page_size=page_size,
+                        execution_time_ms=result_data.get("execution_time_ms", 0),
+                        suggest_async=suggest_async,
+                    )
+        except Exception as e:
+            logger.warning(f"缓存读取失败: {e}")
 
         # 执行查询 - 首次查询获取全量数据
         start_time = time.time()
@@ -100,21 +109,26 @@ class QueryService:
 
             # 缓存全量结果（5分钟）- 只有第一页查询才缓存全量
             if request.page == 1:
-                full_cache_service.set(
-                    cache_key_base,
-                    SQLQueryResponse(
-                        columns=result["columns"],
-                        rows=all_rows,
-                        total=total,
-                        page=1,
-                        page_size=999999,
-                        execution_time_ms=execution_time_ms,
-                        suggest_async=suggest_async,
-                    ).model_dump(),
-                    params=request.params,
-                    ttl=300,
-                )
-                logger.info(f"缓存全量数据: total={total}")
+                try:
+                    if full_cache_service.redis_client:
+                        cache_key_write = f"query_full:{hashlib.md5((optimized_sql + json.dumps(request.params or {}, sort_keys=True)).encode()).hexdigest()}"
+                        cached_data = {
+                            "result": SQLQueryResponse(
+                                columns=result["columns"],
+                                rows=all_rows,
+                                total=total,
+                                page=1,
+                                page_size=999999,
+                                execution_time_ms=execution_time_ms,
+                                suggest_async=suggest_async,
+                            ).model_dump(),
+                            "cached_at": datetime.now().isoformat(),
+                            "ttl": 300
+                        }
+                        full_cache_service.redis_client.setex(cache_key_write, 300, json.dumps(cached_data))
+                        logger.info(f"缓存全量数据: key={cache_key_write}, total={total}")
+                except Exception as e:
+                    logger.warning(f"缓存写入失败: {e}")
 
             return response
         except Exception as e:
