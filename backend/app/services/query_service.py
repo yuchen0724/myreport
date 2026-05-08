@@ -163,7 +163,15 @@ class QueryService:
                 conn.execute(text(f"SET SESSION MAX_EXECUTION_TIME = {QUERY_TIMEOUT*1000}"))
             elif ds.type == "POSTGRESQL":
                 conn.execute(text(f"SET SESSION STATEMENT_TIMEOUT = '{QUERY_TIMEOUT}s'"))
-            result = conn.execute(text(sql))
+            
+            # 执行查询，支持参数绑定（缺少参数时忽略）
+            if params:
+                # 过滤掉 None 和空字符串的参数
+                filtered_params = {k: v for k, v in params.items() if v is not None and v != ''}
+                result = conn.execute(text(sql), filtered_params)
+            else:
+                result = conn.execute(text(sql))
+            
             columns = list(result.keys())
             rows = [list(row) for row in result.fetchall()]
         
