@@ -70,33 +70,29 @@ class QueryService:
                 "row_count": result["total"],
             })
 
-            # 分页
-            all_rows = result["rows"]
+            # 分页 - 后端已经返回了当前页数据，直接使用
+            paginated_rows = result["rows"]
             total = result["total"]
-            page = request.page
-            page_size = request.page_size
-            start = (page - 1) * page_size
-            paginated_rows = all_rows[start:start + page_size]
 
             response = SQLQueryResponse(
                 columns=result["columns"],
                 rows=paginated_rows,
                 total=total,
-                page=page,
-                page_size=page_size,
+                page=request.page,
+                page_size=request.page_size,
                 execution_time_ms=execution_time_ms,
                 suggest_async=suggest_async,
             )
 
-            # 缓存全量结果（5分钟），用 page=1&page_size=999999 作为缓存 key 后缀
+            # 缓存当前页结果（5分钟）
             cache_service.set(
                 optimized_sql,
                 SQLQueryResponse(
                     columns=result["columns"],
-                    rows=all_rows,
+                    rows=result["rows"],
                     total=total,
-                    page=1,
-                    page_size=999999,
+                    page=request.page,
+                    page_size=request.page_size,
                     execution_time_ms=execution_time_ms,
                     suggest_async=suggest_async,
                 ).model_dump(),
