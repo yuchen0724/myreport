@@ -206,3 +206,52 @@ class CacheService:
 
 # 全局缓存服务实例
 cache_service = CacheService()
+
+
+class FullCacheService(CacheService):
+    """全量缓存服务 - 用于缓存完整查询结果供分页使用"""
+    
+    def get_full(self, sql_key: str, params: dict = None) -> Optional[dict]:
+        """从缓存获取全量查询结果"""
+        if not self.redis_client:
+            self.stats.record_miss()
+            return None
+        try:
+            # 使用特殊的前缀来区分全量缓存
+            full_key = f"query_full:{sql_key}"
+            cached_data = self.redis_client.get(full_key)
+            if cached_data:
+                self.stats.record_hit()
+                return json.loads(cached_data)
+            self.stats.record_miss()
+            return None
+        except Exception as e:
+            logger.warning("全量缓存读取失败: %s", e)
+            self.stats.record_miss()
+            return None
+    
+    def set_full(self, sql_key: str, result: dict, params: dict = None, ttl: int = 300) -> bool:
+        """将全量查询结果存入缓存"""
+        if not self.redis_client:
+            return False
+        try:
+            full_key = f"query_full:{sql_key}"
+            cached_data = {
+                "result": result,
+                "cached_at": datetime.now().isoformat(),
+                "ttl": ttl
+            }
+            self.redis_client.setex(
+                full_key,
+                ttl,
+                json.dumps(cached_data)
+            )
+            self.stats.record_set()
+            return True
+        except Exception as e:
+            logger.warning("全量缓存写入失败: %s", e)
+            return False
+
+
+# 全量缓存服务实例
+full_cache_service = FullCacheService()

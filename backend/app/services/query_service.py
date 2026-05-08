@@ -1,4 +1,5 @@
 import time
+import logging
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.repositories.data_source_repository import DataSourceRepository
@@ -6,8 +7,10 @@ from app.repositories.query_history_repository import QueryHistoryRepository
 from app.schemas.query import SQLQueryRequest, SQLQueryResponse
 from app.utils.sql_validator import SQLValidator
 from app.core.security import decrypt_password
-from app.services.cache_service import cache_service
+from app.services.cache_service import cache_service, full_cache_service
 from app.utils.query_optimizer import QueryOptimizer
+
+logger = logging.getLogger(__name__)
 
 
 class QueryService:
@@ -35,29 +38,36 @@ class QueryService:
         if not ds:
             raise ValueError("数据源不存在")
 
-        # 尝试从缓存获取
-        cached_result = cache_service.get(optimized_sql, request.params)
-        if cached_result:
-            cached = SQLQueryResponse(**cached_result["result"])
-            # 从缓存全量结果中切片
+        # 尝试从缓存获取（全量数据）
+        cache_key_base = f"{optimized_sql}:full"
+        cached_full = full_cache_service.get(cache_key_base, request.params)
+        
+        if cached_full:
+            # 从缓存全量数据中切片
+            all_rows = cached_full["rows"]
+            total = len(all_rows)
             page = request.page
             page_size = request.page_size
             start = (page - 1) * page_size
-            paginated_rows = cached.rows[start:start + page_size]
+            paginated_rows = all_rows[start:start + page_size]
+            logger.info(f"缓存命中，从全量数据切片: page={page}, start={start}, size={len(paginated_rows)}")
             return SQLQueryResponse(
-                columns=cached.columns,
+                columns=cached_full["columns"],
                 rows=paginated_rows,
-                total=cached.total,
+                total=total,
                 page=page,
                 page_size=page_size,
-                execution_time_ms=cached.execution_time_ms,
+                execution_time_ms=cached_full["execution_time_ms"],
                 suggest_async=suggest_async,
             )
 
-        # 执行查询
+        # 执行查询 - 首次查询获取全量数据
         start_time = time.time()
         try:
-            result = self._execute_query(ds, optimized_sql, request.params, request.page, request.page_size)
+            # 第一页且请求的 page_size 较小（意味着用户在看第一页），查询全量数据
+            request_page_size = 999999 if request.page == 1 else request.page_size
+            
+            result = self._execute_query(ds, optimized_sql, request.params, 1, request_page_size)
             execution_time_ms = int((time.time() - start_time) * 1000)
 
             # 保存查询历史
@@ -70,35 +80,41 @@ class QueryService:
                 "row_count": result["total"],
             })
 
-            # 分页 - 后端已经返回了当前页数据，直接使用
-            paginated_rows = result["rows"]
+            # 分页 - 从全量数据切片
+            all_rows = result["rows"]
             total = result["total"]
+            page = request.page
+            page_size = request.page_size
+            start = (page - 1) * page_size
+            paginated_rows = all_rows[start:start + page_size]
 
             response = SQLQueryResponse(
                 columns=result["columns"],
                 rows=paginated_rows,
                 total=total,
-                page=request.page,
-                page_size=request.page_size,
+                page=page,
+                page_size=page_size,
                 execution_time_ms=execution_time_ms,
                 suggest_async=suggest_async,
             )
 
-            # 缓存当前页结果（5分钟）
-            cache_service.set(
-                optimized_sql,
-                SQLQueryResponse(
-                    columns=result["columns"],
-                    rows=result["rows"],
-                    total=total,
-                    page=request.page,
-                    page_size=request.page_size,
-                    execution_time_ms=execution_time_ms,
-                    suggest_async=suggest_async,
-                ).model_dump(),
-                params=request.params,
-                ttl=300,
-            )
+            # 缓存全量结果（5分钟）- 只有第一页查询才缓存全量
+            if request.page == 1:
+                full_cache_service.set(
+                    cache_key_base,
+                    SQLQueryResponse(
+                        columns=result["columns"],
+                        rows=all_rows,
+                        total=total,
+                        page=1,
+                        page_size=999999,
+                        execution_time_ms=execution_time_ms,
+                        suggest_async=suggest_async,
+                    ).model_dump(),
+                    params=request.params,
+                    ttl=300,
+                )
+                logger.info(f"缓存全量数据: total={total}")
 
             return response
         except Exception as e:
@@ -170,6 +186,21 @@ class QueryService:
                     
                     # 将 ${xxx} 格式转换为 :xxx 格式（SQLAlchemy 参数绑定格式）
                     converted_sql = re.sub(r'\$\{(\w+)\}', r':\1', sql)
+                    
+                    # 添加分页 LIMIT 和 OFFSET（仅当 page_size < 999999 时添加）
+                    if page_size < 999999:
+                        offset = (page - 1) * page_size
+                        converted_sql = converted_sql.rstrip(';').strip()
+                        if re.search(r'\bLIMIT\b', converted_sql, re.IGNORECASE):
+                            converted_sql = re.sub(r'\bLIMIT\s+\d+', f'LIMIT {page_size}', converted_sql, flags=re.IGNORECASE)
+                            if re.search(r'\bOFFSET\b', converted_sql, re.IGNORECASE):
+                                converted_sql = re.sub(r'\bOFFSET\s+\d+', f'OFFSET {offset}', converted_sql, flags=re.IGNORECASE)
+                            else:
+                                converted_sql += f' OFFSET {offset}'
+                        else:
+                            converted_sql += f' LIMIT {page_size} OFFSET {offset}'
+                    
+                    logger.info(f"执行查询: page={page}, page_size={page_size}")
                     
                     # 执行查询，支持参数绑定（缺少参数时设为空字符串）
                     if params:
