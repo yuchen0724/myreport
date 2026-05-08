@@ -41,6 +41,9 @@ class QueryService:
         if not ds:
             raise ValueError("数据源不存在")
 
+        # 调试日志
+        logger.info(f"查询请求: page={request.page}, page_size={request.page_size}, sql={optimized_sql[:100]}")
+
         # 尝试从缓存获取（全量数据）
         # 直接使用 redis key，不依赖 cache_service 的 get 方法
         cache_key = f"query_full:{hashlib.md5((optimized_sql + json.dumps(request.params or {}, sort_keys=True)).encode()).hexdigest()}"
