@@ -143,7 +143,7 @@
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
           :page-sizes="[10, 20, 50, 100]"
-          :total="filteredData.length"
+          :total="total"
           layout="total, sizes, prev, pager, next, jumper"
           @size-change="handlePageChange"
           @current-change="handlePageChange"
@@ -380,9 +380,9 @@ const loadData = async () => {
   }
 }
 
-// 导出 - 使用异步导出
+// 分页变化时重新请求后端
 const handlePageChange = () => {
-  // 分页变化时不需要重新请求后端，前端分页已处理
+  loadData()
 }
 
 // 导出
