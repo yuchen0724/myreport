@@ -354,7 +354,17 @@ const doPreview = async () => {
   if (config.params && config.params.length > 0) {
     config.params.forEach(p => {
       // 使用默认值（如果有）
-      paramsDict[p.name] = p.default || null
+      paramsDict[p.name] = p.default || ''
+    })
+  }
+
+  // 将 SQL 中的 ${xxx} 替换为实际值（兼容后端旧代码）
+  let sql = config.sql
+  if (config.params && config.params.length > 0) {
+    config.params.forEach(p => {
+      const value = p.default || ''
+      // 替换 ${param_name} 为实际值
+      sql = sql.replace(new RegExp(`\\$\\{${p.name}\\}`, 'g'), value)
     })
   }
 
@@ -362,7 +372,7 @@ const doPreview = async () => {
     previewing.value = true
     const response = await executeQuery({
       data_source_id: config.data_source_id,
-      sql: config.sql,
+      sql: sql,
       params: paramsDict,
       page: currentPage.value,
       page_size: pageSize.value
