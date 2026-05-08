@@ -22,13 +22,80 @@
           />
         </el-form-item>
 
-        <el-form-item label="模板配置" prop="config">
+        <el-form-item label="数据源" prop="data_source_id">
+          <el-select v-model.number="dataSourceId" clearable filterable placeholder="选择数据源" style="width: 100%">
+            <el-option v-for="ds in dataSources" :key="ds.id" :label="ds.name" :value="ds.id" />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="SQL 语句" prop="sql">
           <el-input
-            v-model="configJson"
+            v-model="sqlText"
             type="textarea"
-            :rows="10"
-            placeholder='请输入模板配置（JSON 格式），例如：\n{\n  "data_source_id": 1,\n  "sql": "SELECT * FROM users",\n  "params": {}\n}'
+            :rows="8"
+            placeholder='输入 SQL 语句，使用 ${param_name} 或 :param_name 作为参数占位符&#10;示例：SELECT * FROM orders WHERE date >= ${start_date}'
           />
+        </el-form-item>
+
+        <!-- 查询参数编辑器 -->
+        <el-form-item label="查询参数">
+          <div class="params-editor">
+            <div class="params-toolbar">
+              <el-button type="primary" size="small" @click="addParam">
+                <el-icon><Plus /></el-icon>添加参数
+              </el-button>
+              <el-button type="warning" size="small" @click="autodetectParams" style="margin-left: 8px;">
+                <el-icon><Search /></el-icon>从 SQL 自动识别
+              </el-button>
+            </div>
+
+            <el-table v-if="paramList.length > 0" :data="paramList" border style="margin-top: 12px;">
+              <el-table-column label="参数名" width="160">
+                <template #default="{ row }">
+                  <el-input v-model="row.name" placeholder="如 start_date" size="small" />
+                </template>
+              </el-table-column>
+              <el-table-column label="标签" width="160">
+                <template #default="{ row }">
+                  <el-input v-model="row.label" placeholder="如 开始日期" size="small" />
+                </template>
+              </el-table-column>
+              <el-table-column label="类型" width="150">
+                <template #default="{ row }">
+                  <el-select v-model="row.type" size="small" style="width: 100%">
+                    <el-option label="文本" value="string" />
+                    <el-option label="数字" value="number" />
+                    <el-option label="日期" value="date" />
+                    <el-option label="日期范围" value="daterange" />
+                    <el-option label="下拉选择" value="select" />
+                  </el-select>
+                </template>
+              </el-table-column>
+              <el-table-column label="默认值" width="160">
+                <template #default="{ row }">
+                  <el-input v-model="row.default" placeholder="可选" size="small" />
+                </template>
+              </el-table-column>
+              <el-table-column label="下拉选项" width="200" v-if="hasSelectParam">
+                <template #default="{ row }">
+                  <el-input v-if="row.type === 'select'" v-model="row.optionsStr" placeholder="选项1,选项2" size="small" />
+                  <span v-else>-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="必填" width="70" align="center">
+                <template #default="{ row }">
+                  <el-switch v-model="row.required" size="small" />
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="80">
+                <template #default="{ $index }">
+                  <el-button type="danger" size="small" link @click="removeParam($index)">
+                    <el-icon><Close /></el-icon>
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
         </el-form-item>
 
         <el-form-item label="是否公开" prop="is_public">
@@ -84,7 +151,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Plus, Search, Close } from '@element-plus/icons-vue'
 import { getTemplate, createTemplate, updateTemplate } from '@/api/template'
+import { getDataSourceList } from '@/api/data_source'
 import { executeQuery } from '@/api/query'
 const router = useRouter()
 const route = useRoute()
@@ -104,18 +173,97 @@ const form = ref({
   is_public: false
 })
 
-const configJson = ref('')
+// 表单化字段
+const dataSourceId = ref(null)
+const sqlText = ref('')
+const paramList = ref([])
+const dataSources = ref([])
+
+const hasSelectParam = computed(() => paramList.value.some(p => p.type === 'select'))
 
 const rules = {
   name: [{ required: true, message: '请输入模板名称', trigger: 'blur' }],
-  config: [{ required: true, message: '请输入模板配置', trigger: 'blur' }]
+  sql: [{ required: true, message: '请输入 SQL 语句', trigger: 'blur' }],
+  data_source_id: [{ required: true, message: '请选择数据源', trigger: 'change' }]
 }
 
-onMounted(async () => {
-  if (isEdit.value) {
-    await loadTemplate()
+// 从 config 还原到表单
+const restoreFromConfig = (config) => {
+  dataSourceId.value = config.data_source_id || null
+  sqlText.value = config.sql || ''
+  paramList.value = (config.params || []).map(p => ({
+    name: p.name || '',
+    label: p.label || p.name || '',
+    type: p.type || 'string',
+    default: p.default || '',
+    required: p.required || false,
+    optionsStr: Array.isArray(p.options) ? p.options.join(',') : ''
+  }))
+}
+
+// 从表单构建 config
+const buildConfig = () => {
+  const upperSql = sqlText.value.toUpperCase().trim()
+  if (/\b(DROP\s+TABLE|DROP\s+DATABASE|TRUNCATE\s+TABLE|ALTER\s+TABLE)\b/i.test(upperSql)) {
+    ElMessage.error('SQL 包含危险操作（DROP/TRUNCATE/ALTER），已拒绝')
+    return null
   }
-})
+
+  const params = paramList.value
+    .filter(p => p.name.trim())
+    .map(p => {
+      const param = {
+        name: p.name.trim(),
+        label: p.label || p.name.trim(),
+        type: p.type || 'string',
+        required: p.required || false
+      }
+      if (p.default !== '' && p.default !== null) param.default = p.default
+      if (p.type === 'select') param.options = (p.optionsStr || '').split(',').filter(Boolean)
+      return param
+    })
+
+  return {
+    data_source_id: dataSourceId.value,
+    sql: sqlText.value,
+    params: params.length > 0 ? params : []
+  }
+}
+
+// 自动从 SQL 识别 ${xxx} 和 :xxx 占位符
+const autodetectParams = () => {
+  const placeholders = new Set()
+  const regex1 = /\$\{(\w+)\}/g
+  let match
+  while ((match = regex1.exec(sqlText.value)) !== null) {
+    placeholders.add(match[1])
+  }
+  const regex2 = /(?<!['"\w]):(\w+)/g
+  while ((match = regex2.exec(sqlText.value)) !== null) {
+    placeholders.add(match[1])
+  }
+
+  if (placeholders.size === 0) {
+    ElMessage.info('未检测到参数占位符（${xxx} 或 :xxx），示例：SELECT * FROM orders WHERE date >= ${start_date}')
+    return
+  }
+
+  const existingNames = new Set(paramList.value.map(p => p.name))
+  const newParams = [...placeholders]
+    .filter(n => !existingNames.has(n))
+    .map(n => ({ name: n, label: n, type: 'string', default: '', required: false, optionsStr: '' }))
+
+  paramList.value = [...paramList.value, ...newParams]
+  ElMessage.success(`已识别 ${newParams.length} 个新参数`)
+}
+
+const addParam = () => {
+  paramList.value.push({ name: '', label: '', type: 'string', default: '', required: false, optionsStr: '' })
+}
+
+const removeParam = (index) => {
+  paramList.value.splice(index, 1)
+}
 
 const loadTemplate = async () => {
   try {
@@ -126,9 +274,18 @@ const loadTemplate = async () => {
       config: response.config,
       is_public: response.is_public
     }
-    configJson.value = JSON.stringify(response.config, null, 2)
+    restoreFromConfig(response.config)
   } catch (error) {
     ElMessage.error('加载模板失败')
+  }
+}
+
+const loadDataSources = async () => {
+  try {
+    const res = await getDataSourceList({ page: 1, page_size: 100 })
+    dataSources.value = Array.isArray(res) ? res : (res.items || [])
+  } catch {
+    // 忽略加载失败
   }
 }
 
@@ -143,23 +300,20 @@ const handlePreview = async () => {
 }
 
 const doPreview = async () => {
+  const config = buildConfig()
+  if (!config) return
+
+  if (!config.data_source_id) {
+    ElMessage.warning('请选择数据源')
+    return
+  }
+  if (!config.sql) {
+    ElMessage.warning('请输入 SQL 语句')
+    return
+  }
+
   try {
     previewing.value = true
-    const config = JSON.parse(configJson.value)
-
-    if (!config.data_source_id && !config.sql) {
-      ElMessage.warning('模板配置中缺少 data_source_id（数据源ID）和 sql（SQL语句）')
-      return
-    }
-    if (!config.data_source_id) {
-      ElMessage.warning('模板配置中缺少 data_source_id（数据源ID）')
-      return
-    }
-    if (!config.sql) {
-      ElMessage.warning('模板配置中缺少 sql（SQL语句）')
-      return
-    }
-
     const response = await executeQuery({
       data_source_id: config.data_source_id,
       sql: config.sql,
@@ -167,7 +321,6 @@ const doPreview = async () => {
       page: currentPage.value,
       page_size: pageSize.value
     })
-
     queryResult.value = response
     ElMessage.success('查询成功')
   } catch (error) {
@@ -180,17 +333,12 @@ const doPreview = async () => {
 
 const handleSubmit = async () => {
   try {
-    // 验证表单
     await formRef.value.validate()
 
-    // 解析 JSON 配置
-    try {
-      form.value.config = JSON.parse(configJson.value)
-    } catch (error) {
-      ElMessage.error('模板配置格式错误，请输入有效的 JSON')
-      return
-    }
+    const config = buildConfig()
+    if (!config) return
 
+    form.value.config = config
     loading.value = true
 
     if (isEdit.value) {
@@ -210,13 +358,19 @@ const handleSubmit = async () => {
 }
 
 const handleCancel = () => {
-  // 尝试返回上一页，如果没有历史记录则返回模板列表
   if (window.history.length > 1) {
     router.back()
   } else {
     router.push('/templates')
   }
 }
+
+onMounted(() => {
+  loadDataSources()
+  if (isEdit.value) {
+    loadTemplate()
+  }
+})
 </script>
 
 <style scoped>
@@ -228,5 +382,25 @@ const handleCancel = () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.params-editor {
+  width: 100%;
+}
+
+.params-toolbar {
+  margin-bottom: 8px;
+}
+
+.result-footer {
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.result-info {
+  font-size: 13px;
+  color: #909399;
 }
 </style>
