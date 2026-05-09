@@ -310,11 +310,13 @@ class NL2SQLService:
         password = decrypt_password(ds.password_encrypted)
 
         # 构建连接 URL（使用解密后的密码）
-        if ds.type == "MYSQL":
+        ds_type = ds.type.upper() if ds.type else ""
+        
+        if ds_type == "MYSQL":
             conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
-        elif ds.type == "POSTGRESQL":
+        elif ds_type == "POSTGRESQL":
             conn_url = f"postgresql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
-        elif ds.type == "DORIS":
+        elif ds_type == "DORIS":
             # Doris 使用 MySQL 协议
             conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
         else:
@@ -350,10 +352,10 @@ class NL2SQLService:
                             logger.warning(f"获取表 {table_name} 结构失败: {e}")
                             continue
 
-                elif ds.type == "POSTGRESQL":
+                elif ds_type == "POSTGRESQL":
                     # PostgreSQL 使用 information_schema
-                    tables_result = conn.execute(text("""
-                        SELECT table_name 
+                    tables_result = conn.execute(text(f"""
+                    SELECT table_name
                         FROM information_schema.tables 
                         WHERE table_schema = 'public'
                     """))
