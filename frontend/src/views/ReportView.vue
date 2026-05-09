@@ -114,8 +114,8 @@
 
       <!-- 数据表格 -->
       <el-table
-        v-if="filteredData.length > 0"
-        :data="paginatedData"
+        v-if="data.length > 0"
+        :data="data"
         border
         stripe
         :default-sort="{ prop: sortProp, order: sortOrder }"
@@ -144,10 +144,13 @@
           v-model:page-size="pageSize"
           :page-sizes="[10, 20, 50, 100]"
           :total="total"
-          layout="total, sizes, prev, pager, next, jumper"
+          layout="total, sizes, prev, pager, next"
           @size-change="handlePageChange"
           @current-change="handlePageChange"
         />
+        <span v-if="total > 100000" class="deep-page-tip">
+          💡 提示：数据量较大时，建议使用"上一页/下一页"翻页
+        </span>
       </div>
     </el-card>
   </div>
@@ -174,6 +177,7 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const params = reactive({})
 const templateParams = ref([])
+const nextCursor = ref(null)  // 游标分页：下一页游标
 
 // 表格增强功能
 const searchText = ref('')
@@ -206,10 +210,15 @@ const paginatedData = computed(() => {
   return filteredData.value.slice(start, end)
 })
 
-// 更新总数
+// 更新总数 - 只有在筛选时才更新（搜索筛选是在当前页数据内过滤）
+// 注意：不再覆盖 total，因为 total 来自 API 的真实总数
 watch(filteredData, (newData) => {
-  total.value = newData.length
-  currentPage.value = 1  // 筛选后回到第一页
+  // 如果有搜索词，过滤后的数据条数作为参考
+  // 但分页总数仍使用 API 返回的 total（来自后端 COUNT）
+  if (searchText.value) {
+    // 只有搜索筛选时才更新，用于本地过滤显示
+    // 但 el-pagination 的 total 仍使用 API 返回的 total
+  }
 })
 
 // 列展示控制
@@ -354,12 +363,15 @@ const loadData = async () => {
 
   try {
     loading.value = true
+    // 游标分页：翻到第2页及以后时，使用 next_cursor
+    const useCursor = currentPage.value > 1 && nextCursor.value
     const res = await executeQuery({
       data_source_id: config.data_source_id,
       sql: buildSqlWithParams(),
       params: {},  // 前端已替换占位符，后端无需再处理
-      page: currentPage.value,
-      page_size: Math.min(pageSize.value, 5000)  // 限制最大返回5000条
+      page: useCursor ? 1 : currentPage.value,  // 游标模式时固定 page=1
+      page_size: Math.min(pageSize.value, 5000),
+      cursor: useCursor ? nextCursor.value : undefined  // 传递游标
     })
 
     // executeQuery 调用 /api/query/sql，返回 SQLQueryResponse { columns, rows, total, ... }
@@ -373,6 +385,7 @@ const loadData = async () => {
     })
     columns.value = cols
     total.value = res.total || 0
+    nextCursor.value = res.next_cursor || null  // 保存下一页游标
   } catch (error) {
     ElMessage.error('查询失败：' + (error.response?.data?.detail || error.message || '未知错误'))
   } finally {
@@ -382,6 +395,10 @@ const loadData = async () => {
 
 // 分页变化时重新请求后端
 const handlePageChange = () => {
+  // 跳到第1页时重置游标
+  if (currentPage.value === 1) {
+    nextCursor.value = null
+  }
   loadData()
 }
 
@@ -502,8 +519,15 @@ onMounted(() => {
 }
 
 .pagination {
-  margin-top: 20px;
   display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
   justify-content: flex-end;
+}
+
+.deep-page-tip {
+  color: #e6a23c;
+  font-size: 12px;
 }
 </style>

@@ -44,42 +44,14 @@ class QueryService:
         # 调试日志
         logger.info(f"查询请求: page={request.page}, page_size={request.page_size}, sql={optimized_sql[:100]}")
 
-        # 尝试从缓存获取（全量数据）
-        # 直接使用 redis key，不依赖 cache_service 的 get 方法
-        cache_key = f"query_full:{hashlib.md5((optimized_sql + json.dumps(request.params or {}, sort_keys=True)).encode()).hexdigest()}"
+        # 简化处理：不再使用全量缓存策略，每次查询都获取当前页数据 + COUNT 总数
+        # 这样可以避免缓存不一致问题，同时保证分页正确
         
-        try:
-            if full_cache_service.redis_client:
-                cached_data = full_cache_service.redis_client.get(cache_key)
-                if cached_data:
-                    cached = json.loads(cached_data)
-                    result_data = cached.get("result", cached)
-                    all_rows = result_data.get("rows", [])
-                    total = len(all_rows)
-                    page = request.page
-                    page_size = request.page_size
-                    start = (page - 1) * page_size
-                    paginated_rows = all_rows[start:start + page_size]
-                    logger.info(f"缓存命中，从全量数据切片: page={page}, start={start}, size={len(paginated_rows)}, total={total}")
-                    return SQLQueryResponse(
-                        columns=result_data.get("columns", []),
-                        rows=paginated_rows,
-                        total=total,
-                        page=page,
-                        page_size=page_size,
-                        execution_time_ms=result_data.get("execution_time_ms", 0),
-                        suggest_async=suggest_async,
-                    )
-        except Exception as e:
-            logger.warning(f"缓存读取失败: {e}")
-
-        # 执行查询 - 首次查询获取全量数据
+        # 执行查询 - 使用用户请求的实际 page_size
         start_time = time.time()
         try:
-            # 第一页且请求的 page_size 较小（意味着用户在看第一页），查询全量数据
-            request_page_size = 999999 if request.page == 1 else request.page_size
-            
-            result = self._execute_query(ds, optimized_sql, request.params, 1, request_page_size)
+            # 直接使用用户请求的 page_size，不再获取全量
+            result = self._execute_query(ds, optimized_sql, request.params, request.page, request.page_size, getattr(request, 'cursor', None))
             execution_time_ms = int((time.time() - start_time) * 1000)
 
             # 保存查询历史
@@ -92,46 +64,46 @@ class QueryService:
                 "row_count": result["total"],
             })
 
-            # 分页 - 从全量数据切片
-            all_rows = result["rows"]
+            # 分页 - 数据已经是当前页的结果，total 是通过 COUNT 获取的真实总数
+            rows = result["rows"]
             total = result["total"]
             page = request.page
             page_size = request.page_size
-            start = (page - 1) * page_size
-            paginated_rows = all_rows[start:start + page_size]
-
+            
+            # 游标分页：计算当前页游标和下一页游标
+            cursor = getattr(request, 'cursor', None)
+            next_cursor = None
+            order_cols = result.get("order_cols", [])
+            
+            if rows and order_cols:
+                # 从最后一行提取排序字段值作为 next_cursor
+                last_row = rows[-1]
+                cursor_parts = []
+                for col in order_cols:
+                    # 找到该列在 column 列表中的索引
+                    col_idx = result["columns"].index(col) if col in result["columns"] else None
+                    if col_idx is not None and col_idx < len(last_row):
+                        val = last_row[col_idx]
+                        cursor_parts.append(str(val) if val is not None else '')
+                if cursor_parts:
+                    next_cursor = ','.join(cursor_parts)
+            
+            # 计算实际 page（用于游标分页时可能不准确）
+            if cursor and not page:
+                # 游标模式下无法准确知道 pageNum
+                page = 1
+            
             response = SQLQueryResponse(
                 columns=result["columns"],
-                rows=paginated_rows,
+                rows=rows,
                 total=total,
                 page=page,
                 page_size=page_size,
                 execution_time_ms=execution_time_ms,
                 suggest_async=suggest_async,
+                cursor=cursor,
+                next_cursor=next_cursor,
             )
-
-            # 缓存全量结果（5分钟）- 只有第一页查询才缓存全量
-            if request.page == 1:
-                try:
-                    if full_cache_service.redis_client:
-                        cache_key_write = f"query_full:{hashlib.md5((optimized_sql + json.dumps(request.params or {}, sort_keys=True)).encode()).hexdigest()}"
-                        cached_data = {
-                            "result": SQLQueryResponse(
-                                columns=result["columns"],
-                                rows=all_rows,
-                                total=total,
-                                page=1,
-                                page_size=999999,
-                                execution_time_ms=execution_time_ms,
-                                suggest_async=suggest_async,
-                            ).model_dump(),
-                            "cached_at": datetime.now().isoformat(),
-                            "ttl": 300
-                        }
-                        full_cache_service.redis_client.setex(cache_key_write, 300, json.dumps(cached_data))
-                        logger.info(f"缓存全量数据: key={cache_key_write}, total={total}")
-                except Exception as e:
-                    logger.warning(f"缓存写入失败: {e}")
 
             return response
         except Exception as e:
@@ -140,7 +112,7 @@ class QueryService:
                 error_msg = f"{type(e).__name__}"
             raise ValueError(f"查询执行失败: {error_msg}")
 
-    def _execute_query(self, ds, sql: str, params: Optional[dict], page: int = 1, page_size: int = 100) -> dict:
+    def _execute_query(self, ds, sql: str, params: Optional[dict], page: int = 1, page_size: int = 100, cursor: Optional[str] = None) -> dict:
         """执行查询并返回结果（带连接池和超时）"""
         import pymysql
         import psycopg2
@@ -202,55 +174,147 @@ class QueryService:
                         conn.execute(text(f"SET SESSION STATEMENT_TIMEOUT = '{QUERY_TIMEOUT}s'"))
                     
                     # 将 ${xxx} 格式转换为 :xxx 格式（SQLAlchemy 参数绑定格式）
-                    converted_sql = re.sub(r'\$\{(\w+)\}', r':\1', sql)
+                    # 使用原生字符串避免 % 被解释为格式化符
+                    converted_sql = sql.replace('${', ':').replace('}', '')
                     
                     # 添加分页 LIMIT 和 OFFSET（仅当 page_size < 999999 时添加）
                     if page_size < 999999:
                         offset = (page - 1) * page_size
                         converted_sql = converted_sql.rstrip(';').strip()
-                        if re.search(r'\bLIMIT\b', converted_sql, re.IGNORECASE):
-                            converted_sql = re.sub(r'\bLIMIT\s+\d+', f'LIMIT {page_size}', converted_sql, flags=re.IGNORECASE)
-                            if re.search(r'\bOFFSET\b', converted_sql, re.IGNORECASE):
-                                converted_sql = re.sub(r'\bOFFSET\s+\d+', f'OFFSET {offset}', converted_sql, flags=re.IGNORECASE)
-                            else:
-                                converted_sql += f' OFFSET {offset}'
+                        # 去掉任何现有的 LIMIT 和 OFFSET
+                        converted_sql = re.sub(r';?\s*LIMIT\s+\d+\s*OFFSET\s+\d+\s*$', '', converted_sql, flags=re.IGNORECASE)
+                        converted_sql = re.sub(r';?\s*LIMIT\s+\d+\s*$', '', converted_sql, flags=re.IGNORECASE)
+                        
+                        # 提取 ORDER BY 子句（用户必须自己定义排序，否则拒绝查询）
+                        order_by_match = re.search(r'\bORDER\s+BY\s+(.+?)(?:\s+LIMIT|\s+OFFSET|\s*$)', converted_sql, re.IGNORECASE)
+                        if not order_by_match:
+                            raise ValueError("深度分页需要明确的 ORDER BY，请在 SQL 中添加 ORDER BY 子句。例如：ORDER BY id, dt")
+                        
+                        order_by_clause = order_by_match.group(1)
+                        order_cols = [col.strip().split()[0] for col in order_by_clause.split(',')]
+                        
+                        # 清理 SQL 中的 ORDER BY（后续会重新添加）
+                        converted_sql = re.sub(r'\s+ORDER\s+BY\s+.+?(?=\s*LIMIT|\s*$)', '', converted_sql, flags=re.IGNORECASE).strip()
+                        
+                        # 构建游标分页 SQL
+                        cursor = cursor  # 直接使用参数传入的 cursor
+                        cursor_where = ""
+                        cursor_key = None
+                        
+                        if cursor:
+                            # 游标分页：WHERE (col1, col2) > (val1, val2)
+                            cursor_parts = [c.strip() for c in cursor.split(',')]
+                            where_parts = []
+                            for i, col in enumerate(order_cols):
+                                if i < len(cursor_parts):
+                                    # 处理数值和字符串
+                                    val = cursor_parts[i]
+                                    if val.isdigit():
+                                        where_parts.append(f"{col} > {val}")
+                                    else:
+                                        where_parts.append(f"{col} > '{val}'")
+                            if where_parts:
+                                cursor_where = " WHERE " + " AND ".join(where_parts)
+                            
+                            # 生成缓存 key
+                            sql_hash = hashlib.md5((sql + str(page_size)).encode()).hexdigest()[:8]
+                            cursor_key = f"cursor:{sql_hash}:{cursor}"
+                            
+                            logger.info(f"游标分页: cursor={cursor}, key={cursor_key}")
+                        
+                        # 构建最终 SQL
+                        if cursor_where:
+                            # 游标分页（性能最优）
+                            converted_sql = f"SELECT * FROM ({converted_sql}) as t {cursor_where} ORDER BY {order_by_clause} LIMIT {page_size}"
+                        elif offset > 1000:
+                            # 深度分页优化：OFFSET > 1000 时使用窗口函数
+                            converted_sql = f"SELECT * FROM (SELECT ROW_NUMBER() OVER (ORDER BY {order_by_clause}) as _rn, t.* FROM ({converted_sql}) as t) as t_paged WHERE _rn > {offset} AND _rn <= {offset + page_size}"
+                            logger.info(f"深度分页优化: offset={offset}, 使用窗口函数")
                         else:
-                            converted_sql += f' LIMIT {page_size} OFFSET {offset}'
+                            # 普通分页
+                            converted_sql += f' ORDER BY {order_by_clause} LIMIT {page_size} OFFSET {offset}'
                     
                     logger.info(f"执行查询: page={page}, page_size={page_size}")
                     
-                    # 执行查询，支持参数绑定（缺少参数时设为空字符串）
-                    if params:
-                        # 对于缺失的参数，使用空字符串替代（避免 SQLAlchemy 报错）
+                    # 执行查询
+                    # 检查 SQL 中是否还有占位符
+                    has_placeholders = bool(re.search(r':(\w+)', converted_sql))
+                    
+                    if has_placeholders and params:
+                        # 绑定参数
                         all_placeholders = set(re.findall(r':(\w+)', converted_sql))
                         filtered_params = {}
                         for placeholder in all_placeholders:
                             if placeholder in params and params[placeholder] is not None and params[placeholder] != '':
                                 filtered_params[placeholder] = params[placeholder]
                             else:
-                                # 参数缺失时设置为空字符串
                                 filtered_params[placeholder] = ''
                         result = conn.execute(text(converted_sql), filtered_params)
+                    elif has_placeholders:
+                        # SQL 有占位符但没传参数，使用空字符串
+                        all_placeholders = set(re.findall(r':(\w+)', converted_sql))
+                        filtered_params = {p: '' for p in all_placeholders}
+                        result = conn.execute(text(converted_sql), filtered_params)
                     else:
+                        # 无占位符，直接执行
                         result = conn.execute(text(converted_sql))
                     
                     columns = list(result.keys())
                     rows = [list(row) for row in result.fetchall()]
                 
+                # 获取真实总数
+                # 如果 page_size >= 999999（全量查询），total 就是实际返回行数
+                # 否则需要执行 COUNT(*) 获取真实总数
+                if page_size < 999999:
+                    try:
+                        # 使用原始 SQL（未添加分页的）来构造 COUNT 查询
+                        # 先将参数占位符转换，但不添加 LIMIT
+                        count_base_sql = re.sub(r'\$\{(\w+)\}', r':\1', sql)
+                        # 去掉任何现有的 LIMIT 和 ORDER BY（COUNT 时不需要）
+                        count_base_sql = count_base_sql.strip()
+                        count_base_sql = re.sub(r';?\s*LIMIT\s+\d+\s*OFFSET\s+\d+\s*$', '', count_base_sql, flags=re.IGNORECASE)
+                        count_base_sql = re.sub(r';?\s*LIMIT\s+\d+\s*$', '', count_base_sql, flags=re.IGNORECASE)
+                        count_sql = f"SELECT COUNT(*) as cnt FROM ({count_base_sql}) as _subquery"
+                        
+                        with engine.connect() as conn2:
+                            # COUNT 查询使用较短超时
+                            count_timeout = max(10, QUERY_TIMEOUT // 2)
+                            if ds.type == "MYSQL" or ds.type == "DORIS":
+                                conn2.execute(text(f"SET SESSION MAX_EXECUTION_TIME = {count_timeout*1000}"))
+                            elif ds.type == "POSTGRESQL":
+                                conn2.execute(text(f"SET SESSION STATEMENT_TIMEOUT = '{count_timeout}s'"))
+                            
+                            # 使用原始参数
+                            exec_params = {}
+                            if params:
+                                all_placeholders = set(re.findall(r':(\w+)', count_base_sql))
+                                for placeholder in all_placeholders:
+                                    if placeholder in params and params[placeholder] is not None and params[placeholder] != '':
+                                        exec_params[placeholder] = params[placeholder]
+                                    else:
+                                        exec_params[placeholder] = ''
+                            
+                            count_result = conn2.execute(text(count_sql), exec_params)
+                            total = count_result.scalar() or 0
+                            logger.info(f"COUNT 查询结果: total={total}")
+                    except Exception as e:
+                        logger.warning(f"COUNT 查询失败，回退到行数: {e}")
+                        total = len(rows)
+                else:
+                    total = len(rows)
+                
+                # 在所有查询完成后释放连接池
                 engine.dispose()
                 
-                # 获取总数
-                # 如果返回行数等于 page_size，说明可能还有更多数据
-                total = len(rows)
-                has_more = len(rows) >= page_size
+                has_more = len(rows) >= page_size and total > (page - 1) * page_size + len(rows)
                 
                 return {
                     "columns": columns,
                     "rows": rows,
                     "total": total,
-                    "has_more": has_more,  # 告知前端是否还有更多数据
+                    "has_more": has_more,
+                    "order_cols": order_cols,
                 }
-                
             except OperationalError as e:
                 error_msg = str(e)
                 if "fail to send batch" in error_msg or "network" in error_msg.lower():

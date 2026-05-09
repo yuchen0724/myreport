@@ -9,6 +9,8 @@ class SQLQueryRequest(BaseModel):
     params: Optional[dict] = None
     page: int = Field(1, ge=1, description="页码")
     page_size: int = Field(50, ge=1, le=1000, description="每页条数")
+    # 游标分页：传递上一页最后一行排序列的值，格式如 "S99,2025-40"
+    cursor: Optional[str] = Field(None, description="游标（上一页最后一行排序列的值）")
 
 
 class SQLQueryResponse(BaseModel):
@@ -18,7 +20,10 @@ class SQLQueryResponse(BaseModel):
     page: int
     page_size: int
     execution_time_ms: int
-    suggest_async: bool = False  # 查询成本超过阈值时建议用户走异步导出
+    suggest_async: bool = False
+    # 游标分页
+    cursor: Optional[str] = Field(None, description="当前页游标（最后一行排序列的值）")
+    next_cursor: Optional[str] = Field(None, description="下一页游标")
 
 
 class QueryHistoryResponse(BaseModel):
