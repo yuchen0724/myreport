@@ -164,12 +164,18 @@ class NL2SQLService:
 """
 
         # 3. 调用 LLM
+        logger.info(f"LLM 开始生成 SQL, question={question[:30]}, client_timeout={llm_client.timeout}")
+        
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"问题: {question}"}
         ]
-
+        
+        logger.info(f"LLM messages prepared, system_prompt length={len(system_prompt)}")
+        
         response = llm_client.chat(messages, temperature=0.0)
+        
+        logger.info(f"LLM response received, length={len(response)}")
 
         # 4. 解析 JSON 响应
         result = self._parse_llm_response(response)
