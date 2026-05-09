@@ -122,18 +122,9 @@ class QueryService:
         # 查询超时时间（秒）
         QUERY_TIMEOUT = 30
         
-        # 构建连接 URL
-        if ds.type == "MYSQL":
-            conn_url = f"mysql+pymysql://{ds.username}:{decrypt_password(ds.password_encrypted)}@{ds.host}:{ds.port}/{ds.database}"
-            engine = create_engine(
-                conn_url,
-                poolclass=QueuePool,
-                pool_size=5,
-                max_overflow=10,
-                pool_pre_ping=True,
-                pool_recycle=3600,
-            )
+        # 构建连接 URL（统一使用 ds_type）
         ds_type = ds.type.upper() if ds.type else ""
+        password = decrypt_password(ds.password_encrypted)
         
         if ds_type == "MYSQL":
             conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
@@ -180,9 +171,9 @@ class QueryService:
             try:
                 with engine.connect() as conn:
                     # 根据数据库类型设置查询超时
-                    if ds.type == "MYSQL" or ds.type == "DORIS":
+                    if ds_type == "MYSQL" or ds_type == "DORIS":
                         conn.execute(text(f"SET SESSION MAX_EXECUTION_TIME = {QUERY_TIMEOUT*1000}"))
-                    elif ds.type == "POSTGRESQL":
+                    elif ds_type == "POSTGRESQL":
                         conn.execute(text(f"SET SESSION STATEMENT_TIMEOUT = '{QUERY_TIMEOUT}s'"))
                     
                     # 将 ${xxx} 格式转换为 :xxx 格式（SQLAlchemy 参数绑定格式）
@@ -291,9 +282,9 @@ class QueryService:
                         with engine.connect() as conn2:
                             # COUNT 查询使用较短超时
                             count_timeout = max(10, QUERY_TIMEOUT // 2)
-                            if ds.type == "MYSQL" or ds.type == "DORIS":
+                            if ds_type == "MYSQL" or ds_type == "DORIS":
                                 conn2.execute(text(f"SET SESSION MAX_EXECUTION_TIME = {count_timeout*1000}"))
-                            elif ds.type == "POSTGRESQL":
+                            elif ds_type == "POSTGRESQL":
                                 conn2.execute(text(f"SET SESSION STATEMENT_TIMEOUT = '{count_timeout}s'"))
                             
                             # 使用原始参数
