@@ -4,7 +4,7 @@ import { useUserStore } from "@/store"
 
 const request = axios.create({
   baseURL: "/api",
-  timeout: 30000
+  timeout: 180000  // 3分钟，支持 NL2SQL 长时间请求
 })
 
 request.interceptors.request.use(

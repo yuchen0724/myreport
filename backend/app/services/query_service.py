@@ -133,8 +133,10 @@ class QueryService:
                 pool_pre_ping=True,
                 pool_recycle=3600,
             )
-        elif ds.type == "POSTGRESQL":
-            conn_url = f"postgresql://{ds.username}:{decrypt_password(ds.password_encrypted)}@{ds.host}:{ds.port}/{ds.database}"
+        ds_type = ds.type.upper() if ds.type else ""
+        
+        if ds_type == "MYSQL":
+            conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
             engine = create_engine(
                 conn_url,
                 poolclass=QueuePool,
@@ -143,9 +145,19 @@ class QueryService:
                 pool_pre_ping=True,
                 pool_recycle=3600,
             )
-        elif ds.type == "DORIS":
+        elif ds_type == "POSTGRESQL":
+            conn_url = f"postgresql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
+            engine = create_engine(
+                conn_url,
+                poolclass=QueuePool,
+                pool_size=5,
+                max_overflow=10,
+                pool_pre_ping=True,
+                pool_recycle=3600,
+            )
+        elif ds_type == "DORIS":
             # Doris 使用 MySQL 协议
-            conn_url = f"mysql+pymysql://{ds.username}:{decrypt_password(ds.password_encrypted)}@{ds.host}:{ds.port}/{ds.database}"
+            conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
             engine = create_engine(
                 conn_url,
                 poolclass=QueuePool,

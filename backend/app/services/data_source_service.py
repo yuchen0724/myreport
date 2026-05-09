@@ -83,6 +83,18 @@ class DataSourceService:
                 )
                 conn.close()
                 return DataSourceTestResponse(success=True, message="连接成功")
+            elif request.type.upper() == "POSTGRESQL":
+                import psycopg2
+                conn = psycopg2.connect(
+                    host=request.host,
+                    port=request.port,
+                    user=request.username,
+                    password=request.password,
+                    database=request.database,
+                    connect_timeout=5
+                )
+                conn.close()
+                return DataSourceTestResponse(success=True, message="连接成功")
             elif request.type == "DORIS":
                 import pymysql
                 conn = pymysql.connect(
