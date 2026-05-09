@@ -448,12 +448,11 @@ class NL2SQLService:
                 logger.warning(f"未找到数据库 {db_name} 对应的语义层文档")
                 return None
 
-            # 查找文档路径 - 优先项目根目录
+            # 查找文档路径 - 优先 semantic 文件夹
             possible_paths = [
-                Path(__file__).parent.parent.parent / doc_filename,
-                Path(__file__).parent.parent / doc_filename,
-                Path("/home/zhou/myreport") / doc_filename,
-                Path("/home/zhou/myreport/backend") / doc_filename,
+                Path(__file__).parent.parent.parent / "semantic" / doc_filename,
+                Path(__file__).parent.parent / "semantic" / doc_filename,
+                Path("/home/zhou/myreport/semantic") / doc_filename,
             ]
 
             for doc_path in possible_paths:
