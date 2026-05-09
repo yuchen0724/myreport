@@ -22,7 +22,7 @@ async def parse_question(
     - **data_source_id**: 数据源 ID
     """
     query_service = QueryService(db)
-    nl2sql_service = NL2SQLService(query_service)
+    nl2sql_service = NL2SQLService(query_service, db)
 
     try:
         response = nl2sql_service.parse_question(request, current_user_id)

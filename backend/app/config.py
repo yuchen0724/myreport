@@ -53,9 +53,23 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
 
     # LLM / NL2SQL
+    llm_provider: str = "openai"  # openai, azure, ollama, anthropic
     llm_api_base: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
     llm_model: str = "gpt-3.5-turbo"
+    
+    # Azure OpenAI
+    azure_openai_endpoint: Optional[str] = None
+    azure_openai_deployment: Optional[str] = None
+    
+    # Ollama
+    ollama_base_url: str = "http://localhost:11434"
+    
+    # NL2SQL 行为配置
+    nl2sql_temperature: float = 0.0
+    nl2sql_max_retries: int = 2
+    nl2sql_timeout: int = 30
+    nl2sql_cache_ttl: int = 3600  # 缓存 1 小时
 
     @field_validator("database_url", "secret_key")
     @classmethod
