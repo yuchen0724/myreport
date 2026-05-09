@@ -1,6 +1,8 @@
 # backend/app/services/nl2sql_service.py
 import json
 import logging
+import os
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 
@@ -236,7 +238,7 @@ class NL2SQLService:
         """
         构建 Schema 描述 prompt
 
-        通过数据源 ID 获取连接信息，查询表结构，生成结构化的 schema 描述
+        优先使用语义层文档，次之动态查询数据库结构
 
         Args:
             data_source_id: 数据源 ID
@@ -244,15 +246,20 @@ class NL2SQLService:
         Returns:
             Schema 描述字符串
         """
+        # 1. 优先尝试读取语义层文档
+        semantic_doc = self._load_semantic_doc(data_source_id)
+        if semantic_doc:
+            logger.info(f"使用语义层文档 for data_source_id={data_source_id}")
+            return semantic_doc
+
+        # 2. 回退到动态查询
         if not self.ds_repo:
             return "数据源信息不可用"
 
-        # 获取数据源信息
         ds = self.ds_repo.get_by_id(data_source_id)
         if not ds:
             return f"数据源 ID {data_source_id} 不存在"
 
-        # 连接数据源获取表结构
         try:
             tables_info = self._fetch_schema_from_datasource(ds)
             if not tables_info:
@@ -406,3 +413,58 @@ class NL2SQLService:
         """
         is_valid, _ = SQLValidator.validate(sql)
         return is_valid
+
+    def _load_semantic_doc(self, data_source_id: int) -> Optional[str]:
+        """
+        加载语义层文档
+
+        根据 data_source_id 查找对应的语义层文档
+        目前通过数据库名映射：data_source_id=1 -> retail_analysis -> retail_nl2sql.md
+
+        Args:
+            data_source_id: 数据源 ID
+
+        Returns:
+            语义层文档内容，如果不存在则返回 None
+        """
+        if not self.ds_repo:
+            return None
+
+        try:
+            ds = self.ds_repo.get_by_id(data_source_id)
+            if not ds:
+                return None
+
+            # 根据数据库名查找语义层文档
+            db_name = ds.database.lower() if ds.database else ""
+            
+            # 语义层文档路径映射
+            semantic_docs = {
+                "retail_analysis": "retail_nl2sql.md",
+            }
+
+            doc_filename = semantic_docs.get(db_name)
+            if not doc_filename:
+                logger.warning(f"未找到数据库 {db_name} 对应的语义层文档")
+                return None
+
+            # 查找文档路径 - 优先项目根目录
+            possible_paths = [
+                Path(__file__).parent.parent.parent / doc_filename,
+                Path(__file__).parent.parent / doc_filename,
+                Path("/home/zhou/myreport") / doc_filename,
+                Path("/home/zhou/myreport/backend") / doc_filename,
+            ]
+
+            for doc_path in possible_paths:
+                if doc_path.exists():
+                    content = doc_path.read_text(encoding="utf-8")
+                    logger.info(f"加载语义层文档: {doc_path}")
+                    return content
+
+            logger.warning(f"语义层文档不存在: {doc_filename}")
+            return None
+
+        except Exception as e:
+            logger.error(f"加载语义层文档失败: {e}")
+            return None
