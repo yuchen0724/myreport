@@ -11,6 +11,8 @@ class DataSourceBase(BaseModel):
     database: str = Field(..., min_length=1)
     username: str = Field(..., min_length=1)
     password: str = Field(..., min_length=1)
+    use_proxy: bool = Field(default=False, description="是否使用代理")
+    proxy_server_id: Optional[int] = Field(None, description="关联的代理服务器ID")
 
 
 class DataSourceCreate(DataSourceBase):
@@ -25,6 +27,8 @@ class DataSourceUpdate(BaseModel):
     database: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None  # 空字符串表示不修改密码
+    use_proxy: Optional[bool] = None
+    proxy_server_id: Optional[int] = None
     is_active: Optional[bool] = None
 
 
@@ -49,6 +53,8 @@ class DataSourceResponse(BaseModel):
     database: str
     username: str
     password_decrypted: Optional[str] = None  # 编辑时返回解密密码
+    use_proxy: bool = False
+    proxy_server_id: Optional[int] = None
     is_active: bool
     created_by: Optional[int] = None
     created_at: Optional[datetime] = None

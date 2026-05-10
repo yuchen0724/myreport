@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from app.config import get_settings
-from app.api import auth, data_sources, query, report, nl2sql, charts, templates, stats, async_export, users, cache, audit_logs, dashboard, menus
+from app.api import auth, data_sources, query, report, nl2sql, charts, templates, stats, async_export, users, cache, audit_logs, dashboard, menus, proxy_servers
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.audit_log import AuditLogMiddleware
 from app.middleware.error_handler import register_exception_handlers
@@ -80,6 +80,7 @@ app.add_middleware(AuditLogMiddleware)
 # 注册路由
 app.include_router(auth.router)
 app.include_router(data_sources.router)
+app.include_router(proxy_servers.router)
 app.include_router(query.router)
 app.include_router(report.router)
 app.include_router(nl2sql.router)

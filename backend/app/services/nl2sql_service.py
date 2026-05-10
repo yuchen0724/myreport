@@ -319,6 +319,29 @@ class NL2SQLService:
         # 构建连接 URL（使用解密后的密码）
         ds_type = ds.type.upper() if ds.type else ""
         
+        # 获取代理配置
+        proxy_url = None
+        if ds.use_proxy and ds.proxy_server_id:
+            from app.core.security import decrypt_password as decrypt_proxy_pwd
+            from app.models.proxy_server import ProxyServer
+            # 使用传入的 db session
+            proxy = db.query(ProxyServer).filter(ProxyServer.id == ds.proxy_server_id).first()
+            if proxy and proxy.is_active:
+                proxy_auth = ""
+                if proxy.username and proxy.password_encrypted:
+                    proxy_auth = f"{proxy.username}:{decrypt_proxy_pwd(proxy.password_encrypted)}@"
+                proxy_url = f"{proxy.proxy_type}://{proxy_auth}{proxy.host}:{proxy.port}"
+        
+        # 构建连接参数
+        connect_args = {}
+        if proxy_url:
+            if ds_type == "MYSQL" or ds_type == "DORIS":
+                connect_args = {"proxy": proxy_url}
+            elif ds_type == "POSTGRESQL":
+                import os
+                os.environ['HTTP_PROXY'] = proxy_url
+                os.environ['HTTPS_PROXY'] = proxy_url
+        
         if ds_type == "MYSQL":
             conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
         elif ds_type == "POSTGRESQL":
@@ -329,7 +352,7 @@ class NL2SQLService:
         else:
             raise ValueError(f"不支持的数据源类型: {ds.type}")
 
-        engine = create_engine(conn_url, pool_pre_ping=True)
+        engine = create_engine(conn_url, pool_pre_ping=True, connect_args=connect_args)
 
         tables_info = {}
 

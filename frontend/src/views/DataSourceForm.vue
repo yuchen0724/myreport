@@ -28,8 +28,28 @@
             <el-input v-model="form.username" placeholder="请输入用户名" />
           </el-form-item>
           <el-form-item label="密码" prop="password">
-            <el-input v-model="form.password" type="password" placeholder="请输入密码" />
+            <el-input v-model="form.password" type="password" placeholder="请输入密码" show-password />
           </el-form-item>
+          
+          <el-divider>代理设置</el-divider>
+          
+          <el-form-item label="使用代理">
+            <el-switch v-model="form.use_proxy" @change="handleProxyChange" />
+          </el-form-item>
+          
+          <el-form-item v-if="form.use_proxy" label="代理服务器" prop="proxy_server_id">
+            <el-select v-model="form.proxy_server_id" placeholder="请选择代理服务器" clearable>
+              <el-option
+                v-for="proxy in proxyServers"
+                :key="proxy.id"
+                :label="`${proxy.name} (${proxy.host}:${proxy.port})`"
+                :value="proxy.id"
+              />
+            </el-select>
+            <el-button size="small" @click="loadProxyServers" style="margin-left: 10px">刷新</el-button>
+            <el-button size="small" type="primary" @click="$router.push('/proxy-servers/create')">新建</el-button>
+          </el-form-item>
+          
           <el-form-item>
             <el-button type="primary" @click="handleTest" :loading="testing">测试连接</el-button>
             <el-button @click="handleCancel">取消</el-button>
@@ -44,6 +64,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createDataSource, updateDataSource, testDataSourceConnection, getDataSource } from '@/api/data_source'
+import { getActiveProxyServers } from '@/api/proxy_server'
 
 export default {
   name: 'DataSourceForm',
@@ -54,6 +75,8 @@ export default {
     const formRef = ref(null)
     const testing = ref(false)
     const submitting = ref(false)
+    const proxyServers = ref([])
+    
     const form = ref({
       name: '',
       type: 'MYSQL',
@@ -61,7 +84,9 @@ export default {
       port: 3306,
       database: '',
       username: '',
-      password: ''
+      password: '',
+      use_proxy: false,
+      proxy_server_id: null
     })
     const rules = {
       name: [{ required: true, message: '请输入数据源名称', trigger: 'blur' }],
@@ -74,6 +99,20 @@ export default {
     }
 
     const isEdit = computed(() => !!route.params.id)
+
+    const loadProxyServers = async () => {
+      try {
+        proxyServers.value = await getActiveProxyServers()
+      } catch (error) {
+        console.error('加载代理服务器失败', error)
+      }
+    }
+
+    const handleProxyChange = (val) => {
+      if (val && proxyServers.value.length === 0) {
+        loadProxyServers()
+      }
+    }
 
     const handleTest = async () => {
       await formRef.value.validate()
@@ -116,6 +155,9 @@ export default {
     }
 
     onMounted(async () => {
+      // 加载代理服务器列表
+      loadProxyServers()
+      
       if (isEdit.value) {
         try {
           const data = await getDataSource(route.params.id)
@@ -126,7 +168,9 @@ export default {
             port: data.port,
             database: data.database,
             username: data.username,
-            password: data.password_decrypted || ''
+            password: data.password_decrypted || '',
+            use_proxy: data.use_proxy || false,
+            proxy_server_id: data.proxy_server_id || null
           }
         } catch (error) {
           ElMessage.error('加载数据源失败')
@@ -141,6 +185,9 @@ export default {
       testing,
       submitting,
       isEdit,
+      proxyServers,
+      loadProxyServers,
+      handleProxyChange,
       handleTest,
       handleSubmit,
       handleCancel

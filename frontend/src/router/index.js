@@ -51,6 +51,24 @@ const routes = [
     meta: { requiresAuth: true, roles: ["admin"] }
   },
   {
+    path: "/proxy-servers",
+    name: "ProxyServerList",
+    component: () => import("@/views/ProxyServerList.vue"),
+    meta: { requiresAuth: true, roles: ["admin"] }
+  },
+  {
+    path: "/proxy-servers/create",
+    name: "ProxyServerCreate",
+    component: () => import("@/views/ProxyServerForm.vue"),
+    meta: { requiresAuth: true, roles: ["admin"] }
+  },
+  {
+    path: "/proxy-servers/:id/edit",
+    name: "ProxyServerEdit",
+    component: () => import("@/views/ProxyServerForm.vue"),
+    meta: { requiresAuth: true, roles: ["admin"] }
+  },
+  {
     path: "/query",
     name: "QueryEditor",
     component: () => import("@/views/QueryEditor.vue"),

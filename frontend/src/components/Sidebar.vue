@@ -54,6 +54,10 @@
           <el-icon><DataLine /></el-icon>
           <span>数据源管理</span>
         </el-menu-item>
+        <el-menu-item index="/proxy-servers">
+          <el-icon><Connection /></el-icon>
+          <span>代理服务器</span>
+        </el-menu-item>
         <el-menu-item index="/templates">
           <el-icon><Folder /></el-icon>
           <span>模板管理</span>
@@ -100,7 +104,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
   House, DataLine, Document, ChatLineRound, TrendCharts, 
-  Folder, Share, Download, Setting, Menu, Tools
+  Folder, Share, Download, Setting, Menu, Tools, Connection
 } from '@element-plus/icons-vue'
 import { useUserStore, useMenuStore } from '@/store'
 
@@ -108,7 +112,7 @@ export default {
   name: 'Sidebar',
   components: { 
     House, DataLine, Document, ChatLineRound, TrendCharts, 
-    Folder, Share, Download, Setting, Menu, Tools
+    Folder, Share, Download, Setting, Menu, Tools, Connection
   },
   setup() {
     const route = useRoute()

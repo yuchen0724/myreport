@@ -126,6 +126,31 @@ class QueryService:
         ds_type = ds.type.upper() if ds.type else ""
         password = decrypt_password(ds.password_encrypted)
         
+        # 获取代理配置
+        proxy_url = None
+        if ds.use_proxy and ds.proxy_server_id:
+            from app.core.security import decrypt_password as decrypt_proxy_pwd
+            from app.models.proxy_server import ProxyServer
+            proxy = self.db.query(ProxyServer).filter(ProxyServer.id == ds.proxy_server_id).first()
+            if proxy and proxy.is_active:
+                # 构建代理 URL
+                proxy_auth = ""
+                if proxy.username and proxy.password_encrypted:
+                    proxy_auth = f"{proxy.username}:{decrypt_proxy_pwd(proxy.password_encrypted)}@"
+                proxy_url = f"{proxy.proxy_type}://{proxy_auth}{proxy.host}:{proxy.port}"
+        
+        # 构建连接参数
+        connect_args = {}
+        if proxy_url:
+            # 设置代理
+            if ds_type == "MYSQL" or ds_type == "DORIS":
+                connect_args = {"proxy": proxy_url}
+            elif ds_type == "POSTGRESQL":
+                # PostgreSQL 使用环境变量或连接参数
+                import os
+                os.environ['HTTP_PROXY'] = proxy_url
+                os.environ['HTTPS_PROXY'] = proxy_url
+        
         if ds_type == "MYSQL":
             conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
             engine = create_engine(
@@ -135,6 +160,7 @@ class QueryService:
                 max_overflow=10,
                 pool_pre_ping=True,
                 pool_recycle=3600,
+                connect_args=connect_args,
             )
         elif ds_type == "POSTGRESQL":
             conn_url = f"postgresql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
@@ -156,6 +182,7 @@ class QueryService:
                 max_overflow=10,
                 pool_pre_ping=True,
                 pool_recycle=3600,
+                connect_args=connect_args,
             )
         else:
             raise ValueError(f"不支持的数据源类型: {ds.type}")
