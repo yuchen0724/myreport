@@ -72,7 +72,7 @@
         <!-- 数据表格 -->
         <el-table :data="queryResult.rows" style="width: 100%" max-height="400">
           <el-table-column
-            v-for="(column, index) in queryResult.column"
+            v-for="(column, index) in queryResult.columns"
             :key="index"
             :prop="index.toString()"
             :label="column"
@@ -111,13 +111,13 @@ const chartData = ref([])
 
 // 根据查询结果自动推荐图表类型
 const chartConfig = computed(() => {
-  if (!queryResult.value || queryResult.value.column.length < 2) {
+  if (!queryResult.value || !queryResult.value.columns || queryResult.value.columns.length < 2) {
     return {}
   }
   return {
-    title: queryResult.value.column[1] || '数据',
-    x_axis: queryResult.value.column[0],
-    y_axis: queryResult.value.column[1]
+    title: queryResult.value.columns[1] || '数据',
+    x_axis: queryResult.value.columns[0],
+    y_axis: queryResult.value.columns[1]
   }
 })
 
@@ -128,7 +128,7 @@ const analyzeChartData = () => {
     return
   }
 
-  const columns = queryResult.value.column || []
+  const columns = queryResult.value.columns || []
   const rows = queryResult.value.rows || []
   
   if (columns.length < 2) {
