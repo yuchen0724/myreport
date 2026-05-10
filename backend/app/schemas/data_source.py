@@ -71,6 +71,8 @@ class DataSourceTestRequest(BaseModel):
     database: str
     username: str
     password: str
+    use_proxy: Optional[bool] = False
+    proxy_server_id: Optional[int] = None
 
 
 class DataSourceTestResponse(BaseModel):

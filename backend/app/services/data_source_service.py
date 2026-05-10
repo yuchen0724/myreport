@@ -73,11 +73,31 @@ class DataSourceService:
         return self.ds_repo.delete(db_ds)
 
     def test_connection(self, request: DataSourceTestRequest) -> DataSourceTestResponse:
-        """测试数据源连接"""
+        """测试数据源连接（支持代理）"""
         try:
             ds_type = request.type.upper() if request.type else ""
             
-            if ds_type == "MYSQL":
+            # 获取代理配置
+            proxy_url = None
+            original_http_proxy = None
+            original_https_proxy = None
+            
+            if request.use_proxy and request.proxy_server_id:
+                from app.repositories.proxy_server_repository import ProxyServerRepository
+                proxy_repo = ProxyServerRepository(self.ds_repo.db)
+                proxy = proxy_repo.get_by_id(request.proxy_server_id)
+                if proxy and proxy.is_active:
+                    if proxy.proxy_type == "http":
+                        proxy_url = f"http://{proxy.host}:{proxy.port}"
+                        # 设置环境变量让数据库驱动使用代理
+                        import os
+                        original_http_proxy = os.environ.get('HTTP_PROXY')
+                        original_https_proxy = os.environ.get('HTTPS_PROXY')
+                        os.environ['HTTP_PROXY'] = proxy_url
+                        os.environ['HTTPS_PROXY'] = proxy_url
+            
+            # MySQL/Doris 连接
+            if ds_type in ("MYSQL", "DORIS"):
                 import pymysql
                 conn = pymysql.connect(
                     host=request.host,
@@ -85,10 +105,13 @@ class DataSourceService:
                     user=request.username,
                     password=request.password,
                     database=request.database,
-                    connect_timeout=5
+                    connect_timeout=10
                 )
                 conn.close()
-                return DataSourceTestResponse(success=True, message="连接成功")
+                msg = "连接成功" + ("（通过代理）" if proxy_url else "")
+                return DataSourceTestResponse(success=True, message=msg)
+            
+            # PostgreSQL 连接
             elif ds_type == "POSTGRESQL":
                 import psycopg2
                 conn = psycopg2.connect(
@@ -97,23 +120,24 @@ class DataSourceService:
                     user=request.username,
                     password=request.password,
                     database=request.database,
-                    connect_timeout=5
+                    connect_timeout=10
                 )
                 conn.close()
-                return DataSourceTestResponse(success=True, message="连接成功")
-            elif ds_type == "DORIS":
-                import pymysql
-                conn = pymysql.connect(
-                    host=request.host,
-                    port=request.port,
-                    user=request.username,
-                    password=request.password,
-                    database=request.database,
-                    connect_timeout=5
-                )
-                conn.close()
-                return DataSourceTestResponse(success=True, message="连接成功")
+                msg = "连接成功" + ("（通过代理）" if proxy_url else "")
+                return DataSourceTestResponse(success=True, message=msg)
             else:
                 return DataSourceTestResponse(success=False, message=f"不支持的数据源类型: {request.type}")
         except Exception as e:
             return DataSourceTestResponse(success=False, message=f"连接失败: {str(e)}")
+        finally:
+            # 恢复环境变量
+            if proxy_url:
+                import os
+                if original_http_proxy is not None:
+                    os.environ['HTTP_PROXY'] = original_http_proxy
+                else:
+                    os.environ.pop('HTTP_PROXY', None)
+                if original_https_proxy is not None:
+                    os.environ['HTTPS_PROXY'] = original_https_proxy
+                else:
+                    os.environ.pop('HTTPS_PROXY', None)
