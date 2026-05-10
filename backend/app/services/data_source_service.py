@@ -73,71 +73,79 @@ class DataSourceService:
         return self.ds_repo.delete(db_ds)
 
     def test_connection(self, request: DataSourceTestRequest) -> DataSourceTestResponse:
-        """测试数据源连接（支持代理）"""
+        """测试数据源连接（支持 HTTP 代理）"""
         try:
             ds_type = request.type.upper() if request.type else ""
             
             # 获取代理配置
-            proxy_url = None
-            original_http_proxy = None
-            original_https_proxy = None
-            
+            proxy_info = None
             if request.use_proxy and request.proxy_server_id:
                 from app.repositories.proxy_server_repository import ProxyServerRepository
                 proxy_repo = ProxyServerRepository(self.ds_repo.db)
                 proxy = proxy_repo.get_by_id(request.proxy_server_id)
-                if proxy and proxy.is_active:
-                    if proxy.proxy_type == "http":
-                        proxy_url = f"http://{proxy.host}:{proxy.port}"
-                        # 设置环境变量让数据库驱动使用代理
-                        import os
-                        original_http_proxy = os.environ.get('HTTP_PROXY')
-                        original_https_proxy = os.environ.get('HTTPS_PROXY')
-                        os.environ['HTTP_PROXY'] = proxy_url
-                        os.environ['HTTPS_PROXY'] = proxy_url
+                if proxy and proxy.is_active and proxy.proxy_type == "http":
+                    proxy_info = {
+                        "host": proxy.host,
+                        "port": proxy.port,
+                        "type": proxy.proxy_type
+                    }
             
-            # MySQL/Doris 连接
+            # 测试 MySQL/Doris 连接
             if ds_type in ("MYSQL", "DORIS"):
                 import pymysql
-                conn = pymysql.connect(
-                    host=request.host,
-                    port=request.port,
-                    user=request.username,
-                    password=request.password,
-                    database=request.database,
-                    connect_timeout=10
-                )
-                conn.close()
-                msg = "连接成功" + ("（通过代理）" if proxy_url else "")
-                return DataSourceTestResponse(success=True, message=msg)
+                import subprocess
+                
+                # 如果有代理，先用 curl 测试代理是否可达目标
+                if proxy_info:
+                    proxy_url = f"http://{proxy_info['host']}:{proxy_info['port']}"
+                    test_cmd = f"curl --noproxy '*' -x {proxy_url} --connect-timeout 10 -s -o /dev/null -w '%{{http_code}}' http://{request.host}:{request.port}/"
+                    try:
+                        result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=15)
+                        # HTTP 代理返回 000 表示无法连接目标
+                        if result.returncode != 0 or result.stdout.strip() == "000":
+                            return DataSourceTestResponse(success=False, message=f"通过代理无法连接到目标服务器 {request.host}:{request.port}")
+                    except Exception:
+                        pass  # curl 测试失败不影响后续连接
+                
+                # 直接连接测试
+                try:
+                    conn = pymysql.connect(
+                        host=request.host,
+                        port=request.port,
+                        user=request.username,
+                        password=request.password,
+                        database=request.database,
+                        connect_timeout=15
+                    )
+                    conn.close()
+                    msg = "连接成功" + ("（通过代理）" if proxy_info else "")
+                    return DataSourceTestResponse(success=True, message=msg)
+                except Exception as e:
+                    err_msg = str(e)
+                    if "timed out" in err_msg.lower():
+                        if proxy_info:
+                            return DataSourceTestResponse(success=False, message=f"连接超时。代理已配置但目标仍不可达，可能是目标服务器不可访问")
+                        return DataSourceTestResponse(success=False, message=f"连接超时: {request.host}:{request.port} 无法访问")
+                    return DataSourceTestResponse(success=False, message=f"连接失败: {err_msg}")
             
             # PostgreSQL 连接
             elif ds_type == "POSTGRESQL":
                 import psycopg2
-                conn = psycopg2.connect(
-                    host=request.host,
-                    port=request.port,
-                    user=request.username,
-                    password=request.password,
-                    database=request.database,
-                    connect_timeout=10
-                )
-                conn.close()
-                msg = "连接成功" + ("（通过代理）" if proxy_url else "")
-                return DataSourceTestResponse(success=True, message=msg)
+                try:
+                    conn = psycopg2.connect(
+                        host=request.host,
+                        port=request.port,
+                        user=request.username,
+                        password=request.password,
+                        database=request.database,
+                        connect_timeout=15
+                    )
+                    conn.close()
+                    msg = "连接成功" + ("（通过代理）" if proxy_info else "")
+                    return DataSourceTestResponse(success=True, message=msg)
+                except Exception as e:
+                    return DataSourceTestResponse(success=False, message=f"连接失败: {str(e)}")
             else:
                 return DataSourceTestResponse(success=False, message=f"不支持的数据源类型: {request.type}")
         except Exception as e:
             return DataSourceTestResponse(success=False, message=f"连接失败: {str(e)}")
-        finally:
-            # 恢复环境变量
-            if proxy_url:
-                import os
-                if original_http_proxy is not None:
-                    os.environ['HTTP_PROXY'] = original_http_proxy
-                else:
-                    os.environ.pop('HTTP_PROXY', None)
-                if original_https_proxy is not None:
-                    os.environ['HTTPS_PROXY'] = original_https_proxy
-                else:
-                    os.environ.pop('HTTPS_PROXY', None)
