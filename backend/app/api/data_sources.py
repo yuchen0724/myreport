@@ -79,6 +79,8 @@ async def get_data_source(
         "database": db_ds.database,
         "username": db_ds.username,
         "password_decrypted": decrypt_password(db_ds.password_encrypted),
+        "use_proxy": db_ds.use_proxy,
+        "proxy_server_id": db_ds.proxy_server_id,
         "is_active": db_ds.is_active,
         "created_by": db_ds.created_by,
         "created_at": db_ds.created_at,

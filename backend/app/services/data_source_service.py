@@ -46,17 +46,21 @@ class DataSourceService:
         if not db_ds:
             return None
         
-        # 处理密码：空字符串表示不修改密码
+        # 处理更新数据：使用 exclude_unset=True 但后端需要更新布尔字段
         update_data = ds_data.model_dump(exclude_unset=True)
-        if 'password' in update_data:
-            if update_data['password'] == '' or update_data['password'] is None:
-                # 空密码，不更新密码字段
-                del update_data['password']
-            else:
-                # 有新密码，加密存储
-                from app.core.security import encrypt_password
-                update_data['password_encrypted'] = encrypt_password(update_data['password'])
-                del update_data['password']
+        
+        # 手动添加前端传来的布尔字段（即使值为 False）
+        if hasattr(ds_data, 'use_proxy'):
+            update_data['use_proxy'] = ds_data.use_proxy
+        if hasattr(ds_data, 'proxy_server_id') and ds_data.proxy_server_id is not None:
+            update_data['proxy_server_id'] = ds_data.proxy_server_id
+        
+        # 检查密码是否需要更新
+        password_value = update_data.get('password')
+        if password_value:  # 有新密码
+            from app.core.security import encrypt_password
+            update_data['password_encrypted'] = encrypt_password(password_value)
+            del update_data['password']
         
         updated_ds = self.ds_repo.update(db_ds, update_data)
         return DataSourceResponse.model_validate(updated_ds)

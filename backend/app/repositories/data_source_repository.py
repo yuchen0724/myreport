@@ -36,7 +36,10 @@ class DataSourceRepository:
 
     def update(self, ds: DataSource, ds_data: dict) -> DataSource:
         for key, value in ds_data.items():
-            if hasattr(ds, key) and value is not None:
+            # 排除空字符串密码（保留原密码）
+            if key == 'password' and value in ('', None):
+                continue
+            if hasattr(ds, key):
                 setattr(ds, key, value)
         self.db.commit()
         self.db.refresh(ds)
