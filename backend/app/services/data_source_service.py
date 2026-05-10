@@ -83,7 +83,7 @@ class DataSourceService:
                 from app.repositories.proxy_server_repository import ProxyServerRepository
                 proxy_repo = ProxyServerRepository(self.ds_repo.db)
                 proxy = proxy_repo.get_by_id(request.proxy_server_id)
-                if proxy and proxy.is_active and proxy.proxy_type == "http":
+                if proxy and proxy.is_active:
                     proxy_info = {
                         "host": proxy.host,
                         "port": proxy.port,
@@ -95,17 +95,26 @@ class DataSourceService:
                 import pymysql
                 import subprocess
                 
-                # 如果有代理，先用 curl 测试代理是否可达目标
+                # 如果有代理，测试代理是否可达
                 if proxy_info:
-                    proxy_url = f"http://{proxy_info['host']}:{proxy_info['port']}"
-                    test_cmd = f"curl --noproxy '*' -x {proxy_url} --connect-timeout 10 -s -o /dev/null -w '%{{http_code}}' http://{request.host}:{request.port}/"
-                    try:
-                        result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=15)
-                        # HTTP 代理返回 000 表示无法连接目标
-                        if result.returncode != 0 or result.stdout.strip() == "000":
-                            return DataSourceTestResponse(success=False, message=f"通过代理无法连接到目标服务器 {request.host}:{request.port}")
-                    except Exception:
-                        pass  # curl 测试失败不影响后续连接
+                    if proxy_info["type"] == "http":
+                        proxy_url = f"http://{proxy_info['host']}:{proxy_info['port']}"
+                        test_cmd = f"curl --noproxy '*' -x {proxy_url} --connect-timeout 10 -s -o /dev/null -w '%{{http_code}}' http://{request.host}:{request.port}/"
+                        try:
+                            result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=15)
+                            if result.returncode != 0 or result.stdout.strip() == "000":
+                                return DataSourceTestResponse(success=False, message=f"通过代理无法连接到目标服务器 {request.host}:{request.port}")
+                        except Exception:
+                            pass
+                    elif proxy_info["type"] == "socks5":
+                        # SOCKS5 代理：使用 curl 的 socks5 协议测试
+                        test_cmd = f"curl --noproxy '*' --socks5 {proxy_info['host']}:{proxy_info['port']} --connect-timeout 10 -s -o /dev/null -w '%{{http_code}}' http://{request.host}:{request.port}/"
+                        try:
+                            result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=15)
+                            if result.returncode != 0 or result.stdout.strip() == "000":
+                                return DataSourceTestResponse(success=False, message=f"通过SOCKS5代理无法连接到目标服务器 {request.host}:{request.port}")
+                        except Exception:
+                            pass
                 
                 # 直接连接测试
                 try:
