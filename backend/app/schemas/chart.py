@@ -4,11 +4,16 @@ from typing import List, Dict, Any, Optional, Literal
 
 class ChartConfig(BaseModel):
     """图表配置"""
-    chart_type: Literal["line", "bar", "pie", "scatter"] = Field(..., description="图表类型")
+    chart_type: Literal["line", "bar", "pie", "scatter", "radar", "gauge", "funnel"] = Field(..., description="图表类型")
     x_axis: str = Field(..., description="X 轴字段")
     y_axis: str = Field(..., description="Y 轴字段")
     title: Optional[str] = Field(None, description="图表标题")
     color: Optional[str] = Field(None, description="颜色")
+    # 新增炫酷配置
+    colorTheme: Optional[str] = Field("blue", description="配色主题: blue/purple/cyan/orange/green/pink")
+    height: Optional[str] = Field("400px", description="图表高度")
+    showParticles: Optional[bool] = Field(False, description="是否显示粒子特效")
+    maxValue: Optional[float] = Field(None, description="最大值（雷达图/仪表盘用）")
 
 class ChartRequest(BaseModel):
     """图表请求"""
