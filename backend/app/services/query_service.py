@@ -126,6 +126,19 @@ class QueryService:
         ds_type = ds.type.upper() if ds.type else ""
         password = decrypt_password(ds.password_encrypted)
         
+        # SOCKS5 代理处理
+        original_socket = None
+        if ds.use_proxy and ds.proxy_server_id:
+            from app.models.proxy_server import ProxyServer
+            proxy = self.db.query(ProxyServer).filter(ProxyServer.id == ds.proxy_server_id).first()
+            if proxy and proxy.is_active and proxy.proxy_type == "socks5":
+                import socket
+                import socks
+                global_socket = socket.socket
+                socks.set_default_proxy(socks.SOCKS5, proxy.host, proxy.port)
+                socket.socket = socks.socksocket
+                original_socket = global_socket
+        
         # 获取代理配置
         proxy_url = None
         if ds.use_proxy and ds.proxy_server_id:
