@@ -90,10 +90,12 @@ class DataSourceService:
                         "type": proxy.proxy_type
                     }
             
-            # 测试 MySQL/Doris 连接
+# 测试 MySQL/Doris 连接
             if ds_type in ("MYSQL", "DORIS"):
                 import pymysql
                 import subprocess
+                import socket
+                import socks
                 
                 # 如果有代理，测试代理是否可达
                 if proxy_info:
@@ -107,28 +109,51 @@ class DataSourceService:
                         except Exception:
                             pass
                     elif proxy_info["type"] == "socks5":
-                        # SOCKS5 代理：使用 curl 的 socks5 协议测试
-                        test_cmd = f"curl --noproxy '*' --socks5 {proxy_info['host']}:{proxy_info['port']} --connect-timeout 10 -s -o /dev/null -w '%{{http_code}}' http://{request.host}:{request.port}/"
+                        # SOCKS5 代理：测试公网连通性
+                        test_cmd = f"curl --noproxy '*' --socks5 {proxy_info['host']}:{proxy_info['port']} --connect-timeout 10 -s -o /dev/null -w '%{{http_code}}' https://www.baidu.com"
                         try:
                             result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=15)
-                            if result.returncode != 0 or result.stdout.strip() == "000":
-                                return DataSourceTestResponse(success=False, message=f"通过SOCKS5代理无法连接到目标服务器 {request.host}:{request.port}")
-                        except Exception:
-                            pass
+                            if result.returncode != 0 or result.stdout.strip() != "200":
+                                return DataSourceTestResponse(success=False, message=f"SOCKS5代理不可达")
+                        except Exception as e:
+                            return DataSourceTestResponse(success=False, message=f"SOCKS5代理测试失败: {str(e)}")
                 
-                # 直接连接测试
+                # 使用代理连接
                 try:
-                    conn = pymysql.connect(
-                        host=request.host,
-                        port=request.port,
-                        user=request.username,
-                        password=request.password,
-                        database=request.database,
-                        connect_timeout=15
-                    )
-                    conn.close()
-                    msg = "连接成功" + ("（通过代理）" if proxy_info else "")
-                    return DataSourceTestResponse(success=True, message=msg)
+                    if proxy_info and proxy_info["type"] == "socks5":
+                        # 全局替换 socket 为 SOCKS5 代理 socket
+                        import socks
+                        original_socket = socket.socket
+                        socks.set_default_proxy(socks.SOCKS5, proxy_info["host"], proxy_info["port"])
+                        socket.socket = socks.socksocket
+                        try:
+                            conn = pymysql.connect(
+                                host=request.host,
+                                port=request.port,
+                                user=request.username,
+                                password=request.password,
+                                database=request.database,
+                                connect_timeout=20
+                            )
+                            conn.close()
+                            return DataSourceTestResponse(success=True, message="连接成功（通过SOCKS5代理）")
+                        finally:
+                            # 恢复原始 socket
+                            socket.socket = original_socket
+                            socks.set_default_proxy()  # 清除默认代理
+                    else:
+                        # 直接连接
+                        conn = pymysql.connect(
+                            host=request.host,
+                            port=request.port,
+                            user=request.username,
+                            password=request.password,
+                            database=request.database,
+                            connect_timeout=15
+                        )
+                        conn.close()
+                        msg = "连接成功" + ("（通过代理）" if proxy_info else "")
+                        return DataSourceTestResponse(success=True, message=msg)
                 except Exception as e:
                     err_msg = str(e)
                     if "timed out" in err_msg.lower():
