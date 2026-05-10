@@ -83,14 +83,33 @@ const generateChartOption = () => {
   if (props.chartType === 'pie') {
     baseOption.xAxis = null
     baseOption.yAxis = null
-    baseOption.series[0].data = props.data.map(item => ({
+    baseOption.series[0].data = props.data.map((item, index) => ({
       name: item.x,
-      value: item.y
+      value: item.y,
+      itemStyle: {
+        color: PIE_COLORS[index % PIE_COLORS.length]
+      }
     }))
+    baseOption.tooltip = {
+      trigger: 'item',
+      formatter: '{b}: {c} ({d}%)'
+    }
+    baseOption.legend = {
+      orient: 'vertical',
+      left: 'left',
+      data: props.data.map(item => item.x)
+    }
   }
 
   return baseOption
 }
+
+// 饼图颜色配置
+const PIE_COLORS = [
+  '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
+  '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#ff7500',
+  '#36a9e1', '#00c853', '#ff5252', '#7c4dff', '#ffd740'
+]
 </script>
 
 <style scoped>
