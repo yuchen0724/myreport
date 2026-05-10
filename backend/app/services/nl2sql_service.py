@@ -439,10 +439,12 @@ class NL2SQLService:
 
     def _load_semantic_doc(self, data_source_id: int) -> Optional[str]:
         """
-        加载语义层文档
+        加载语义层文档 - 动态扫描，按数据源名+数据库名查找
 
-        根据 data_source_id 查找对应的语义层文档
-        目前通过数据库名映射：data_source_id=1 -> retail_analysis -> retail_nl2sql.md
+        查找规则（按优先级）:
+        1. semantic/{数据源名}/{数据库名}.md
+        2. semantic/{数据源名}/{数据库名}/README.md
+        3. semantic/{数据源名}/{数据库名}/*.md (合并所有 .md 文件)
 
         Args:
             data_source_id: 数据源 ID
@@ -455,38 +457,79 @@ class NL2SQLService:
 
         try:
             ds = self.ds_repo.get_by_id(data_source_id)
-            if not ds:
+            if not ds or not ds.database:
                 return None
 
-            # 根据数据库名查找语义层文档
-            db_name = ds.database.lower() if ds.database else ""
-            
-            # 语义层文档路径映射
-            semantic_docs = {
-                "retail_analysis": "retail_nl2sql.md",
-            }
+            ds_name = ds.name.lower() if ds.name else ""
+            db_name = ds.database.lower()
+            semantic_dir = self._get_semantic_dir()
 
-            doc_filename = semantic_docs.get(db_name)
-            if not doc_filename:
-                logger.warning(f"未找到数据库 {db_name} 对应的语义层文档")
+            if not semantic_dir or not semantic_dir.exists():
+                logger.warning(f"语义层目录不存在: {semantic_dir}")
                 return None
 
-            # 查找文档路径 - 优先 semantic 文件夹
-            possible_paths = [
-                Path(__file__).parent.parent.parent / "semantic" / doc_filename,
-                Path(__file__).parent.parent / "semantic" / doc_filename,
-                Path("/home/zhou/myreport/semantic") / doc_filename,
-            ]
+            # 策略1: semantic/{数据源名}/{数据库名}.md
+            single_file = semantic_dir / ds_name / f"{db_name}.md"
+            if single_file.exists():
+                content = single_file.read_text(encoding="utf-8")
+                logger.info(f"加载语义层文档(单文件): {single_file}")
+                return content
 
-            for doc_path in possible_paths:
-                if doc_path.exists():
-                    content = doc_path.read_text(encoding="utf-8")
-                    logger.info(f"加载语义层文档: {doc_path}")
+            # 策略2: semantic/{数据源名}/{数据库名}/README.md
+            db_dir = semantic_dir / ds_name / db_name
+            readme_file = db_dir / "README.md"
+            if db_dir.exists() and db_dir.is_dir() and readme_file.exists():
+                content = readme_file.read_text(encoding="utf-8")
+                logger.info(f"加载语义层文档(目录): {readme_file}")
+                return content
+
+            # 策略3: semantic/{数据源名}/{数据库名}/*.md 合并
+            if db_dir.exists() and db_dir.is_dir():
+                md_files = sorted(db_dir.glob("*.md"))
+                if md_files:
+                    contents = []
+                    for md_file in md_files:
+                        contents.append(f"## {md_file.stem}\n\n{md_file.read_text(encoding='utf-8')}")
+                    content = "\n\n".join(contents)
+                    logger.info(f"加载语义层文档(合并 {len(md_files)} 个文件): {db_dir}")
                     return content
 
-            logger.warning(f"语义层文档不存在: {doc_filename}")
-            return None
+            # 兼容策略: 找不到时回退到根目录查找
+            return self._load_semantic_doc_fallback(semantic_dir, db_name)
 
         except Exception as e:
             logger.error(f"加载语义层文档失败: {e}")
             return None
+
+    def _load_semantic_doc_fallback(self, semantic_dir: Path, db_name: str) -> Optional[str]:
+        """回退到根目录查找（兼容旧结构）"""
+        # 策略1: semantic/{database}.md
+        single_file = semantic_dir / f"{db_name}.md"
+        if single_file.exists():
+            content = single_file.read_text(encoding="utf-8")
+            logger.info(f"加载语义层文档(兼容模式-单文件): {single_file}")
+            return content
+
+        # 策略2: semantic/{database}/README.md
+        db_dir = semantic_dir / db_name
+        readme_file = db_dir / "README.md"
+        if db_dir.exists() and db_dir.is_dir() and readme_file.exists():
+            content = readme_file.read_text(encoding="utf-8")
+            logger.info(f"加载语义层文档(兼容模式-目录): {readme_file}")
+            return content
+
+        logger.warning(f"回退查找也未找到数据库 {db_name} 对应的语义层文档")
+        return None
+
+    def _get_semantic_dir(self) -> Optional[Path]:
+        """获取语义层目录路径"""
+        possible_dirs = [
+            Path("/home/zhou/myreport/semantic"),
+            Path(__file__).parent.parent.parent / "semantic",
+            Path(__file__).parent.parent / "semantic",
+        ]
+        for d in possible_dirs:
+            if d.exists():
+                return d
+        # 返回第一个可能的目录（用于创建）
+        return possible_dirs[0]
