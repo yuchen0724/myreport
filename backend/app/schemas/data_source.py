@@ -19,6 +19,12 @@ class DataSourceCreate(DataSourceBase):
 
 class DataSourceUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
+    type: Optional[str] = None
+    host: Optional[str] = None
+    port: Optional[int] = Field(None, gt=0, le=65535)
+    database: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None  # 空字符串表示不修改密码
     is_active: Optional[bool] = None
 
 
@@ -42,6 +48,7 @@ class DataSourceResponse(BaseModel):
     port: int
     database: str
     username: str
+    password_decrypted: Optional[str] = None  # 编辑时返回解密密码
     is_active: bool
     created_by: Optional[int] = None
     created_at: Optional[datetime] = None

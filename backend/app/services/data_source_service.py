@@ -45,8 +45,20 @@ class DataSourceService:
         db_ds = self.ds_repo.get_by_id(ds_id)
         if not db_ds:
             return None
-
-        updated_ds = self.ds_repo.update(db_ds, ds_data.model_dump(exclude_unset=True))
+        
+        # 处理密码：空字符串表示不修改密码
+        update_data = ds_data.model_dump(exclude_unset=True)
+        if 'password' in update_data:
+            if update_data['password'] == '' or update_data['password'] is None:
+                # 空密码，不更新密码字段
+                del update_data['password']
+            else:
+                # 有新密码，加密存储
+                from app.core.security import encrypt_password
+                update_data['password_encrypted'] = encrypt_password(update_data['password'])
+                del update_data['password']
+        
+        updated_ds = self.ds_repo.update(db_ds, update_data)
         return DataSourceResponse.model_validate(updated_ds)
 
     def delete_data_source(self, ds_id: int) -> bool:
@@ -59,7 +71,9 @@ class DataSourceService:
     def test_connection(self, request: DataSourceTestRequest) -> DataSourceTestResponse:
         """测试数据源连接"""
         try:
-            if request.type == "MYSQL":
+            ds_type = request.type.upper() if request.type else ""
+            
+            if ds_type == "MYSQL":
                 import pymysql
                 conn = pymysql.connect(
                     host=request.host,
@@ -71,7 +85,7 @@ class DataSourceService:
                 )
                 conn.close()
                 return DataSourceTestResponse(success=True, message="连接成功")
-            elif request.type == "POSTGRESQL":
+            elif ds_type == "POSTGRESQL":
                 import psycopg2
                 conn = psycopg2.connect(
                     host=request.host,
@@ -95,7 +109,7 @@ class DataSourceService:
                 )
                 conn.close()
                 return DataSourceTestResponse(success=True, message="连接成功")
-            elif request.type == "DORIS":
+            elif ds_type == "DORIS":
                 import pymysql
                 conn = pymysql.connect(
                     host=request.host,

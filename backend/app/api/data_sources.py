@@ -49,7 +49,7 @@ async def get_data_source(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id)
 ):
-    """获取数据源详情"""
+    """获取数据源详情（包含解密密码，方便编辑测试）"""
     ds_service = DataSourceService(db)
     ds = ds_service.get_data_source(ds_id)
     if not ds:
@@ -57,7 +57,33 @@ async def get_data_source(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="数据源不存在",
         )
-    return ds
+    # 返回包含解密密码的响应
+    from app.core.security import decrypt_password
+    from sqlalchemy import select
+    from app.models.data_source import DataSource
+    
+    # 重新查询获取原始数据库对象
+    db_ds = db.execute(select(DataSource).where(DataSource.id == ds_id)).scalar_one_or_none()
+    if not db_ds:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="数据源不存在",
+        )
+    
+    return {
+        "id": db_ds.id,
+        "name": db_ds.name,
+        "type": db_ds.type,
+        "host": db_ds.host,
+        "port": db_ds.port,
+        "database": db_ds.database,
+        "username": db_ds.username,
+        "password_decrypted": decrypt_password(db_ds.password_encrypted),
+        "is_active": db_ds.is_active,
+        "created_by": db_ds.created_by,
+        "created_at": db_ds.created_at,
+        "updated_at": db_ds.updated_at,
+    }
 
 
 @router.put("/{ds_id}", response_model=DataSourceResponse)

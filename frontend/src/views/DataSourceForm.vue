@@ -126,7 +126,7 @@ export default {
             port: data.port,
             database: data.database,
             username: data.username,
-            password: ''
+            password: data.password_decrypted || ''
           }
         } catch (error) {
           ElMessage.error('加载数据源失败')
