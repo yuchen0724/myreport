@@ -231,7 +231,15 @@ class LLMClient:
         return ""
     
     def _call_azure(self, messages: List[Dict[str, str]], temperature: float) -> str:
-        """调用 Azure OpenAI API (兼容新版 OpenAI SDK v1.0+)"""
+        """调用 Azure OpenAI API (兼容新版 OpenAI SDK v1.0+)
+        
+        如果未配置 azure_endpoint 但配置了 llm_api_base，自动回退到 OpenAI 兼容模式
+        """
+        # 检查是否配置了 Azure 端点，如果没有但配置了 API_BASE，回退到 OpenAI 模式
+        if not self.settings.azure_openai_endpoint and self.settings.llm_api_base:
+            print(f"[LLM:Azure] ⚠️ 未配置 azure_endpoint，检测到 llm_api_base，回退到 OpenAI 兼容模式", flush=True)
+            return self._call_openai(messages, temperature)
+        
         try:
             # 尝试使用 AzureOpenAI 客户端（新版本 SDK）
             from openai import AzureOpenAI
