@@ -758,6 +758,7 @@ class NL2SQLService:
         1. 匹配 FROM/JOIN 后的完整表名（如 ads_cockpit_freedom.table_name 或 table_name）
         2. 如果已带库名（有点号），跳过
         3. 如果没有库名，添加数据源的默认库名
+        4. 跳过 WITH 定义的 CTE（虚拟表）
         """
         import re
         
@@ -772,16 +773,33 @@ class NL2SQLService:
             logger.warning(f"[NL2SQL] ⚠️ 无法获取数据源 {data_source_id} 的数据库名")
             return sql
         
+        # 提取 WITH 定义的 CTE 名称（虚拟表名不添加库名）
+        cte_names = set()
+        cte_pattern = r'WITH\s+(\w+)\s+AS'
+        cte_matches = re.findall(cte_pattern, sql, re.IGNORECASE)
+        cte_names.update(cte_matches)
+        # 处理多个 CTE: WITH cte1 AS (), cte2 AS ()
+        multi_cte_pattern = r'WITH\s+(?:\w+\s+AS\s*\([^)]+\),\s*)+(\w+)\s+AS'
+        multi_matches = re.findall(multi_cte_pattern, sql, re.IGNORECASE)
+        cte_names.update(multi_matches)
+        
+        if cte_names:
+            logger.info(f"[NL2SQL] ℹ️ 跳过 WITH 定义的 CTE: {cte_names}")
+        
         # 匹配 FROM/JOIN 后的表名，支持两种格式：
         # 1. db.table_name (带库名)
         # 2. table_name (不带库名)
-        # 注意：表名可能带 AS 别名，需要处理
         pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\s*(?:AS\s+\w+)?'
         
         matches = re.findall(pattern, sql, re.IGNORECASE)
         
         fixed_sql = sql
         for full_table in set(matches):
+            # 跳过 WITH 定义的 CTE（虚拟表）
+            if full_table.upper() in {t.upper() for t in cte_names}:
+                logger.info(f"[NL2SQL] ✓ 跳过 CTE: {full_table}")
+                continue
+            
             # 跳过已带库名的表名（已包含点号）
             if '.' in full_table:
                 logger.info(f"[NL2SQL] ✓ 表名已带库名，跳过: {full_table}")
@@ -800,7 +818,6 @@ class NL2SQLService:
             
             # 添加库名前缀
             fixed_name = f"{db_name}.{full_table}"
-            # 替换原始表名（在 FROM/JOIN 后面）
             fixed_sql = re.sub(
                 rf'(?:FROM|JOIN)\s+{full_table}\b',
                 lambda m: m.group(0).replace(full_table, fixed_name),
