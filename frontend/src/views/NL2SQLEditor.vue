@@ -57,6 +57,12 @@
         
         <!-- 图表展示区域 -->
         <div v-if="chartData.length > 0" class="chart-section">
+          <!-- 图表建议说明 -->
+          <div v-if="recommendedChart && recommendedChart.reason" class="chart-recommend-tip">
+            <el-icon><InfoFilled /></el-icon>
+            <span>图表建议：{{ recommendedChart.chart_type }} - {{ recommendedChart.reason }}</span>
+          </div>
+          
           <div class="chart-controls">
             <el-radio-group v-model="chartType" size="small" @change="handleChartTypeChange">
               <el-radio-button value="bar">📊 柱状图</el-radio-button>
@@ -105,6 +111,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
 import { parseQuestion } from '@/api/nl2sql'
 import { getDataSourceList } from '@/api/data_source'
 import ChartRenderer from '@/components/ChartRenderer.vue'
@@ -556,6 +563,19 @@ const handleChartTypeChange = (type) => {
   margin-bottom: 15px;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.chart-recommend-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background-color: #f0f9ff;
+  border: 1px solid #bae7ff;
+  border-radius: 4px;
+  color: #1890ff;
+  font-size: 14px;
 }
 
 .chart-section .el-radio-group {
