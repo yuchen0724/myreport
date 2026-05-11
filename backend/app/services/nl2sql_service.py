@@ -775,13 +775,13 @@ class NL2SQLService:
         
         # 提取 WITH 定义的 CTE 名称（虚拟表名不添加库名）
         cte_names = set()
-        cte_pattern = r'WITH\s+(\w+)\s+AS'
-        cte_matches = re.findall(cte_pattern, sql, re.IGNORECASE)
-        cte_names.update(cte_matches)
-        # 处理多个 CTE: WITH cte1 AS (), cte2 AS ()
-        multi_cte_pattern = r'WITH\s+(?:\w+\s+AS\s*\([^)]+\),\s*)+(\w+)\s+AS'
-        multi_matches = re.findall(multi_cte_pattern, sql, re.IGNORECASE)
-        cte_names.update(multi_matches)
+        # 匹配 WITH 后到 SELECT 之间的所有 CTE 名称
+        # 格式: WITH cte1 AS (...), cte2 AS (...), cte3 AS (...) SELECT ...
+        cte_section_match = re.search(r'WITH\s+(.*?)\s+(?:SELECT|INSERT|UPDATE|DELETE)', sql, re.IGNORECASE | re.DOTALL)
+        if cte_section_match:
+            cte_section = cte_section_match.group(1)
+            # 提取所有 CTE 名称（AS 之前的标识符）
+            cte_names = set(re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*)\s+AS', cte_section, re.IGNORECASE))
         
         if cte_names:
             logger.info(f"[NL2SQL] ℹ️ 跳过 WITH 定义的 CTE: {cte_names}")
