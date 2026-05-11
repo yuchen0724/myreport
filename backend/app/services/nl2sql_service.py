@@ -754,12 +754,10 @@ class NL2SQLService:
         """
         校验并修复 SQL 中的表名，确保带库名前缀
         
-        Args:
-            sql: 原始 SQL
-            data_source_id: 数据源 ID
-            
-        Returns:
-            修复后的 SQL
+        逻辑：
+        1. 匹配 FROM/JOIN 后的完整表名（如 ads_cockpit_freedom.table_name 或 table_name）
+        2. 如果已带库名（有点号），跳过
+        3. 如果没有库名，添加数据源的默认库名
         """
         import re
         
@@ -774,52 +772,44 @@ class NL2SQLService:
             logger.warning(f"[NL2SQL] ⚠️ 无法获取数据源 {data_source_id} 的数据库名")
             return sql
         
-        # 查找 SQL 中所有不带库名的表名（FROM/JOIN 后面只有表名，没有点号）
-        # 匹配: FROM table_name 或 JOIN table_name (不含点号)
-        pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)\b'
+        # 匹配 FROM/JOIN 后的表名，支持两种格式：
+        # 1. db.table_name (带库名)
+        # 2. table_name (不带库名)
+        # 注意：表名可能带 AS 别名，需要处理
+        pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\s*(?:AS\s+\w+)?'
         
-        def replace_func(match):
-            prefix = match.group(1)
-            # 跳过已带库名的表名（如已有 ads_cockpit_freedom.）
-            if '.' in prefix:
-                return match.group(0)
-            # 跳过 MySQL 关键字和函数
+        matches = re.findall(pattern, sql, re.IGNORECASE)
+        
+        fixed_sql = sql
+        for full_table in set(matches):
+            # 跳过已带库名的表名（已包含点号）
+            if '.' in full_table:
+                logger.info(f"[NL2SQL] ✓ 表名已带库名，跳过: {full_table}")
+                continue
+            
+            # 跳过 SQL 关键字
             skip_words = {'SELECT', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'ON', 'AS', 
                          'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'CROSS', 'JOIN',
                          'GROUP', 'ORDER', 'BY', 'HAVING', 'LIMIT', 'OFFSET', 'UNION',
                          'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'NULL', 'TRUE', 'FALSE',
-                         'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'COALESCE', 'IFNULL', 'IF'}
-            if prefix.upper() in skip_words:
-                return match.group(0)
-            # 添加库名前缀
-            fixed = f"{db_name}.{prefix}"
-            logger.info(f"[NL2SQL] 🔧 修复表名: {prefix} -> {fixed}")
-            return match.group(0).replace(prefix, fixed)
-        
-        # 检查是否有需要修复的表名
-        tables_without_db = re.findall(pattern, sql, re.IGNORECASE)
-        if not tables_without_db:
-            return sql
-        
-        # 只修复真正需要修复的表名
-        fixed_sql = sql
-        for table in set(tables_without_db):
-            # 跳过关键字
-            if table.upper() in {'SELECT', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'ON', 'AS',
-                                 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'GROUP', 'ORDER', 'BY',
-                                 'HAVING', 'LIMIT', 'OFFSET', 'UNION', 'CASE', 'WHEN', 'THEN',
-                                 'ELSE', 'END', 'NULL', 'TRUE', 'FALSE', 'COUNT', 'SUM', 
-                                 'AVG', 'MAX', 'MIN', 'COALESCE', 'IFNULL', 'IF', 'FROM', 'JOIN'}:
+                         'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'COALESCE', 'IFNULL', 'IF',
+                         'FROM', 'JOIN', 'SET', 'VALUES', 'INTO', 'TABLE', 'DATABASE',
+                         'SCHEMA', 'INDEX', 'VIEW', 'TRIGGER', 'FUNCTION', 'PROCEDURE'}
+            if full_table.upper() in skip_words:
                 continue
-            # 替换 FROM table / JOIN table
+            
+            # 添加库名前缀
+            fixed_name = f"{db_name}.{full_table}"
+            # 替换原始表名（在 FROM/JOIN 后面）
             fixed_sql = re.sub(
-                rf'(?:FROM|JOIN)\s+{table}\b',
-                lambda m: m.group(0).replace(table, f"{db_name}.{table}"),
+                rf'(?:FROM|JOIN)\s+{full_table}\b',
+                lambda m: m.group(0).replace(full_table, fixed_name),
                 fixed_sql,
                 flags=re.IGNORECASE
             )
+            logger.info(f"[NL2SQL] 🔧 修复表名: {full_table} -> {fixed_name}")
         
         if fixed_sql != sql:
-            logger.info(f"[NL2SQL] 🔧 SQL 表名已修复:\n  原SQL: {sql[:100]}...\n  新SQL: {fixed_sql[:100]}...")
+            logger.info(f"[NL2SQL] 🔧 SQL 表名已修复:\n  原SQL: {sql[:150]}...\n  新SQL: {fixed_sql[:150]}...")
         
         return fixed_sql
