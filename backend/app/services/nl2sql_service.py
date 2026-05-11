@@ -370,11 +370,12 @@ class NL2SQLService:
         if semantic_doc:
             logger.info(f"[NL2SQL] │   ├─ 语义层文档: 找到, 长度={len(semantic_doc)} 字符")
             logger.info(f"[NL2SQL] │   │   ├─ 加载的文档: {self._get_loaded_doc_names(data_source_id)}")
-            # 获取数据库名，追加库名前缀提示
+            # 获取数据库名
             ds = self.ds_repo.get_by_id(data_source_id) if self.ds_repo else None
             db_name = ds.database if ds and ds.database else "数据库名"
             logger.info(f"[NL2SQL] │   │   └─ 数据库名: {db_name}")
-            prefix_hint = f"\n## 重要提示\n【必须】SQL中所有表名必须使用 `{db_name}.表名` 格式，例如 `SELECT * FROM {db_name}.table_name`\n"
+            # 【重要】语义层文档中的表名已包含库名前缀，告诉 LLM 不要重复添加
+            prefix_hint = f"\n## 重要提示\n【注意】本文档中的表名**已经包含库名前缀**（如 `ads_cockpit_qck.dim_store`），请直接使用文档中的表名，**不要再添加其他库名**！\n"
             return prefix_hint + semantic_doc
 
         # 2. 回退到动态查询

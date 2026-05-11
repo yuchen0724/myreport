@@ -5,6 +5,9 @@
 - **数据库名**: ads_cockpit_qck（商策快查）
 - **数据源**: StarRocks (Apache Doris)
 - **用途**: 零售门店快查场景的预聚合数据层，提供销售、成本、库存、供应链、档期促销、会员、门店运营等维度的快速查询。基于订单流水数据进行多口径聚合（销售口径/过账口径）。
+- **【重要】表名前缀**: 本文档所有表名**已包含库名前缀**，SQL 中请直接使用文档中的表名，**不要额外添加库名**！例如：
+  - 文档写 `ads_cockpit_qck.dim_store`，SQL 就用 `ads_cockpit_qck.dim_store`
+  - 文档写 `ads_cockpit_qck.order_d_v1`，SQL 就用 `ads_cockpit_qck.order_d_v1`
 - **核心业务概念**:
   - **销售口径 vs 过账口径**: 表名含 `_post_` 的为"过账口径"（已完成财务过账），不含的为"销售口径"（订单完成即计入）
   - **商品级 vs 类目级**: `_item_agg` 为商品粒度，`_ocat_agg` 按营运类目聚合，`_pcat_agg` 按采销类目聚合
@@ -606,20 +609,20 @@
 
 | 表名 | 说明 |
 |------|------|
-| dim_store | 门店维度表（含门店基本信息） |
-| dim_store_ware_os_fit | 门店商品OS适配表 |
-| dim_store_ware_os_fit_snap | 门店商品OS适配快照表 |
-| dim_date | 日期维度 |
-| dim_hour / dim_hour_os | 小时维度 |
-| dim_ware_status | 商品状态维度 |
-| dim_brand_status | 品牌状态 |
-| dim_vender_ware_status | 商家商品状态 |
-| dim_promotion_store | 促销门店 |
-| dim_schedule_os | 档期信息 |
-| dim_store_ware_promotion_item_d_v1 | 促销商品明细 |
-| dim_ware_package | 商品包装信息 |
-| dim_supplier_contract | 供应商合同 |
-| dim_os_store_d_v2 | OS门店信息 |
+| ads_cockpit_qck.dim_store | 门店维度表（含门店基本信息） |
+| ads_cockpit_qck.dim_store_ware_os_fit | 门店商品OS适配表 |
+| ads_cockpit_qck.dim_store_ware_os_fit_snap | 门店商品OS适配快照表 |
+| ads_cockpit_qck.dim_date | 日期维度 |
+| ads_cockpit_qck.dim_hour / ads_cockpit_qck.dim_hour_os | 小时维度 |
+| ads_cockpit_qck.dim_ware_status | 商品状态维度 |
+| ads_cockpit_qck.dim_brand_status | 品牌状态 |
+| ads_cockpit_qck.dim_vender_ware_status | 商家商品状态 |
+| ads_cockpit_qck.dim_promotion_store | 促销门店 |
+| ads_cockpit_qck.dim_schedule_os | 档期信息 |
+| ads_cockpit_qck.dim_store_ware_promotion_item_d_v1 | 促销商品明细 |
+| ads_cockpit_qck.dim_ware_package | 商品包装信息 |
+| ads_cockpit_qck.dim_supplier_contract | 供应商合同 |
+| ads_cockpit_qck.dim_os_store_d_v2 | OS门店信息 |
 
 ---
 
