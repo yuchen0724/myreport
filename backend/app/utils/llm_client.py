@@ -48,13 +48,15 @@ class LLMClient:
         self.provider = (provider or settings.llm_provider or "openai").lower()
         self.max_retries = settings.nl2sql_max_retries or 2
         self.timeout = settings.nl2sql_timeout or 300  # 从配置读取超时时间
+        self.api_mode = getattr(settings, 'llm_api_mode', 'chat') or 'chat'  # chat 或 responses
         
         print(f"[LLM] ═════════ 初始化 LLM Client ═════════", flush=True)
         print(f"[LLM] ├─ Provider: {self.provider}", flush=True)
         print(f"[LLM] ├─ Model: {settings.llm_model or 'default'}", flush=True)
         print(f"[LLM] ├─ API Base: {settings.llm_api_base or 'default'}", flush=True)
+        print(f"[LLM] ├─ API Mode: {self.api_mode}", flush=True)
         print(f"[LLM] ├─ Timeout: {self.timeout}s", flush=True)
-        print(f"[LLM] ├─ Max Retries: {self.max_retries}", flush=True)
+        print(f"[LLM] ├��� Max Retries: {self.max_retries}", flush=True)
         print(f"[LLM] └─ API Key: {settings.llm_api_key[:10] if settings.llm_api_key else 'None'}...", flush=True)
         
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.0) -> str:
@@ -109,29 +111,42 @@ class LLMClient:
         return result
     
     def _call_openai(self, messages: List[Dict[str, str]], temperature: float) -> str:
-        """调用 OpenAI 兼容 API（使用原生 httpx）"""
+        """调用 OpenAI 兼容 API（使用原生 httpx）
+        
+        根据 api_mode 选择:
+        - chat: 使用 /chat/completions 端点
+        - responses: 使用 /responses 端点 (新版本 API)
+        """
         import httpx
         import urllib3
         
         # 禁用 SSL 警告
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         
-        pid = os.getpid()
-        url = f"{self.settings.llm_api_base}/chat/completions"
+        # 根据 API 模式选择端点
+        if self.api_mode == "responses":
+            url = f"{self.settings.llm_api_base}/responses"
+            # Responses API 格式：将 messages 转为 input
+            data = {
+                "model": self.settings.llm_model or "gpt-3.5-turbo",
+                "input": messages,
+                "temperature": temperature
+            }
+        else:
+            url = f"{self.settings.llm_api_base}/chat/completions"
+            data = {
+                "model": self.settings.llm_model or "gpt-3.5-turbo",
+                "messages": messages,
+                "temperature": temperature
+            }
+        
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.settings.llm_api_key}"
         }
-        data = {
-            "model": self.settings.llm_model or "gpt-3.5-turbo",
-            "messages": messages,
-            "temperature": temperature
-        }
-        
-        # 不使用代理，直接连接
-        # 注意：SSL 验证已禁用以解决证书问题
         
         logger.info("[LLM:OpenAI] ═══════════════════════════════")
+        logger.info(f"[LLM:OpenAI] ├─ API Mode: {self.api_mode}")
         logger.info(f"[LLM:OpenAI] ├─ 请求URL: {url}")
         logger.info(f"[LLM:OpenAI] ├─ Model: {data['model']}")
         logger.info(f"[LLM:OpenAI] ├─ Timeout: {self.timeout}s")
@@ -161,16 +176,33 @@ class LLMClient:
                 
                 logger.info(f"[LLM:OpenAI] │   └─ 响应解析成功")
                 
-                # 提取响应内容
-                content = result["choices"][0]["message"].get("content")
-                if content:
-                    logger.info(f"[LLM:OpenAI] ✅ 成功获取 content: {content[:100]}...")
-                    return content
-                # GLM 模型可能返回 reasoning
-                reasoning = result["choices"][0]["message"].get("reasoning")
-                if reasoning:
-                    logger.info(f"[LLM:OpenAI] ✅ 成功获取 reasoning: {reasoning[:100]}...")
-                    return reasoning
+                # 根据 API 模式提取响应内容
+                if self.api_mode == "responses":
+                    # Responses API 格式: {"output": [{"content": [{"text": "..."}]}]}
+                    content = ""
+                    output = result.get("output", [])
+                    for item in output:
+                        if item.get("type") == "message":
+                            for c in item.get("content", []):
+                                if c.get("type") == "output_text":
+                                    content = c.get("text", "")
+                                    break
+                    if content:
+                        logger.info(f"[LLM:OpenAI] ✅ (Responses模式) 成功获取 content: {content[:100]}...")
+                        return content
+                    logger.error(f"[LLM:OpenAI] ❌ Responses 模式解析失败，原始响应: {result}")
+                else:
+                    # Chat Completions API 格式: {"choices": [{"message": {"content": "..."}}]}
+                    content = result["choices"][0]["message"].get("content")
+                    if content:
+                        logger.info(f"[LLM:OpenAI] ✅ 成功获取 content: {content[:100]}...")
+                        return content
+                    # GLM 模型可能返回 reasoning
+                    reasoning = result["choices"][0]["message"].get("reasoning")
+                    if reasoning:
+                        logger.info(f"[LLM:OpenAI] ✅ 成功获取 reasoning: {reasoning[:100]}...")
+                        return reasoning
+                
                 logger.error(f"[LLM:OpenAI] ❌ LLM 返回空内容，原始响应: {result}")
                 raise ValueError("LLM 返回空内容")
             except httpx.HTTPStatusError as e:

@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     llm_api_base: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
     llm_model: str = "gpt-3.5-turbo"
+    llm_api_mode: str = "chat"  # chat (chat.completions) 或 responses (OpenAI Responses API)
     
     # Azure OpenAI
     azure_openai_endpoint: Optional[str] = None
