@@ -218,6 +218,12 @@ class NL2SQLService:
    - 饼图(pie)：适合展示占比关系
    - 散点图(scatter)：适合展示相关性
 10. X轴选择维度/分类字段，Y轴选择数值/指标字段
+11. 【重要】日期函数注意：
+    - Doris/StarRocks 不支持 `CURRENT_DATE`，请使用 `CURRENT_DATE()` (带括号)
+    - 昨日: `DATE_SUB(CURDATE(), INTERVAL 1 DAY)` 或 `DATE_ADD(CURDATE(), INTERVAL -1 DAY)`
+    - 上周: `DATE_SUB(CURDATE(), INTERVAL 1 WEEK)`
+    - 日期格式: `YYYYMMDD`（如 20260510）
+    - dt 字段是日期分区，格式为 `yyyymmdd`（字符串或整数）
 
 ## 输出格式
 请返回以下 JSON 格式（不要添加任何其他文字）：
