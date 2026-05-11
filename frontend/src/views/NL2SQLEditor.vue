@@ -59,10 +59,10 @@
         <div v-if="chartData.length > 0" class="chart-section">
           <div class="chart-controls">
             <el-radio-group v-model="chartType" size="small" @change="handleChartTypeChange">
-              <el-radio-button label="bar">📊 柱状图</el-radio-button>
-              <el-radio-button label="line">📈 折线图</el-radio-button>
-              <el-radio-button label="pie">🥧 饼图</el-radio-button>
-              <el-radio-button label="scatter">🔵 散点图</el-radio-button>
+              <el-radio-button value="bar">📊 柱状图</el-radio-button>
+              <el-radio-button value="line">📈 折线图</el-radio-button>
+              <el-radio-button value="pie">🥧 饼图</el-radio-button>
+              <el-radio-button value="scatter">🔵 散点图</el-radio-button>
             </el-radio-group>
             <el-select v-model="chartColorTheme" size="small" style="width: 120px; margin-left: 10px;">
               <el-option label="💎 蓝色" value="blue" />

@@ -47,7 +47,7 @@
         <template #item="{ element, index }">
           <div class="edit-item">
             <div class="drag-handle">
-              <el-icon><Rank /></el-icon>
+              <el-icon><Sort /></el-icon>
             </div>
             <div class="edit-item-preview">
               <DashboardWidget :widget="element" :dashboard-data="dashboardData" />
@@ -86,7 +86,7 @@
 <script>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Rank, View, Hide } from '@element-plus/icons-vue'
+import { Sort, View, Hide } from '@element-plus/icons-vue'
 import draggable from 'vuedraggable'
 import DashboardWidget from '@/components/DashboardWidget.vue'
 import { getWidgetConfig, saveWidgetConfig, getDashboardData } from '@/api/dashboard'

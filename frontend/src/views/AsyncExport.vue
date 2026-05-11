@@ -31,8 +31,8 @@
 
           <el-form-item label="导出类型">
             <el-radio-group v-model="form.export_type">
-              <el-radio label="excel">Excel</el-radio>
-              <el-radio label="pdf">PDF</el-radio>
+              <el-radio value="excel">Excel</el-radio>
+              <el-radio value="pdf">PDF</el-radio>
             </el-radio-group>
           </el-form-item>
 
