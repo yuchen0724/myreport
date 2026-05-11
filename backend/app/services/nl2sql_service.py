@@ -283,6 +283,25 @@ class NL2SQLService:
         print(f"[NL2SQL] │   │   ├─ Confidence: {confidence:.2%}", flush=True)
         print(f"[NL2SQL] │   │   ├─ Explanation: {explanation[:80]}..." if len(explanation) > 80 else f"[NL2SQL] │   │   ├─ Explanation: {explanation}", flush=True)
         print(f"[NL2SQL] │   │   └─ Chart Config: {chart_config}", flush=True)
+        
+        # 【新增】详细日志：提取 SQL 中使用的所有表名
+        import re
+        # 匹配 FROM/JOIN 后面的表名，支持: 库名.表名, 别名, 库名.表名 AS 别名
+        table_pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)'
+        tables_used = re.findall(table_pattern, sql, re.IGNORECASE)
+        if tables_used:
+            # 去重并按出现顺序排列
+            unique_tables = list(dict.fromkeys(tables_used))
+            table_list = [f"{db}.{tbl}" for db, tbl in unique_tables]
+            print(f"[NL2SQL] │   ├─ SQL 使用的表: {table_list}", flush=True)
+            logger.info(f"[NL2SQL] │   ├─ SQL 使用了 {len(unique_tables)} 个表: {table_list}")
+        else:
+            # 尝试匹配不带库名的表名（可能存在问题）
+            simple_table_pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)'
+            simple_tables = re.findall(simple_table_pattern, sql, re.IGNORECASE)
+            if simple_tables:
+                print(f"[NL2SQL] │   ⚠️ SQL 中有表未带库名: {simple_tables}", flush=True)
+                logger.warning(f"[NL2SQL] │   ⚠️ SQL 中有表未带库名前缀: {simple_tables}")
 
         if not sql:
             print(f"[NL2SQL] │   └─ ❌ LLM 返回的 SQL 为空", flush=True)
@@ -345,26 +364,36 @@ class NL2SQLService:
             Schema 描述字符串
         """
         # 1. 优先尝试读取语义层文档
+        logger.info(f"[NL2SQL] 🔍 ========== 开始构建 Schema Prompt ==========")
+        logger.info(f"[NL2SQL] ├─ 数据源ID: {data_source_id}")
         semantic_doc = self._load_semantic_doc(data_source_id)
         if semantic_doc:
-            logger.info(f"使用语义层文档 for data_source_id={data_source_id}")
+            logger.info(f"[NL2SQL] │   ├─ 语义层文档: 找到, 长度={len(semantic_doc)} 字符")
+            logger.info(f"[NL2SQL] │   │   ├─ 加载的文档: {self._get_loaded_doc_names(data_source_id)}")
             # 获取数据库名，追加库名前缀提示
             ds = self.ds_repo.get_by_id(data_source_id) if self.ds_repo else None
             db_name = ds.database if ds and ds.database else "数据库名"
+            logger.info(f"[NL2SQL] │   │   └─ 数据库名: {db_name}")
             prefix_hint = f"\n## 重要提示\n【必须】SQL中所有表名必须使用 `{db_name}.表名` 格式，例如 `SELECT * FROM {db_name}.table_name`\n"
             return prefix_hint + semantic_doc
 
         # 2. 回退到动态查询
+        logger.info(f"[NL2SQL] │   ├─ 语义层文档: 未找到, 改用动态查询获取表结构")
         if not self.ds_repo:
+            logger.warning(f"[NL2SQL] │   └─ 数据源仓库不可用")
             return "数据源信息不可用"
 
         ds = self.ds_repo.get_by_id(data_source_id)
         if not ds:
+            logger.warning(f"[NL2SQL] │   └─ 数据源 ID {data_source_id} 不存在")
             return f"数据源 ID {data_source_id} 不存在"
 
         try:
             tables_info = self._fetch_schema_from_datasource(ds)
+            logger.info(f"[NL2SQL] │   └─ 动态获取表结构: {len(tables_info)} 个表")
+
             if not tables_info:
+                logger.warning(f"[NL2SQL] │       └─ 未获取到任何表结构")
                 return f"数据源: {ds.name} ({ds.type})\n表结构信息不可用"
 
             # 构建格式化的 schema 描述
@@ -652,6 +681,47 @@ class NL2SQLService:
 
         logger.warning(f"回退查找也未找到数据库 {db_name} 对应的语义层文档")
         return None
+
+    def _get_loaded_doc_names(self, data_source_id: int) -> List[str]:
+        """
+        获取已加载的语义层文档文件名列表
+        
+        Args:
+            data_source_id: 数据源 ID
+            
+        Returns:
+            文档文件名列表
+        """
+        if not self.ds_repo:
+            return []
+        
+        try:
+            ds = self.ds_repo.get_by_id(data_source_id)
+            if not ds or not ds.database:
+                return []
+            
+            ds_name = ds.name.lower() if ds.name else ""
+            semantic_dir = self._get_semantic_dir()
+            
+            if not semantic_dir or not semantic_dir.exists():
+                return []
+            
+            ds_dir = semantic_dir / ds_name
+            if ds_dir.exists() and ds_dir.is_dir():
+                md_files = sorted(ds_dir.glob("*.md"))
+                md_files = [f for f in md_files if f.name.upper() != "README.MD"]
+                return [f.name for f in md_files]
+            
+            # 回退到单个文件
+            db_name = ds.database.lower()
+            single_file = semantic_dir / ds_name / f"{db_name}.md"
+            if single_file.exists():
+                return [single_file.name]
+                
+            return []
+        except Exception as e:
+            logger.warning(f"获取加载的文档名失败: {e}")
+            return []
 
     def _get_semantic_dir(self) -> Optional[Path]:
         """获取语义层目录路径"""
