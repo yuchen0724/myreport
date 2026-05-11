@@ -463,15 +463,21 @@ class NL2SQLService:
 
         try:
             with engine.connect() as conn:
-                # 获取表列表
+                # 获取表列表（含库名）
                 if ds.type in ["MYSQL", "DORIS"]:
-                    tables_result = conn.execute(text("SHOW TABLES"))
-                    table_names = [row[0] for row in tables_result.fetchall()]
+                    # 从 information_schema 获取表及其所属库
+                    tables_result = conn.execute(text("""
+                        SELECT TABLE_SCHEMA, TABLE_NAME 
+                        FROM information_schema.TABLES 
+                        WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+                        ORDER BY TABLE_SCHEMA, TABLE_NAME
+                    """))
+                    tables_with_schema = [(row[0], row[1]) for row in tables_result.fetchall()][:50]
 
                     # 获取每个表的列信息
-                    for table_name in table_names[:50]:  # 限制最多 50 个表
+                    for db_name, table_name in tables_with_schema:
                         try:
-                            desc_result = conn.execute(text(f"DESCRIBE `{table_name}`"))
+                            desc_result = conn.execute(text(f"DESCRIBE `{db_name}`.`{table_name}`"))
                             columns = []
                             for row in desc_result.fetchall():
                                 columns.append({
@@ -482,21 +488,23 @@ class NL2SQLService:
                                     "default": str(row[4]) if len(row) > 4 and row[4] is not None else "",
                                     "comment": row[5] if len(row) > 5 else ""
                                 })
-                            tables_info[table_name] = columns
+                            # 键名使用 "库名.表名" 格式
+                            tables_info[f"{db_name}.{table_name}"] = columns
                         except Exception as e:
-                            logger.warning(f"获取表 {table_name} 结构失败: {e}")
+                            logger.warning(f"获取表 {db_name}.{table_name} 结构失败: {e}")
                             continue
 
                 elif ds_type == "POSTGRESQL":
-                    # PostgreSQL 使用 information_schema
+                    # PostgreSQL 使用 information_schema，获取 schema（相当于库）
                     tables_result = conn.execute(text(f"""
-                    SELECT table_name
+                    SELECT table_schema, table_name
                         FROM information_schema.tables 
-                        WHERE table_schema = 'public'
+                        WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
+                        ORDER BY table_schema, table_name
                     """))
-                    table_names = [row[0] for row in tables_result.fetchall()]
+                    tables_with_schema = [(row[0], row[1]) for row in tables_result.fetchall()][:50]
 
-                    for table_name in table_names[:50]:
+                    for db_name, table_name in tables_with_schema:
                         try:
                             desc_result = conn.execute(text(f"""
                                 SELECT 
@@ -505,9 +513,9 @@ class NL2SQLService:
                                     is_nullable,
                                     column_default
                                 FROM information_schema.columns
-                                WHERE table_schema = 'public' AND table_name = :table_name
+                                WHERE table_schema = :schema_name AND table_name = :table_name
                                 ORDER BY ordinal_position
-                            """), {"table_name": table_name})
+                            """), {"schema_name": db_name, "table_name": table_name})
 
                             columns = []
                             for row in desc_result.fetchall():
@@ -519,9 +527,9 @@ class NL2SQLService:
                                     "default": str(row[3]) if row[3] else "",
                                     "comment": ""
                                 })
-                            tables_info[table_name] = columns
+                            tables_info[f"{db_name}.{table_name}"] = columns
                         except Exception as e:
-                            logger.warning(f"获取表 {table_name} 结构失败: {e}")
+                            logger.warning(f"获取表 {db_name}.{table_name} 结构失败: {e}")
                             continue
 
         finally:
