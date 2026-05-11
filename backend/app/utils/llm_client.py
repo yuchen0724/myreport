@@ -127,10 +127,10 @@ class LLMClient:
         if self.api_mode == "responses":
             url = f"{self.settings.llm_api_base}/responses"
             # Responses API 格式：将 messages 转为 input
+            # 注意：某些模型（如 glm）不支持 temperature 参数，不传递
             data = {
                 "model": self.settings.llm_model or "gpt-3.5-turbo",
-                "input": messages,
-                "temperature": temperature
+                "input": messages
             }
         else:
             url = f"{self.settings.llm_api_base}/chat/completions"
