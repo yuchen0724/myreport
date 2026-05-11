@@ -118,6 +118,10 @@ class NL2SQLService:
 
         # 5. 执行 SQL 查询
         logger.info("[NL2SQL] 📌 步骤4: 执行 SQL 查询...")
+        
+        # 【新增】校验并修复 SQL 中的表名（确保带库名前缀）
+        sql = self._fix_sql_table_names(sql, request.data_source_id)
+        
         query_request = SQLQueryRequest(
             data_source_id=request.data_source_id,
             sql=sql,
@@ -221,9 +225,12 @@ class NL2SQLService:
 11. 【重要】日期函数注意：
     - Doris/StarRocks 不支持 `CURRENT_DATE`，请使用 `CURRENT_DATE()` (带括号)
     - 昨日: `DATE_SUB(CURDATE(), INTERVAL 1 DAY)` 或 `DATE_ADD(CURDATE(), INTERVAL -1 DAY)`
-    - 上周: `DATE_SUB(CURDATE(), INTERVAL 1 WEEK)`
     - 日期格式: `YYYYMMDD`（如 20260510）
     - dt 字段是日期分区，格式为 `yyyymmdd`（字符串或整数）
+12. 【强制】SQL 中所有表名**必须**带库名前缀，格式为 `库名.表名`：
+    - 正确: `SELECT * FROM ads_cockpit_freedom.ads_cockpit_fd_store_ware_d`
+    - 错误: `SELECT * FROM ads_cockpit_fd_store_ware_d` （漏掉库名！）
+    - 如果你不想使用带库名的表名，直接返回空 SQL 并在 explanation 中说明原因
 
 ## 输出格式
 请返回以下 JSON 格式（不要添加任何其他文字）：
@@ -742,3 +749,77 @@ class NL2SQLService:
                 return d
         # 返回第一个可能的目录（用于创建）
         return possible_dirs[0]
+
+    def _fix_sql_table_names(self, sql: str, data_source_id: int) -> str:
+        """
+        校验并修复 SQL 中的表名，确保带库名前缀
+        
+        Args:
+            sql: 原始 SQL
+            data_source_id: 数据源 ID
+            
+        Returns:
+            修复后的 SQL
+        """
+        import re
+        
+        # 获取数据源的默认数据库名
+        db_name = None
+        if self.ds_repo:
+            ds = self.ds_repo.get_by_id(data_source_id)
+            if ds and ds.database:
+                db_name = ds.database
+        
+        if not db_name:
+            logger.warning(f"[NL2SQL] ⚠️ 无法获取数据源 {data_source_id} 的数据库名")
+            return sql
+        
+        # 查找 SQL 中所有不带库名的表名（FROM/JOIN 后面只有表名，没有点号）
+        # 匹配: FROM table_name 或 JOIN table_name (不含点号)
+        pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)\b'
+        
+        def replace_func(match):
+            prefix = match.group(1)
+            # 跳过已带库名的表名（如已有 ads_cockpit_freedom.）
+            if '.' in prefix:
+                return match.group(0)
+            # 跳过 MySQL 关键字和函数
+            skip_words = {'SELECT', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'ON', 'AS', 
+                         'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'CROSS', 'JOIN',
+                         'GROUP', 'ORDER', 'BY', 'HAVING', 'LIMIT', 'OFFSET', 'UNION',
+                         'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'NULL', 'TRUE', 'FALSE',
+                         'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'COALESCE', 'IFNULL', 'IF'}
+            if prefix.upper() in skip_words:
+                return match.group(0)
+            # 添加库名前缀
+            fixed = f"{db_name}.{prefix}"
+            logger.info(f"[NL2SQL] 🔧 修复表名: {prefix} -> {fixed}")
+            return match.group(0).replace(prefix, fixed)
+        
+        # 检查是否有需要修复的表名
+        tables_without_db = re.findall(pattern, sql, re.IGNORECASE)
+        if not tables_without_db:
+            return sql
+        
+        # 只修复真正需要修复的表名
+        fixed_sql = sql
+        for table in set(tables_without_db):
+            # 跳过关键字
+            if table.upper() in {'SELECT', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'ON', 'AS',
+                                 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'GROUP', 'ORDER', 'BY',
+                                 'HAVING', 'LIMIT', 'OFFSET', 'UNION', 'CASE', 'WHEN', 'THEN',
+                                 'ELSE', 'END', 'NULL', 'TRUE', 'FALSE', 'COUNT', 'SUM', 
+                                 'AVG', 'MAX', 'MIN', 'COALESCE', 'IFNULL', 'IF', 'FROM', 'JOIN'}:
+                continue
+            # 替换 FROM table / JOIN table
+            fixed_sql = re.sub(
+                rf'(?:FROM|JOIN)\s+{table}\b',
+                lambda m: m.group(0).replace(table, f"{db_name}.{table}"),
+                fixed_sql,
+                flags=re.IGNORECASE
+            )
+        
+        if fixed_sql != sql:
+            logger.info(f"[NL2SQL] 🔧 SQL 表名已修复:\n  原SQL: {sql[:100]}...\n  新SQL: {fixed_sql[:100]}...")
+        
+        return fixed_sql
