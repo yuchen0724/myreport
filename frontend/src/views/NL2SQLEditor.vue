@@ -119,6 +119,7 @@ const suggestions = ref([])
 const queryResult = ref(null)
 const executionTimeMs = ref(null)
 const loading = ref(false)
+const recommendedChart = ref(null)  // LLM 推荐的图表配置
 
 // 图表相关
 const chartType = ref('bar')
@@ -226,6 +227,74 @@ const analyzeChartData = () => {
   chartData.value = data
 }
 
+/**
+ * 根据 LLM 推荐的图表配置构建图表数据
+ */
+const buildChartFromLLMRecommendation = (config) => {
+  if (!queryResult.value || !config) {
+    console.log('[Chart] ⚠️ 无查询结果或图表配置，跳过 LLM 推荐')
+    analyzeChartData()
+    autoSelectChartType()
+    return
+  }
+
+  const columns = queryResult.value.columns || []
+  const rows = queryResult.value.rows || []
+  
+  console.log('[Chart] 🤖 LLM 推荐的图表配置:', config)
+  console.log('[Chart] 🤖 查询结果列:', columns)
+
+  const xField = config.x_axis
+  const yField = config.y_axis
+  
+  // 查找字段索引
+  let xFieldIndex = columns.findIndex(c => c === xField || c.toLowerCase() === xField?.toLowerCase())
+  let yFieldIndex = columns.findIndex(c => c === yField || c.toLowerCase() === yField?.toLowerCase())
+
+  // 如果找不到精确匹配，尝试模糊匹配
+  if (xFieldIndex === -1) {
+    xFieldIndex = columns.findIndex(c => xField && c.toLowerCase().includes(xField.toLowerCase()))
+  }
+  if (yFieldIndex === -1) {
+    yFieldIndex = columns.findIndex(c => yField && c.toLowerCase().includes(yField.toLowerCase()))
+  }
+
+  console.log('[Chart] 🤖 字段索引:', { xField, xFieldIndex, yField, yFieldIndex })
+
+  // 如果找不到对应字段，回退到智能分析
+  if (xFieldIndex === -1 || yFieldIndex === -1) {
+    console.log('[Chart] ⚠️ LLM 推荐的字段未找到，回退到智能分析')
+    analyzeChartData()
+    autoSelectChartType()
+    return
+  }
+
+  // 根据 LLM 推荐的字段构建图表数据
+  const data = rows.slice(0, 20).map(row => {
+    let xVal, yVal
+    
+    if (Array.isArray(row)) {
+      xVal = row[xFieldIndex]
+      yVal = row[yFieldIndex]
+    } else if (typeof row === 'object') {
+      xVal = row[columns[xFieldIndex]]
+      yVal = row[columns[yFieldIndex]]
+    }
+    
+    return {
+      x: String(xVal ?? ''),
+      y: Number(yVal ?? 0)
+    }
+  }).filter(item => {
+    const valid = !isNaN(item.y)
+    if (!valid) console.log('[Chart] 🤖 过滤掉无效数据:', item)
+    return valid
+  })
+
+  console.log('[Chart] 🤖 LLM 推荐构建的图表数据:', data)
+  chartData.value = data
+}
+
 onMounted(async () => {
   await loadDataSources()
 })
@@ -268,6 +337,7 @@ const handleParse = async () => {
     suggestions.value = response.suggestions || []
     queryResult.value = response.query_result
     executionTimeMs.value = response.execution_time_ms
+    recommendedChart.value = response.recommended_chart  // 保存 LLM 推荐的图表配置
 
     console.group('[NL2SQL] ✅ 解析完成')
     console.log('├─ 客户端耗时:', `${(endTime - startTime).toFixed(2)}ms`)
@@ -279,14 +349,22 @@ const handleParse = async () => {
       rowCount: queryResult.value.rows?.length,
       total: queryResult.value.total
     } : 'null')
+    console.log('├─ 推荐的图表配置:', recommendedChart.value)
     console.groupEnd()
 
-    // 分析数据生成图表
-    console.log('[NL2SQL] 📊 开始分析图表数据...')
-    analyzeChartData()
-
-    // 根据数据特征自动选择图表类型
-    autoSelectChartType()
+    // 优先使用 LLM 推荐的图表配置，否则使用智能分析
+    if (recommendedChart.value && recommendedChart.value.chart_type) {
+      console.log('[NL2SQL] 📊 使用 LLM 推荐的图表配置')
+      chartType.value = recommendedChart.value.chart_type
+      // 根据 LLM 推荐的���段构建图表数据
+      buildChartFromLLMRecommendation(recommendedChart.value)
+    } else {
+      // 分析数据生成图表
+      console.log('[NL2SQL] 📊 使用智能分析图表数据...')
+      analyzeChartData()
+      // 根据数据特征自动选择图表类型
+      autoSelectChartType()
+    }
 
     ElMessage.success('解析成功')
   } catch (error) {

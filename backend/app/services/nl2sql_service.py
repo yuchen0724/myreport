@@ -58,21 +58,23 @@ class NL2SQLService:
         used_llm = False
 
         # 1. 尝试使用 LLM 生成 SQL
+        chart_config = None  # LLM 推荐的图表配置
         logger.info("[NL2SQL] 📌 步骤1: 尝试使用 LLM 生成 SQL...")
         try:
             llm_client = self._get_llm_client()
             logger.info(f"[NL2SQL] ├─ LLM 客户端初始化完成, timeout={llm_client.timeout}")
             
-            sql, confidence, explanation = self._generate_sql_with_llm(
+            sql, confidence, explanation, chart_config = self._generate_sql_with_llm(
                 llm_client, request.question, request.data_source_id
             )
             used_llm = True
             logger.info(f"[NL2SQL] ✅ LLM 生成 SQL 成功:")
             logger.info(f"[NL2SQL] │   ├─ SQL: {sql[:150]}..." if len(sql) > 150 else f"[NL2SQL] │   ├─ SQL: {sql}")
             logger.info(f"[NL2SQL] │   ├─ 置信度: {confidence:.2%}")
-            logger.info(f"[NL2SQL] │   └─ 解释: {explanation[:100]}..." if len(explanation) > 100 else f"[NL2SQL] │   └─ 解释: {explanation}")
+            logger.info(f"[NL2SQL] │   ├─ 解释: {explanation[:100]}..." if len(explanation) > 100 else f"[NL2SQL] │   ├─ 解释: {explanation}")
+            logger.info(f"[NL2SQL] │   └─ 图表配置: {chart_config}")
         except LLMError as e:
-            logger.warning(f"[NL2SQL] ⚠️ LLM 调用失败: {e}，回退到规则引擎")
+            logger.warning(f"[NL2SQL] ⚠️ LLM 调用失败: {e}，回退到规则���擎")
         except Exception as e:
             logger.warning(f"[NL2SQL] ⚠️ LLM 生成 SQL 失败: {e}，回退到规则引擎")
 
@@ -106,14 +108,15 @@ class NL2SQLService:
             )
         logger.info(f"[NL2SQL] ✅ SQL 验证通过: {validation_msg}")
 
-        # 4. 创建 SQL ��议
+        # 4. 创建 SQL 建议
         suggestion = SQLSuggestion(
             sql=sql,
             confidence=confidence,
-            explanation=explanation
+            explanation=explanation,
+            chart_config=chart_config
         )
 
-        # 5. 执行查询
+        # 5. 执行 SQL 查询
         logger.info("[NL2SQL] 📌 步骤4: 执行 SQL 查询...")
         query_request = SQLQueryRequest(
             data_source_id=request.data_source_id,
@@ -130,6 +133,14 @@ class NL2SQLService:
             logger.info(f"[NL2SQL] │   ├─ 总数: {result.total}")
             logger.info(f"[NL2SQL] │   └─ 执行时间: {result.execution_time_ms}ms")
 
+            # 构建建议，包含 LLM 推荐的图表配置
+            suggestion = SQLSuggestion(
+                sql=sql,
+                confidence=confidence,
+                explanation=explanation,
+                chart_config=chart_config
+            )
+
             return NL2SQLResponse(
                 suggestions=[suggestion],
                 selected_sql=sql,
@@ -138,17 +149,27 @@ class NL2SQLService:
                     "rows": result.rows,
                     "total": result.total
                 },
-                execution_time_ms=result.execution_time_ms
+                execution_time_ms=result.execution_time_ms,
+                recommended_chart=chart_config  # 返回推荐的图表配置
             )
         except Exception as e:
             # 查询失败，返回建议但不返回结果
             error_msg = str(e) if str(e) else f"{type(e).__name__}"
             logger.error(f"[NL2SQL] ❌ 查询执行失败: {error_msg}")
+            
+            suggestion = SQLSuggestion(
+                sql=sql,
+                confidence=confidence,
+                explanation=error_msg,
+                chart_config=chart_config
+            )
+            
             return NL2SQLResponse(
                 suggestions=[suggestion],
                 selected_sql=sql,
                 query_result=None,
-                execution_time_ms=None
+                execution_time_ms=None,
+                recommended_chart=chart_config
             )
 
     def _generate_sql_with_llm(
@@ -177,7 +198,7 @@ class NL2SQLService:
         print(f"[NL2SQL] ├─ 步骤2: 构建系统提示词...", flush=True)
         
         # 使用 print 输出完整的 system prompt，方便调试
-        system_prompt = f"""你是一个数据分析专家，擅长将自然语言问题转换为 SQL 查询。
+        system_prompt = f"""你是一个数据分析专家，擅长将自然语言问题转换为 SQL 查询，并推荐合适的可视化图表。
 
 ## 数据源信息
 {schema_prompt}
@@ -190,13 +211,25 @@ class NL2SQLService:
 5. 【重要】必须包含 ORDER BY 子句以支持分页，没有 ORDER BY 会导致查询失败！
 6. 不要使用 SQL 注释（-- 或 /* */）
 7. 不要在 SQL 末尾添加分号
+8. 根据查询结果判断合适的图表类型：
+   - 柱状图(bar)：适合对比分类数据的大小
+   - 折线图(line)：适合展示趋势变化
+   - 饼图(pie)：适合展示占比关系
+   - 散点图(scatter)：适合展示相关性
+9. X轴选择维度/分类字段，Y轴选择数值/指标字段
 
 ## 输出格式
 请返回以下 JSON 格式（不要添加任何其他文字）：
 {{
   "sql": "生成的 SQL 语句",
   "confidence": 0.0-1.0,
-  "explanation": "SQL 生成逻辑的简要说明"
+  "explanation": "SQL 生成逻辑的简要说明",
+  "chart_config": {{
+    "chart_type": "bar|line|pie|scatter",
+    "x_axis": "X轴字段名（维度/分类）",
+    "y_axis": "Y轴字段名（数值/指标）",
+    "reason": "选择该图表配置的原因"
+  }}
 }}
 """
         print(f"[NL2SQL] │   └─ System prompt 长度: {len(system_prompt)} 字符", flush=True)
@@ -232,11 +265,23 @@ class NL2SQLService:
         sql = result.get("sql", "").strip()
         confidence = float(result.get("confidence", 0.0))
         explanation = result.get("explanation", "")
+        # 提取图表配置
+        chart_config_raw = result.get("chart_config")
+        chart_config = None
+        if chart_config_raw and isinstance(chart_config_raw, dict):
+            chart_config = {
+                "chart_type": chart_config_raw.get("chart_type", "bar"),
+                "x_axis": chart_config_raw.get("x_axis", ""),
+                "y_axis": chart_config_raw.get("y_axis", ""),
+                "reason": chart_config_raw.get("reason", "")
+            }
+            print(f"[NL2SQL] │   ├─ 图表配置: {chart_config}", flush=True)
 
         print(f"[NL2SQL] │   ├─ 解析成功:", flush=True)
         print(f"[NL2SQL] │   │   ├─ SQL: {sql[:100]}..." if len(sql) > 100 else f"[NL2SQL] │   │   ├─ SQL: {sql}", flush=True)
         print(f"[NL2SQL] │   │   ├─ Confidence: {confidence:.2%}", flush=True)
-        print(f"[NL2SQL] │   │   └─ Explanation: {explanation[:80]}..." if len(explanation) > 80 else f"[NL2SQL] │   │   └─ Explanation: {explanation}", flush=True)
+        print(f"[NL2SQL] │   │   ├─ Explanation: {explanation[:80]}..." if len(explanation) > 80 else f"[NL2SQL] │   │   ├─ Explanation: {explanation}", flush=True)
+        print(f"[NL2SQL] │   │   └─ Chart Config: {chart_config}", flush=True)
 
         if not sql:
             print(f"[NL2SQL] │   └─ ❌ LLM 返回的 SQL 为空", flush=True)
@@ -244,7 +289,7 @@ class NL2SQLService:
 
         logger.info("[NL2SQL] └─ ✅ _generate_sql_with_llm 执行完成")
         
-        return sql, confidence, explanation
+        return sql, confidence, explanation, chart_config
 
     def _parse_llm_response(self, response: str) -> Optional[Dict[str, Any]]:
         """
