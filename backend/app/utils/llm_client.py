@@ -231,14 +231,24 @@ class LLMClient:
         return ""
     
     def _call_azure(self, messages: List[Dict[str, str]], temperature: float) -> str:
-        """调用 Azure OpenAI API"""
-        from openai import OpenAI
-        
-        client = OpenAI(
-            api_key=self.settings.llm_api_key,
-            azure_endpoint=self.settings.azure_openai_endpoint,
-            api_version="2024-02-01"
-        )
+        """调用 Azure OpenAI API (兼容新版 OpenAI SDK v1.0+)"""
+        try:
+            # 尝试使用 AzureOpenAI 客户端（新版本 SDK）
+            from openai import AzureOpenAI
+            client = AzureOpenAI(
+                api_key=self.settings.llm_api_key,
+                api_version="2024-02-01",
+                azure_endpoint=self.settings.azure_openai_endpoint
+            )
+        except ImportError:
+            # 回退到旧版方式
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=self.settings.llm_api_key,
+                azure_deployment=self.settings.azure_openai_deployment or "gpt-35-turbo",
+                api_version="2024-02-01",
+                azure_endpoint=self.settings.azure_openai_endpoint
+            )
         
         for attempt in range(self.max_retries + 1):
             try:
