@@ -539,9 +539,10 @@ class NL2SQLService:
         加载语义层文档 - 动态扫描，按数据源名+数据库名查找
 
         查找规则（按优先级）:
-        1. semantic/{数据源名}/{数据库名}.md
-        2. semantic/{数据源名}/{数据库名}/README.md
-        3. semantic/{数据源名}/{数据库名}/*.md (合并所有 .md 文件)
+        1. 加载 semantic/{数据源名}/*.md (合并所有 .md 文件)
+        2. 加载 semantic/{数据源名}/{数据库名}.md (单个文件)
+        3. 加载 semantic/{数据源名}/{数据库名}/README.md
+        4. 加载 semantic/{数据源名}/{数据库名}/*.md (合并目录下的所有 .md 文件)
 
         Args:
             data_source_id: 数据源 ID
@@ -565,14 +566,32 @@ class NL2SQLService:
                 logger.warning(f"语义层目录不存在: {semantic_dir}")
                 return None
 
-            # 策略1: semantic/{数据源名}/{数据库名}.md
+            # 优先加载该数据源下所有的 .md 文件
+            ds_dir = semantic_dir / ds_name
+            if ds_dir.exists() and ds_dir.is_dir():
+                md_files = sorted(ds_dir.glob("*.md"))
+                # 过滤掉 README.md（作为单独策略）
+                md_files = [f for f in md_files if f.name.upper() != "README.MD"]
+                
+                if md_files:
+                    contents = []
+                    for md_file in md_files:
+                        file_content = md_file.read_text(encoding="utf-8")
+                        # 使用文件名（不含扩展名）作为章节标题
+                        contents.append(f"## {md_file.stem}\n\n{file_content}")
+                    
+                    content = "\n\n".join(contents)
+                    logger.info(f"加载语义层文档(合并 {len(md_files)} 个文件): {ds_dir}")
+                    return content
+
+            # 回退策略：按数据库名单个文件查找
             single_file = semantic_dir / ds_name / f"{db_name}.md"
             if single_file.exists():
                 content = single_file.read_text(encoding="utf-8")
                 logger.info(f"加载语义层文档(单文件): {single_file}")
                 return content
 
-            # 策略2: semantic/{数据源名}/{数据库名}/README.md
+            # 策略3: semantic/{数据源名}/{数据库名}/README.md
             db_dir = semantic_dir / ds_name / db_name
             readme_file = db_dir / "README.md"
             if db_dir.exists() and db_dir.is_dir() and readme_file.exists():
@@ -580,7 +599,7 @@ class NL2SQLService:
                 logger.info(f"加载语义层文档(目录): {readme_file}")
                 return content
 
-            # 策略3: semantic/{数据源名}/{数据库名}/*.md 合并
+            # 策略4: semantic/{数据源名}/{数据库名}/*.md 合并
             if db_dir.exists() and db_dir.is_dir():
                 md_files = sorted(db_dir.glob("*.md"))
                 if md_files:
