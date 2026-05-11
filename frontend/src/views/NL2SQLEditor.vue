@@ -141,20 +141,26 @@ const chartConfig = computed(() => {
 
 // 自动分析数据并生成图表数据
 const analyzeChartData = () => {
+  console.group('[Chart] 📊 开始分析图表数据')
+  
   if (!queryResult.value || !queryResult.value.rows || queryResult.value.rows.length === 0) {
-    console.log('[Chart] 无数据: queryResult 为空')
+    console.log('[Chart] ⚠️ 无数据: queryResult 为空')
     chartData.value = []
+    console.groupEnd()
     return
   }
 
   const columns = queryResult.value.columns || []
   const rows = queryResult.value.rows || []
   
-  console.log('[Chart] 原始数据:', { columns, rows: rows.slice(0, 3) })
+  console.log('[Chart] ├─ 原始数据列:', columns)
+  console.log('[Chart] ├─ 原始数据行数:', rows.length)
+  console.log('[Chart] ├─ 数据预览:', rows.slice(0, 3))
   
   if (columns.length < 2) {
-    console.log('[Chart] 列数不足:', columns.length)
+    console.log('[Chart] ⚠️ 列数不足，无法生成图表')
     chartData.value = []
+    console.groupEnd()
     return
   }
 
@@ -223,8 +229,10 @@ const analyzeChartData = () => {
     return valid
   })
 
-  console.log('[Chart] 转换后数据:', data)
+  console.log('[Chart] ├─ 转换后数据条目数:', data.length)
   chartData.value = data
+  console.log('[Chart] └─ 图表数据生成完成')
+  console.groupEnd()
 }
 
 /**
@@ -300,10 +308,16 @@ onMounted(async () => {
 })
 
 const loadDataSources = async () => {
+  console.group('[NL2SQL] 📥 加载数据源列表')
   try {
     const response = await getDataSourceList()
     dataSource.value = response
+    console.log('[NL2SQL] ✅ 数据源加载成功, 数量:', response.length)
+    console.log('[NL2SQL] │ 数据源列表:', response.map(ds => ({ id: ds.id, name: ds.name, type: ds.type })))
+    console.groupEnd()
   } catch (error) {
+    console.error('[NL2SQL] ❌ 数据源加载失败:', error)
+    console.groupEnd()
     ElMessage.error('加载数据源失败')
   }
 }
@@ -382,22 +396,42 @@ const handleParse = async () => {
 }
 
 const handleClear = () => {
+  console.group('[NL2SQL] 🧹 清空操作')
+  console.log('├─ 清空前状态:', {
+    question: form.value.question,
+    suggestions: suggestions.value.length,
+    queryResult: queryResult.value ? '有数据' : 'null',
+    chartData: chartData.value.length
+  })
+  
   form.value.question = ''
   suggestions.value = []
   queryResult.value = null
   executionTimeMs.value = null
   chartData.value = []
+  chartType.value = 'bar'
+  
+  console.log('└─ 清空完成')
+  console.groupEnd()
 }
 
 // 根据数据特征自动选择图表类型
 const autoSelectChartType = () => {
-  if (!queryResult.value || !queryResult.value.rows || queryResult.value.rows.length === 0) return
+  console.group('[Chart] 🎯 智能选择图表类型')
+  
+  if (!queryResult.value || !queryResult.value.rows || queryResult.value.rows.length === 0) {
+    console.log('[Chart] ⚠️ 无数据')
+    console.groupEnd()
+    return
+  }
 
   const rowCount = queryResult.value.rows.length
   const columns = queryResult.value.columns || []
   
-  console.log('[Chart] 自动选择图表类型:', { rowCount, columns })
-
+  console.log('[Chart] ├─ 行数:', rowCount)
+  console.log('[Chart] ├─ 列:', columns)
+  console.log('[Chart] ├─ 图表数据条目:', chartData.value.length)
+  
   // 获取 Y 轴数据的特征
   const yData = chartData.value.map(item => item.y)
   
@@ -416,6 +450,16 @@ const autoSelectChartType = () => {
   // 检查数据是否差距悬殊（适合用对数刻度或饼图突出占比）
   const maxMinRatio = maxVal / (minVal || 1)
   const hasLargeGap = maxMinRatio > 100
+
+  console.log('[Chart] ├─ 数据特征:', {
+    total: total.toFixed(2),
+    max: maxVal.toFixed(2),
+    min: minVal.toFixed(2),
+    avg: avgVal.toFixed(2),
+    hasNegative,
+    isTimeSeries,
+    maxMinRatio: maxMinRatio.toFixed(2)
+  })
   
   // 🎯 智能选择图表类型
   let recommendedType = 'bar'
@@ -457,7 +501,8 @@ const autoSelectChartType = () => {
   }
 
   chartType.value = recommendedType
-  console.log('[Chart] 推荐图表类型:', recommendedType, reason)
+  console.log('[Chart] └─ 推荐图表类型:', recommendedType, '- 原因:', reason)
+  console.groupEnd()
 }
 
 // 检查数组是否有序（递增或递减）
