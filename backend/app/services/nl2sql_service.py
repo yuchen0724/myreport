@@ -205,18 +205,19 @@ class NL2SQLService:
 
 ## 规则
 1. 只生成 SELECT 查询，禁止生成 UPDATE/DELETE/DROP 等操作
-2. 使用精确的表名和列名
-3. 条件要准确匹配问题中的语义
-4. 日期格式使用 YYYYMMDD（如 20260508）
-5. 【重要】必须包含 ORDER BY 子句以支持分页，没有 ORDER BY 会导致查询失败！
-6. 不要使用 SQL 注释（-- 或 /* */）
-7. 不要在 SQL 末尾添加分号
-8. 根据查询结果判断合适的图表类型：
+2. 【重要】所有表名必须带库名前缀，如 `库名.表名`（例如 `ads_cockpit_freedom.store_sales`），否则跨库查询会失败！
+3. 使用精确的表名和列名
+4. 条件要准确匹配问题中的语义
+5. 日期格式使用 YYYYMMDD（如 20260508）
+6. 【重要】必须包含 ORDER BY 子句以支持分页，没有 ORDER BY 会导致查询失败！
+7. 不要使用 SQL 注释（-- 或 /* */）
+8. 不要在 SQL 末尾添加分号
+9. 根据查询结果判断合适的图表类型：
    - 柱状图(bar)：适合对比分类数据的大小
    - 折线图(line)：适合展示趋势变化
    - 饼图(pie)：适合展示占比关系
    - 散点图(scatter)：适合展示相关性
-9. X轴选择维度/分类字段，Y轴选择数值/指标字段
+10. X轴选择维度/分类字段，Y轴选择数值/指标字段
 
 ## 输出格式
 请返回以下 JSON 格式（不要添加任何其他文字）：
@@ -347,7 +348,11 @@ class NL2SQLService:
         semantic_doc = self._load_semantic_doc(data_source_id)
         if semantic_doc:
             logger.info(f"使用语义层文档 for data_source_id={data_source_id}")
-            return semantic_doc
+            # 获取数据库名，追加库名前缀提示
+            ds = self.ds_repo.get_by_id(data_source_id) if self.ds_repo else None
+            db_name = ds.database if ds and ds.database else "数据库名"
+            prefix_hint = f"\n## 重要提示\n【必须】SQL中所有表名必须使用 `{db_name}.表名` 格式，例如 `SELECT * FROM {db_name}.table_name`\n"
+            return prefix_hint + semantic_doc
 
         # 2. 回退到动态查询
         if not self.ds_repo:
@@ -363,16 +368,19 @@ class NL2SQLService:
                 return f"数据源: {ds.name} ({ds.type})\n表结构信息不可用"
 
             # 构建格式化的 schema 描述
+            db_name = ds.database or ""
             prompt_parts = [
                 f"数据源: {ds.name} ({ds.type})",
-                f"数据库: {ds.database}",
+                f"数据库: {db_name}",
+                f"【重要】SQL中所有表名必须使用 `{db_name}.表名` 格式，例如 `{db_name}.{next(iter(tables_info), 'table')}`",
                 "",
                 "## 表结构信息",
                 ""
             ]
 
             for table_name, columns in tables_info.items():
-                prompt_parts.append(f"### 表: {table_name}")
+                full_table_name = f"{db_name}.{table_name}" if db_name else table_name
+                prompt_parts.append(f"### 表: {full_table_name}")
                 prompt_parts.append("| 列名 | 类型 | 是否为空 | 键 | 默认值 | 注释 |")
                 prompt_parts.append("|------|------|----------|-----|--------|------|")
 
