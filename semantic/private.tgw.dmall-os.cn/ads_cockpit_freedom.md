@@ -5,6 +5,11 @@
 - **数据库名**: ads_cockpit_freedom（商策自由查）
 - **数据源**: StarRocks (Apache Doris)
 - **用途**: 零售门店商品销售、供应链、库存、贸易质检等业务分析。
+- **【重要】跨库查询**: 以下维度表**不在本数据库中**，需要跨库查询：
+  - `ads_cockpit_qck.dim_store` - 门店维度表（门店主数据），如需店名请使用此表
+  - `ads_cockpit_qck.dim_date` - 日期维度
+  - `ads_cockpit_qck.dim_ware_status` - 商品状态维度
+  - 使用示例: `SELECT s.store_name FROM ads_cockpit_freedom.ads_cockpit_fd_store_ware_d f LEFT JOIN ads_cockpit_qck.dim_store s ON f.store_code = s.store_code`
 - **核心业务概念**:
   - **店品**: 门店与商品的交叉维度，每条记录表示某门店某商品在某个日期的汇总数据
   - **经营方式(sell_type)**: 区分自营(1)、联营(2)等经营模式
