@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     # NL2SQL 行为配置
     nl2sql_temperature: float = 0.0
     nl2sql_max_retries: int = 2
-    nl2sql_timeout: int = 120  # LLM 调用超时 2 分钟
+    nl2sql_timeout: int = 300  # LLM 调用超时 5 分钟（可配置）
     nl2sql_cache_ttl: int = 3600  # 缓存 1 小时
 
     @field_validator("database_url", "secret_key")

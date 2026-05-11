@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from app.config import get_settings
-from app.api import auth, data_sources, query, report, nl2sql, charts, templates, stats, async_export, users, cache, audit_logs, dashboard, menus, proxy_servers
+from app.api import auth, data_sources, query, report, nl2sql, charts, templates, stats, async_export, users, cache, audit_logs, dashboard, menus, proxy_servers, config
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.audit_log import AuditLogMiddleware
 from app.middleware.error_handler import register_exception_handlers
@@ -93,6 +93,7 @@ app.include_router(cache.router)
 app.include_router(audit_logs.router)
 app.include_router(dashboard.router)
 app.include_router(menus.router)
+app.include_router(config.router)
 
 
 @app.get("/")

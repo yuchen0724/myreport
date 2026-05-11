@@ -241,32 +241,65 @@ const loadDataSources = async () => {
 
 const handleParse = async () => {
   if (!form.value.data_source_id) {
+    console.log('[NL2SQL] ⚠️ 验证失败: 未选择数据源')
     ElMessage.warning('请选择数据源')
     return
   }
   if (!form.value.question) {
+    console.log('[NL2SQL] ⚠️ 验证失败: 未输入问题')
     ElMessage.warning('请输入自然语言问题')
     return
   }
 
+  const startTime = performance.now()
+  console.group('[NL2SQL] 🔄 开始解析')
+  console.log('├─ 数据源ID:', form.value.data_source_id)
+  console.log('├─ 问题:', form.value.question)
+  console.log('└─ 发起时间:', new Date().toISOString())
+  console.groupEnd()
+
   loading.value = true
   try {
+    console.log('[NL2SQL] ⏳ 请求中...')
+    
     const response = await parseQuestion(form.value)
+    const endTime = performance.now()
+    
     suggestions.value = response.suggestions || []
     queryResult.value = response.query_result
     executionTimeMs.value = response.execution_time_ms
-    
+
+    console.group('[NL2SQL] ✅ 解析完成')
+    console.log('├─ 客户端耗时:', `${(endTime - startTime).toFixed(2)}ms`)
+    console.log('├─ 服务端执行时间:', `${response.execution_time_ms}ms`)
+    console.log('├─ SQL建议数:', suggestions.value.length)
+    console.log('├─ 选中SQL:', response.selected_sql?.substring(0, 100) + '...')
+    console.log('├─ 查询结果:', queryResult.value ? {
+      columns: queryResult.value.columns,
+      rowCount: queryResult.value.rows?.length,
+      total: queryResult.value.total
+    } : 'null')
+    console.groupEnd()
+
     // 分析数据生成图表
+    console.log('[NL2SQL] 📊 开始分析图表数据...')
     analyzeChartData()
-    
+
     // 根据数据特征自动选择图表类型
     autoSelectChartType()
-    
+
     ElMessage.success('解析成功')
   } catch (error) {
+    console.error('[NL2SQL] ❌ 解析失败:', {
+      error: error,
+      message: error.message,
+      stack: error.stack,
+      response: error.response?.data
+    })
     ElMessage.error('解析失败：' + (error.message || '未知错误'))
   } finally {
     loading.value = false
+    console.log('[NL2SQL] 🏁 请求结束, loading 状态:', loading.value)
   }
 }
 

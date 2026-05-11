@@ -4,11 +4,23 @@ LLM 客户端封装
 支持多种 LLM 提供商: OpenAI, Azure OpenAI, Ollama, Anthropic
 """
 import json
+import logging
+import os
+import time
 from enum import Enum
 from typing import List, Dict, Any, Optional
 import httpx
 from app.config import get_settings
 
+# 同时使用 logger 和 print，确保日志输出可见
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)  # 设置为 DEBUG 级别
+
+def log_print(*args, **kwargs):
+    """同时输出到 logger 和 stdout"""
+    msg = " ".join(str(a) for a in args)
+    print(f"[LLM] {msg}", flush=True)
+    logger.info(msg)
 
 class LLMProvider(str, Enum):
     """LLM 提供商枚举"""
@@ -35,7 +47,15 @@ class LLMClient:
         self.settings = settings
         self.provider = (provider or settings.llm_provider or "openai").lower()
         self.max_retries = settings.nl2sql_max_retries or 2
-        self.timeout = settings.nl2sql_timeout or 120  # 从配置读取超时时间
+        self.timeout = settings.nl2sql_timeout or 300  # 从配置读取超时时间
+        
+        print(f"[LLM] ═════════ 初始化 LLM Client ═════════", flush=True)
+        print(f"[LLM] ├─ Provider: {self.provider}", flush=True)
+        print(f"[LLM] ├─ Model: {settings.llm_model or 'default'}", flush=True)
+        print(f"[LLM] ├─ API Base: {settings.llm_api_base or 'default'}", flush=True)
+        print(f"[LLM] ├─ Timeout: {self.timeout}s", flush=True)
+        print(f"[LLM] ├─ Max Retries: {self.max_retries}", flush=True)
+        print(f"[LLM] └─ API Key: {settings.llm_api_key[:10] if settings.llm_api_key else 'None'}...", flush=True)
         
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.0) -> str:
         """
@@ -48,23 +68,53 @@ class LLMClient:
         Returns:
             模型响应文本
         """
+        start_time = time.time()
+        
+        print(f"[LLM] ════════════ LLM.chat() 被调用 ════════════", flush=True)
+        print(f"[LLM] ├─ Provider: {self.provider}", flush=True)
+        print(f"[LLM] ├─ Temperature: {temperature}", flush=True)
+        print(f"[LLM] ├─ Messages 数量: {len(messages)}", flush=True)
+        
+        # 打印消息摘要
+        for i, msg in enumerate(messages):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            content_preview = content[:100] + "..." if len(content) > 100 else content
+            print(f"[LLM] │   └─ Message[{i}] role={role}, content_len={len(content)}", flush=True)
+            if i == 0:  # system 消息只打印长度
+                print(f"[LLM] │           └─ (system prompt 长度: {len(content)} 字符)", flush=True)
+            else:
+                print(f"[LLM] │           └─ {content_preview}", flush=True)
+        
+        print(f"[LLM] └─ 开始调用 LLM...", flush=True)
+        
         if self.provider == LLMProvider.OPENAI:
-            return self._call_openai(messages, temperature)
+            result = self._call_openai(messages, temperature)
         elif self.provider == LLMProvider.AZURE:
-            return self._call_azure(messages, temperature)
+            result = self._call_azure(messages, temperature)
         elif self.provider == LLMProvider.OLLAMA:
-            return self._call_ollama(messages, temperature)
+            result = self._call_ollama(messages, temperature)
         elif self.provider == LLMProvider.ANTHROPIC:
-            return self._call_anthropic(messages, temperature)
+            result = self._call_anthropic(messages, temperature)
         else:
             raise LLMError(f"Unsupported provider: {self.provider}")
+        
+        elapsed = (time.time() - start_time) * 1000
+        result_preview = result[:150] + "..." if len(result) > 150 else result
+        print(f"[LLM] ════════════ LLM.chat() 完成 ════════════", flush=True)
+        print(f"[LLM] ├─ 耗时: {elapsed:.2f}ms", flush=True)
+        print(f"[LLM] ├─ 响应长度: {len(result)} 字符", flush=True)
+        print(f"[LLM] └─ 响应内容: {result_preview}", flush=True)
+        
+        return result
     
     def _call_openai(self, messages: List[Dict[str, str]], temperature: float) -> str:
         """调用 OpenAI 兼容 API（使用原生 httpx）"""
         import httpx
-        import logging
-        import os
-        logger = logging.getLogger("myreport")
+        import urllib3
+        
+        # 禁用 SSL 警告
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         
         pid = os.getpid()
         url = f"{self.settings.llm_api_base}/chat/completions"
@@ -78,30 +128,73 @@ class LLMClient:
             "temperature": temperature
         }
         
-        logger.info(f"LLM 调用开始: timeout={self.timeout}s, url={url}")
+        # 不使用代理，直接连接
+        # 注意：SSL 验证已禁用以解决证书问题
+        
+        logger.info("[LLM:OpenAI] ═══════════════════════════════")
+        logger.info(f"[LLM:OpenAI] ├─ 请求URL: {url}")
+        logger.info(f"[LLM:OpenAI] ├─ Model: {data['model']}")
+        logger.info(f"[LLM:OpenAI] ├─ Timeout: {self.timeout}s")
+        logger.info(f"[LLM:OpenAI] ├─ SSL Verify: False")
+        logger.info(f"[LLM:OpenAI] ├─ Max Retries: {self.max_retries}")
+        logger.info(f"[LLM:OpenAI] └─ 准备发送请求...")
         
         for attempt in range(self.max_retries + 1):
             try:
-                logger.info(f"LLM attempt {attempt + 1}: 发送请求...")
-                response = httpx.post(url, json=data, headers=headers, timeout=self.timeout)
-                logger.info(f"LLM attempt {attempt + 1}: 收到响应")
+                logger.info(f"[LLM:OpenAI] ├─ Attempt {attempt + 1}/{self.max_retries + 1}: 发送请求...")
+                request_start = time.time()
+                response = httpx.post(
+                    url, 
+                    json=data, 
+                    headers=headers, 
+                    timeout=self.timeout,
+                    verify=False  # 禁用 SSL 验证
+                )
+                request_elapsed = (time.time() - request_start) * 1000
+                
+                logger.info(f"[LLM:OpenAI] │   ├─ HTTP Status: {response.status_code}")
+                logger.info(f"[LLM:OpenAI] │   ├─ 响应耗时: {request_elapsed:.2f}ms")
+                logger.info(f"[LLM:OpenAI] │   ├─ 响应大小: {len(response.content)} bytes")
+                
                 response.raise_for_status()
                 result = response.json()
+                
+                logger.info(f"[LLM:OpenAI] │   └─ 响应解析成功")
                 
                 # 提取响应内容
                 content = result["choices"][0]["message"].get("content")
                 if content:
-                    logger.info(f"LLM 成功: content={content[:50]}...")
+                    logger.info(f"[LLM:OpenAI] ✅ 成功获取 content: {content[:100]}...")
                     return content
                 # GLM 模型可能返回 reasoning
                 reasoning = result["choices"][0]["message"].get("reasoning")
                 if reasoning:
-                    logger.info(f"LLM 成功: reasoning={reasoning[:50]}...")
+                    logger.info(f"[LLM:OpenAI] ✅ 成功获取 reasoning: {reasoning[:100]}...")
                     return reasoning
+                logger.error(f"[LLM:OpenAI] ❌ LLM 返回空内容，原始响应: {result}")
                 raise ValueError("LLM 返回空内容")
-            except httpx.HTTPError as e:
+            except httpx.HTTPStatusError as e:
+                logger.error(f"[LLM:OpenAI] ═══════════════════════════════")
+                logger.error(f"[LLM:OpenAI] ├─ HTTP 错误: {e.response.status_code}")
+                logger.error(f"[LLM:OpenAI] ├─ 错误响应: {e.response.text[:200]}")
                 if attempt >= self.max_retries:
+                    logger.error(f"[LLM:OpenAI] └─ 达到最大重试次数，放弃")
+                    raise LLMError(f"OpenAI API error after {self.max_retries} retries: {str(e)}", "openai", e.response.status_code)
+                logger.warning(f"[LLM:OpenAI] ├─ 重试... ({attempt + 1}/{self.max_retries})")
+            except httpx.TimeoutException as e:
+                logger.error(f"[LLM:OpenAI] ═══════════════════════════════")
+                logger.error(f"[LLM:OpenAI] ├─ 请求超时: {self.timeout}s")
+                if attempt >= self.max_retries:
+                    logger.error(f"[LLM:OpenAI] └─ 达到最大重试次数，放弃")
+                    raise LLMError(f"OpenAI API timeout after {self.max_retries} retries: {str(e)}", "openai")
+                logger.warning(f"[LLM:OpenAI] ├─ 重试... ({attempt + 1}/{self.max_retries})")
+            except httpx.RequestError as e:
+                logger.error(f"[LLM:OpenAI] ═══════════════════════════════")
+                logger.error(f"[LLM:OpenAI] ├─ 请求错误: {type(e).__name__}: {str(e)}")
+                if attempt >= self.max_retries:
+                    logger.error(f"[LLM:OpenAI] └─ 达到最大重试次数，放弃")
                     raise LLMError(f"OpenAI API error after {self.max_retries} retries: {str(e)}", "openai")
+                logger.warning(f"[LLM:OpenAI] ├─ 重试... ({attempt + 1}/{self.max_retries})")
         
         return ""
     

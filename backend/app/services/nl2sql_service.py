@@ -45,34 +45,53 @@ class NL2SQLService:
         Returns:
             NL2SQL 响应
         """
+        logger.info("=" * 60)
+        logger.info("[NL2SQL] 🔵 ========== 新的 NL2SQL 请求 ==========")
+        logger.info(f"[NL2SQL] ├─ 用户ID: {user_id}")
+        logger.info(f"[NL2SQL] ├─ 数据源ID: {request.data_source_id}")
+        logger.info(f"[NL2SQL] ├─ 问题: {request.question}")
+        logger.info(f"[NL2SQL] └─ 请求时间: {__import__('datetime').datetime.now().isoformat()}")
+        
         sql = None
         confidence = 0.0
         explanation = ""
         used_llm = False
 
         # 1. 尝试使用 LLM 生成 SQL
+        logger.info("[NL2SQL] 📌 步骤1: 尝试使用 LLM 生成 SQL...")
         try:
             llm_client = self._get_llm_client()
+            logger.info(f"[NL2SQL] ├─ LLM 客户端初始化完成, timeout={llm_client.timeout}")
+            
             sql, confidence, explanation = self._generate_sql_with_llm(
                 llm_client, request.question, request.data_source_id
             )
             used_llm = True
-            logger.info(f"LLM 生成 SQL 成功: {sql[:100]}...")
+            logger.info(f"[NL2SQL] ✅ LLM 生成 SQL 成功:")
+            logger.info(f"[NL2SQL] │   ├─ SQL: {sql[:150]}..." if len(sql) > 150 else f"[NL2SQL] │   ├─ SQL: {sql}")
+            logger.info(f"[NL2SQL] │   ├─ 置信度: {confidence:.2%}")
+            logger.info(f"[NL2SQL] │   └─ 解释: {explanation[:100]}..." if len(explanation) > 100 else f"[NL2SQL] │   └─ 解释: {explanation}")
         except LLMError as e:
-            logger.warning(f"LLM 调用失败: {e}，回退到规则引擎")
+            logger.warning(f"[NL2SQL] ⚠️ LLM 调用失败: {e}，回退到规则引擎")
         except Exception as e:
-            logger.warning(f"LLM 生成 SQL 失败: {e}，回退到规则引擎")
+            logger.warning(f"[NL2SQL] ⚠️ LLM 生成 SQL 失败: {e}，回退到规则引擎")
 
         # 2. LLM 失败时，使用规则引擎作为 fallback
         if not sql:
+            logger.info("[NL2SQL] 📌 步骤2: LLM 未成功，使用规则引擎作为 fallback...")
             sql, confidence = self.rule_engine.parse_question(request.question)
             explanation = f"基于规则引擎生成，置信度：{confidence:.2%}"
-            logger.info(f"规则引擎生成 SQL: {sql}")
+            logger.info(f"[NL2SQL] ✅ 规则引擎生成 SQL:")
+            logger.info(f"[NL2SQL] │   ├─ SQL: {sql}")
+            logger.info(f"[NL2SQL] │   └─ 置信度: {confidence:.2%}")
+        else:
+            logger.info("[NL2SQL] 📌 步骤2: 跳过规则引擎（LLM 成功）")
 
         # 3. 验证 SQL 安全性
+        logger.info("[NL2SQL] 📌 步骤3: 验证 SQL 安全性...")
         is_valid, validation_msg = SQLValidator.validate(sql)
         if not is_valid:
-            logger.error(f"SQL 验证失败: {validation_msg}")
+            logger.error(f"[NL2SQL] ❌ SQL 验证失败: {validation_msg}")
             return NL2SQLResponse(
                 suggestions=[
                     SQLSuggestion(
@@ -85,8 +104,9 @@ class NL2SQLService:
                 query_result=None,
                 execution_time_ms=None
             )
+        logger.info(f"[NL2SQL] ✅ SQL 验证通过: {validation_msg}")
 
-        # 4. 创建 SQL 建议
+        # 4. 创建 SQL ��议
         suggestion = SQLSuggestion(
             sql=sql,
             confidence=confidence,
@@ -94,6 +114,7 @@ class NL2SQLService:
         )
 
         # 5. 执行查询
+        logger.info("[NL2SQL] 📌 步骤4: 执行 SQL 查询...")
         query_request = SQLQueryRequest(
             data_source_id=request.data_source_id,
             sql=sql,
@@ -102,6 +123,12 @@ class NL2SQLService:
 
         try:
             result = self.query_service.execute_sql(query_request, user_id)
+
+            logger.info("[NL2SQL] ✅ 查询执行成功:")
+            logger.info(f"[NL2SQL] │   ├─ 列数: {len(result.columns)}")
+            logger.info(f"[NL2SQL] │   ├─ 行数: {len(result.rows)}")
+            logger.info(f"[NL2SQL] │   ├─ 总数: {result.total}")
+            logger.info(f"[NL2SQL] │   └─ 执行时间: {result.execution_time_ms}ms")
 
             return NL2SQLResponse(
                 suggestions=[suggestion],
@@ -116,7 +143,7 @@ class NL2SQLService:
         except Exception as e:
             # 查询失败，返回建议但不返回结果
             error_msg = str(e) if str(e) else f"{type(e).__name__}"
-            logger.error(f"查询执行失败: {error_msg}")
+            logger.error(f"[NL2SQL] ❌ 查询执行失败: {error_msg}")
             return NL2SQLResponse(
                 suggestions=[suggestion],
                 selected_sql=sql,
@@ -138,10 +165,18 @@ class NL2SQLService:
         Returns:
             (sql, confidence, explanation): 生成的 SQL、置信度和解释
         """
+        logger.info("[NL2SQL] ═══════════════════════════════════════════")
+        logger.info("[NL2SQL] 🔧 _generate_sql_with_llm 方法开始执行")
+        
         # 1. 构建 schema prompt
+        logger.info("[NL2SQL] ├─ 步骤1: 构建 Schema prompt...")
         schema_prompt = self.build_schema_prompt(data_source_id)
+        logger.info(f"[NL2SQL] │   └─ Schema 长度: {len(schema_prompt)} 字符")
 
         # 2. 构建系统提示词
+        print(f"[NL2SQL] ├─ 步骤2: 构建系统提示词...", flush=True)
+        
+        # 使用 print 输出完整的 system prompt，方便调试
         system_prompt = f"""你是一个数据分析专家，擅长将自然语言问题转换为 SQL 查询。
 
 ## 数据源信息
@@ -152,7 +187,7 @@ class NL2SQLService:
 2. 使用精确的表名和列名
 3. 条件要准确匹配问题中的语义
 4. 日期格式使用 YYYYMMDD（如 20260508）
-5. 必须包含 ORDER BY 子句以支持分页
+5. 【重要】必须包含 ORDER BY 子句以支持分页，没有 ORDER BY 会导致查询失败！
 6. 不要使用 SQL 注释（-- 或 /* */）
 7. 不要在 SQL 末尾添加分号
 
@@ -164,34 +199,51 @@ class NL2SQLService:
   "explanation": "SQL 生成逻辑的简要说明"
 }}
 """
+        print(f"[NL2SQL] │   └─ System prompt 长度: {len(system_prompt)} 字符", flush=True)
+        print(f"[NL2SQL] │   └─ Schema preview: {schema_prompt[:200]}...", flush=True)
 
         # 3. 调用 LLM
-        logger.info(f"LLM 开始生成 SQL, question={question[:30]}, client_timeout={llm_client.timeout}")
+        print(f"[NL2SQL] ├─ 步骤3: 调用 LLM 生成 SQL", flush=True)
+        print(f"[NL2SQL] │   ├─ Question: {question}", flush=True)
+        print(f"[NL2SQL] │   ├─ DataSourceID: {data_source_id}", flush=True)
+        print(f"[NL2SQL] │   ├─ LLM Client Timeout: {llm_client.timeout}s", flush=True)
         
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"问题: {question}"}
         ]
         
-        logger.info(f"LLM messages prepared, system_prompt length={len(system_prompt)}")
+        print(f"[NL2SQL] │   ├─ Messages prepared", flush=True)
         
+        print(f"[NL2SQL] │   └─ 正在等待 LLM 响应...", flush=True)
         response = llm_client.chat(messages, temperature=0.0)
         
-        logger.info(f"LLM response received, length={len(response)}")
+        print(f"[NL2SQL] │       └─ LLM 响应长度: {len(response)} 字符", flush=True)
+        print(f"[NL2SQL] │           └─ LLM 响应(前200字符): {response[:200]}...", flush=True)
 
         # 4. 解析 JSON 响应
+        print(f"[NL2SQL] ├─ 步骤4: 解析 LLM JSON 响应", flush=True)
         result = self._parse_llm_response(response)
 
         if not result:
+            print(f"[NL2SQL] │   └─ ❌ 无法解析 LLM 响应为 JSON", flush=True)
             raise ValueError("无法解析 LLM 响应")
 
         sql = result.get("sql", "").strip()
         confidence = float(result.get("confidence", 0.0))
         explanation = result.get("explanation", "")
 
+        print(f"[NL2SQL] │   ├─ 解析成功:", flush=True)
+        print(f"[NL2SQL] │   │   ├─ SQL: {sql[:100]}..." if len(sql) > 100 else f"[NL2SQL] │   │   ├─ SQL: {sql}", flush=True)
+        print(f"[NL2SQL] │   │   ├─ Confidence: {confidence:.2%}", flush=True)
+        print(f"[NL2SQL] │   │   └─ Explanation: {explanation[:80]}..." if len(explanation) > 80 else f"[NL2SQL] │   │   └─ Explanation: {explanation}", flush=True)
+
         if not sql:
+            print(f"[NL2SQL] │   └─ ❌ LLM 返回的 SQL 为空", flush=True)
             raise ValueError("LLM 未返回有效的 SQL")
 
+        logger.info("[NL2SQL] └─ ✅ _generate_sql_with_llm 执行完成")
+        
         return sql, confidence, explanation
 
     def _parse_llm_response(self, response: str) -> Optional[Dict[str, Any]]:
