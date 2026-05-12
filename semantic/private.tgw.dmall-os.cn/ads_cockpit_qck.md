@@ -570,7 +570,7 @@
 
 ---
 
-#### 27. ads_cockpit_qck.matnr_sale_d_v1（商品销售流水）
+#### 27. ads_cockpit_qck.ads_cockpit_qck_matnr_sale_d_v1（商品销售流水）
 
 **说明**: 商品粒度的销售流水数据，含ARRAY字段（store_code、trade_type等为数组类型）。
 
@@ -582,7 +582,7 @@
 
 ---
 
-#### 28. ads_cockpit_qck.ware_pcat_overview（品类概览）
+#### 28. ads_cockpit_qck.ads_cockpit_qck_ware_pcat_overview（品类概览）
 
 **说明**: 含管理架构和同期对比的品类销售概览。
 
