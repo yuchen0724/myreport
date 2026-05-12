@@ -56,7 +56,7 @@ class LLMClient:
         print(f"[LLM] ├─ API Base: {settings.llm_api_base or 'default'}", flush=True)
         print(f"[LLM] ├─ API Mode: {self.api_mode}", flush=True)
         print(f"[LLM] ├─ Timeout: {self.timeout}s", flush=True)
-        print(f"[LLM] ├��� Max Retries: {self.max_retries}", flush=True)
+        print(f"[LLM] ├─ Max Retries: {self.max_retries}", flush=True)
         print(f"[LLM] └─ API Key: {settings.llm_api_key[:10] if settings.llm_api_key else 'None'}...", flush=True)
         
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.0) -> str:
