@@ -51,7 +51,7 @@ class QueryService:
         start_time = time.time()
         try:
             # 直接使用用户请求的 page_size，不再获取全量
-            result = self._execute_query(ds, optimized_sql, request.params, request.page, request.page_size, getattr(request, 'cursor', None))
+            result = self._execute_query(ds, optimized_sql, request.params, request.page, request.page_size, getattr(request, 'cursor', None), skip_deep_pagination_check=getattr(request, 'skip_deep_pagination_check', False))
             execution_time_ms = int((time.time() - start_time) * 1000)
 
             # 保存查询历史
@@ -112,7 +112,7 @@ class QueryService:
                 error_msg = f"{type(e).__name__}"
             raise ValueError(f"查询执行失败: {error_msg}")
 
-    def _execute_query(self, ds, sql: str, params: Optional[dict], page: int = 1, page_size: int = 100, cursor: Optional[str] = None) -> dict:
+    def _execute_query(self, ds, sql: str, params: Optional[dict], page: int = 1, page_size: int = 100, cursor: Optional[str] = None, skip_deep_pagination_check: bool = False) -> dict:
         """执行查询并返回结果（带连接池和超时）"""
         import pymysql
         import psycopg2
@@ -207,7 +207,7 @@ class QueryService:
                         converted_sql = re.sub(r';?\s*LIMIT\s+\d+\s*$', '', converted_sql, flags=re.IGNORECASE)
                         
                         # 【新增】NL2SQL 查询直接使用普通分页，跳过所有深度分页检查
-                        if request.skip_deep_pagination_check:
+                        if skip_deep_pagination_check:
                             # 直接添加 LIMIT OFFSET，不做其他处理
                             converted_sql = f"{converted_sql} LIMIT {page_size} OFFSET {offset}"
                             logger.info("NL2SQL查询：跳过深度分页检查，使用普通分页 LIMIT OFFSET")
@@ -244,7 +244,7 @@ class QueryService:
                         
                         # 如果没有 ORDER BY，根据 skip_deep_pagination_check 决定处理方式
                         if not order_by_match:
-                            if request.skip_deep_pagination_check:
+                            if skip_deep_pagination_check:
                                 # NL2SQL 查询：直接使用普通分页
                                 converted_sql = f"{converted_sql} LIMIT {page_size} OFFSET {offset}"
                                 logger.info("NL2SQL查询：无ORDER BY，使用普通分页 LIMIT OFFSET")
