@@ -240,6 +240,7 @@ class NL2SQLService:
    - 散点图(scatter)：适合展示相关性
 11. X轴选择维度/分类字段，Y轴选择数值/指标字段
 12. 【推荐】使用中文作为字段别名，例如 `SUM(sale_amt) AS 销售额`，方便非技术人员理解
+13. 【重要】金额类指标必须保留2位小数，使用 `ROUND(字段, 2)` 或 `CAST(字段 AS DECIMAL(18,2))`
 
 ## 输出格式
 请返回以下 JSON 格式（不要添加任何其他文字）：
@@ -426,7 +427,10 @@ class NL2SQLService:
    - ❌ 不支持 `GROUP_CONCAT`（MySQL 特有），使用 `GROUP_CONCAT_DISTINCT` 或 `STRING_AGG`
    - ❌ 不支持 `FIND_IN_SET`，使用 `array_contains` 或 `IN`
 
-3. 其他限制：
+3. 数值精度限制：
+   - 【重要】金额类指标必须保留2位小数，使用 `ROUND(字段, 2)` 或 `CAST(字段 AS DECIMAL(18,2))`
+
+4. 其他限制：
    - ❌ 不支持 `information_schema.TABLES`
    - ✅ 支持 `DUAL` 虚拟表（如 `SELECT 1 FROM DUAL`）
    - ✅ 支持窗口函数 (ROW_NUMBER, RANK, DENSE_RANK 等)
