@@ -114,10 +114,14 @@ class QueryService:
 
     def _execute_query(self, ds, sql: str, params: Optional[dict], page: int = 1, page_size: int = 100, cursor: Optional[str] = None, skip_deep_pagination_check: bool = False) -> dict:
         """执行查询并返回结果（带连接池和超时）"""
+        import time as time_module
         import pymysql
         import psycopg2
         from sqlalchemy import create_engine, text
         from sqlalchemy.pool import QueuePool
+        
+        # 记录查询开始时间
+        start_time = time_module.time()
         
         # 查询超时时间（秒）
         QUERY_TIMEOUT = 30
@@ -236,7 +240,7 @@ class QueryService:
                                 total=len(rows),
                                 page=page,
                                 page_size=page_size,
-                                execution_time_ms=int((time.time() - start_time) * 1000)
+                                execution_time_ms=int((time_module.time() - start_time) * 1000)
                             )
                         
                         # 提取 ORDER BY 子句，用于后续分页
@@ -384,8 +388,7 @@ class QueryService:
                 error_msg = str(e)
                 if "fail to send batch" in error_msg or "network" in error_msg.lower():
                     if attempt < max_retries - 1:
-                        import time
-                        time.sleep(retry_delay * (attempt + 1))  # 递增等待时间
+                        time_module.sleep(retry_delay * (attempt + 1))  # 递增等待时间
                         continue
                 raise ValueError(f"查询执行失败: {error_msg}")
         
