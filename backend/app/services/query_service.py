@@ -206,6 +206,39 @@ class QueryService:
                         converted_sql = re.sub(r';?\s*LIMIT\s+\d+\s*OFFSET\s+\d+\s*$', '', converted_sql, flags=re.IGNORECASE)
                         converted_sql = re.sub(r';?\s*LIMIT\s+\d+\s*$', '', converted_sql, flags=re.IGNORECASE)
                         
+                        # 【新增】NL2SQL 查询直接使用普通分页，跳过所有深度分页检查
+                        if request.skip_deep_pagination_check:
+                            # 直接添加 LIMIT OFFSET，不做其他处理
+                            converted_sql = f"{converted_sql} LIMIT {page_size} OFFSET {offset}"
+                            logger.info("NL2SQL查询：跳过深度分页检查，使用普通分页 LIMIT OFFSET")
+                            
+                            # 直接执行查询，跳过后续的分页逻辑
+                            logger.info(f"执行查询: page={page}, page_size={page_size}")
+                            has_placeholders = bool(re.search(r':(\w+)', converted_sql))
+                            
+                            if has_placeholders and params:
+                                all_placeholders = set(re.findall(r':(\w+)', converted_sql))
+                                filtered_params = {}
+                                for placeholder in all_placeholders:
+                                    if placeholder in params and params[placeholder] is not None and params[placeholder] != '':
+                                        filtered_params[placeholder] = params[placeholder]
+                                result = conn.execute(text(converted_sql), filtered_params)
+                            else:
+                                result = conn.execute(text(converted_sql))
+                            
+                            # 获取列名
+                            columns = [col[0] for col in result.cursor.description] if result.cursor.description else []
+                            rows = [list(row) for row in result.fetchall()]
+                            
+                            return SQLQueryResponse(
+                                columns=columns,
+                                rows=rows,
+                                total=len(rows),
+                                page=page,
+                                page_size=page_size,
+                                execution_time_ms=int((time.time() - start_time) * 1000)
+                            )
+                        
                         # 提取 ORDER BY 子句（用户必须自己定义排序，否则拒绝查询）
                         order_by_match = re.search(r'\bORDER\s+BY\s+(.+?)(?:\s+LIMIT|\s+OFFSET|\s*$)', converted_sql, re.IGNORECASE)
                         if not order_by_match:
