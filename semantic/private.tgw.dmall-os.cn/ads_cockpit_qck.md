@@ -27,7 +27,7 @@
 
 ---
 
-#### 1. ads_cockpit_qck.order_d_v1（流水订单销售表 - 销售口径）
+#### 1. ads_cockpit_qck.ads_cockpit_qck_order_d_v1（流水订单销售表 - 销售口径）
 
 **说明**: 按订单行记录销售数据，订单完成即计入。包含订单维度信息和商品数组。
 
@@ -67,13 +67,13 @@
 
 ---
 
-#### 2. ads_cockpit_qck.order_post_d_v1（流水订单销售表 - 过账口径）
+#### 2. ads_cockpit_qck.ads_cockpit_qck_order_post_d_v1（流水订单销售表 - 过账口径）
 
 **结构与 `order_d_v1` 完全一致**，区别在于数据按**财务过账时间**计入，而非订单完成时间。
 
 ---
 
-#### 3. ads_cockpit_qck.order_matnr_d_v1（订单商品维度聚合 - 销售口径）
+#### 3. ads_cockpit_qck.ads_cockpit_qck_order_matnr_d_v1（订单商品维度聚合 - 销售口径）
 
 **说明**: AGGREGATE KEY 模型。按订单-商品维度聚合，支持 BITMAP 去重计数。
 
@@ -95,7 +95,7 @@
 
 ---
 
-#### 4. ads_cockpit_qck.order_matnr_post_d_v1（订单商品维度聚合 - 过账口径）
+#### 4. ads_cockpit_qck.ads_cockpit_qck_order_matnr_post_d_v1（订单商品维度聚合 - 过账口径）
 
 **与 `order_matnr_d_v1` 结构一致**，过账口径版本。
 
@@ -107,7 +107,7 @@
 
 ---
 
-#### 5. ads_cockpit_qck.order_ware_item_agg_d_v1（过账商品销售聚合 - 商品维度）
+#### 5. ads_cockpit_qck.ads_cockpit_qck_order_ware_item_agg_d_v1（过账商品销售聚合 - 商品维度）
 
 **说明**: 按商品编码聚合的销售指标，包含商品属性信息。
 
@@ -145,7 +145,7 @@
 
 ---
 
-#### 6. ads_cockpit_qck.order_ware_ocat_agg_d_v1（过账商品销售聚合 - 营运类目）
+#### 6. ads_cockpit_qck.ads_cockpit_qck_order_ware_ocat_agg_d_v1（过账商品销售聚合 - 营运类目）
 
 **说明**: 按营运类目聚合，包含 agg_level 字段控制聚合层级（0=门店、1~5=类目层级）。
 
@@ -173,13 +173,13 @@
 
 ---
 
-#### 7. ads_cockpit_qck.order_ware_pcat_agg_d_v1（过账商品销售聚合 - 采销类目）
+#### 7. ads_cockpit_qck.ads_cockpit_qck_order_ware_pcat_agg_d_v1（过账商品销售聚合 - 采销类目）
 
 **与 `ocat_agg` 结构一致**，维度改用采销类目（purchase_category1~5）。
 
 ---
 
-#### 8. ads_cockpit_qck.order_ware_post_item_agg_d_v1（过账口径商品销售聚合 - 商品维度）
+#### 8. ads_cockpit_qck.ads_cockpit_qck_order_ware_post_item_agg_d_v1（过账口径商品销售聚合 - 商品维度）
 
 **与 `order_ware_item_agg` 类似**，增加以下指标：
 
@@ -192,11 +192,11 @@
 
 ---
 
-#### 9. ads_cockpit_qck.order_ware_post_ocat_agg_d_v1（过账口径 - 营运类目聚合）
+#### 9. ads_cockpit_qck.ads_cockpit_qck_order_ware_post_ocat_agg_d_v1（过账口径 - 营运类目聚合）
 
 **与 `order_ware_ocat_agg` 结构一致**，增加促销/优惠券指标。
 
-#### 10. ads_cockpit_qck.order_ware_post_pcat_agg_d_v1（过账口径 - 采销类目聚合）
+#### 10. ads_cockpit_qck.ads_cockpit_qck_order_ware_post_pcat_agg_d_v1（过账口径 - 采销类目聚合）
 
 **与 `order_ware_pcat_agg` 结构一致**，增加促销/优惠券指标。
 
@@ -208,7 +208,7 @@
 
 ---
 
-#### 11. ads_cockpit_qck.store_ware_item_agg_d_v1（门店商品日汇总 - 商品维度）
+#### 11. ads_cockpit_qck.ads_cockpit_qck_store_ware_item_agg_d_v1（门店商品日汇总 - 商品维度）
 
 **说明**: 按天、门店、商品维度汇总的宽表，包含销售、团购、成本。
 
@@ -256,7 +256,7 @@
 
 ---
 
-#### 12. ads_cockpit_qck.store_ware_ocat_agg_d_v1（门店商品日汇总 - 营运类目）
+#### 12. ads_cockpit_qck.ads_cockpit_qck_store_ware_ocat_agg_d_v1（门店商品日汇总 - 营运类目）
 
 **说明**: 按营运类目聚合，agg_level=0 门店级、1~5 类目层级。
 
@@ -272,7 +272,7 @@
 
 ---
 
-#### 13. ads_cockpit_qck.store_ware_pcat_agg_d_v1（门店商品日汇总 - 采销类目）
+#### 13. ads_cockpit_qck.ads_cockpit_qck_store_ware_pcat_agg_d_v1（门店商品日汇总 - 采销类目）
 
 **与 `ocat_agg` 结构类似**，维度改为采销类目，不含商品级和规格字段。
 
@@ -282,7 +282,7 @@
 
 ---
 
-#### 14. ads_cockpit_qck.store_ware_stock_item_agg_d_v1（库存日汇总 - 商品维度）
+#### 14. ads_cockpit_qck.ads_cockpit_qck_store_ware_stock_item_agg_d_v1（库存日汇总 - 商品维度）
 
 **说明**: 按天、门店、商品维度汇总的库存指标。
 
@@ -299,7 +299,7 @@
 
 ---
 
-#### 15. ads_cockpit_qck.store_stock_pcat_agg_d_v1（库存聚合 - 采销类目）
+#### 15. ads_cockpit_qck.ads_cockpit_qck_store_stock_pcat_agg_d_v1（库存聚合 - 采销类目）
 
 **说明**: 按采销类目聚合的库存数据。
 
@@ -325,7 +325,7 @@
 
 ---
 
-#### 16. ads_cockpit_qck.store_ware_schedule_item_d_v1（档期商品销售 - 商品维度）
+#### 16. ads_cockpit_qck.ads_cockpit_qck_store_ware_schedule_item_d_v1（档期商品销售 - 商品维度）
 
 **说明**: 按档期维度汇总的商品销售数据，包含档期信息和销售指标。
 
@@ -342,7 +342,7 @@
 
 ---
 
-#### 17. ads_cockpit_qck.store_ware_schedule_pcat_agg_d_v1（档期销售聚合 - 采销类目）
+#### 17. ads_cockpit_qck.ads_cockpit_qck_store_ware_schedule_pcat_agg_d_v1（档期销售聚合 - 采销类目）
 
 **说明**: 按档期+采销类目聚合，包含更丰富的档期信息。
 
@@ -364,7 +364,7 @@
 
 ---
 
-#### 18. ads_cockpit_qck.scene_store_ware_ocat_agg_d_v1（场景门店商品分析 - 营运类目）
+#### 18. ads_cockpit_qck.ads_cockpit_qck_scene_store_ware_ocat_agg_d_v1（场景门店商品分析 - 营运类目）
 
 **说明**: 场景分析预聚合表，包含多数据源标记和多层次成本指标。
 
@@ -382,7 +382,7 @@
 
 ---
 
-#### 19. ads_cockpit_qck.scene_store_ware_pcat_agg_d_v1（场景门店商品分析 - 采销类目）
+#### 19. ads_cockpit_qck.ads_cockpit_qck_scene_store_ware_pcat_agg_d_v1（场景门店商品分析 - 采销类目）
 
 **与 `scene_ocat_agg` 结构一致**，维度改为采销类目。
 
@@ -392,7 +392,7 @@
 
 ---
 
-#### 20. ads_cockpit_qck.scm_receive_ware_pcat_agg_d_v1（供应链收货聚合 - 采销类目）
+#### 20. ads_cockpit_qck.ads_cockpit_qck_scm_receive_ware_pcat_agg_d_v1（供应链收货聚合 - 采销类目）
 
 **说明**: 聚焦供应链收货流程，包含订货确认、收货、价格信息。
 
@@ -426,7 +426,7 @@
 
 ---
 
-#### 21. ads_cockpit_qck.supplier_store_pcat_agg_d_v1（供应商聚合 - 采销类目）
+#### 21. ads_cockpit_qck.ads_cockpit_qck_supplier_store_pcat_agg_d_v1（供应商聚合 - 采销类目）
 
 **说明**: 按供应商+采销类目聚合的销售数据。
 
@@ -442,7 +442,7 @@
 
 ---
 
-#### 22. ads_cockpit_qck.store_cat_budget_d_v1（类目预算）
+#### 22. ads_cockpit_qck.ads_cockpit_qck_store_cat_budget_d_v1（类目预算）
 
 **说明**: 门店类目预算表，包含销售额、毛利、库存、商损等多维度预算数据。
 
@@ -484,7 +484,7 @@
 
 ---
 
-#### 23. ads_cockpit_qck.store_cat_ware_budget_d_v1（商品预算）
+#### 23. ads_cockpit_qck.ads_cockpit_qck_store_cat_ware_budget_d_v1（商品预算）
 
 **说明**: 按商品维度的预算数据。
 
@@ -499,7 +499,7 @@
 
 ---
 
-#### 24. ads_cockpit_qck.store_activation_agg_d_v1（门店稼动指标）
+#### 24. ads_cockpit_qck.ads_cockpit_qck_store_activation_agg_d_v1（门店稼动指标）
 
 **说明**: 门店运营效率指标，包含稼动、配送、拣货、天气等。
 
@@ -529,7 +529,7 @@
 
 ---
 
-#### 25. ads_cockpit_qck.store_ware_abnormal_d_v1（异常商品明细）
+#### 25. ads_cockpit_qck.ads_cockpit_qck_store_ware_abnormal_d_v1（异常商品明细）
 
 **说明**: 记录异常商品数据，含超时未取、缺货、盘点异常等标签。
 
@@ -543,7 +543,7 @@
 
 ---
 
-#### 26. ads_cockpit_qck.group_d_v1（集团每日指标）
+#### 26. ads_cockpit_qck.ads_cockpit_qck_group_d_v1（集团每日指标）
 
 **说明**: 集团级别的会员生命周期指标，按日汇总。
 
