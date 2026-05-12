@@ -809,14 +809,15 @@ class NL2SQLService:
                 logger.info(f"[NL2SQL] ✓ 表名已带库名，跳过: {full_table}")
                 continue
             
-            # 跳过 SQL 关键字
+            # 跳过 SQL 关键字和虚拟表
             skip_words = {'SELECT', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'ON', 'AS', 
                          'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'CROSS', 'JOIN',
                          'GROUP', 'ORDER', 'BY', 'HAVING', 'LIMIT', 'OFFSET', 'UNION',
                          'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'NULL', 'TRUE', 'FALSE',
                          'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'COALESCE', 'IFNULL', 'IF',
                          'FROM', 'JOIN', 'SET', 'VALUES', 'INTO', 'TABLE', 'DATABASE',
-                         'SCHEMA', 'INDEX', 'VIEW', 'TRIGGER', 'FUNCTION', 'PROCEDURE'}
+                         'SCHEMA', 'INDEX', 'VIEW', 'TRIGGER', 'FUNCTION', 'PROCEDURE',
+                         'DUAL'}
             if full_table.upper() in skip_words:
                 continue
             
