@@ -275,14 +275,12 @@ const analyzeChartData = () => {
       yVal = row
     }
     
+    // Y轴值转换：优先转为数字，若失败则给默认值1（用于展示类别存在性）
+    const yNum = Number(yVal ?? 0)
     return {
       x: String(xVal ?? ''),
-      y: Number(yVal ?? 0)
+      y: isNaN(yNum) ? 1 : yNum  // 字符类型Y轴默认为1
     }
-  }).filter(item => {
-    const valid = !isNaN(item.y)
-    if (!valid) console.log('[Chart] 过滤掉无效数据:', item)
-    return valid
   })
 
   console.log('[Chart] ├─ 转换后数据条目数:', data.length)
@@ -355,12 +353,8 @@ const buildChartFromLLMRecommendation = (config) => {
     
     return {
       x: String(xVal ?? ''),
-      y: Number(yVal ?? 0)
+      y: isNaN(Number(yVal ?? 0)) ? 1 : Number(yVal ?? 0)
     }
-  }).filter(item => {
-    const valid = !isNaN(item.y)
-    if (!valid) console.log('[Chart] 🤖 过滤掉无效数据:', item)
-    return valid
   })
 
   console.log('[Chart] 🤖 LLM 推荐构建的图表数据:', data)
@@ -394,9 +388,9 @@ const rebuildChartFromFields = () => {
     const yVal = Array.isArray(row) ? row[yIndex] : row[columns[yIndex]]
     return {
       x: String(xVal ?? ''),
-      y: Number(yVal ?? 0)
+      y: isNaN(Number(yVal ?? 0)) ? 1 : Number(yVal ?? 0)
     }
-  }).filter(item => !isNaN(item.y))
+  })
 }
 
 onMounted(async () => {
