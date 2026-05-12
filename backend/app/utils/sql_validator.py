@@ -18,18 +18,20 @@ class SQLValidator:
         "USER", "CURRENT_USER", "LOAD_CONCATENATED_FILE", "READFILE"
     ]
 
-    # 常见注入模式
+    # 常见注入模式（排除合法的 UNION/WITH 用法）
     INJECTION_PATTERNS = [
-        r"OR\s+1\s*=\s*1",           # OR 1=1
-        r"OR\s+'[^']*'\s*=\s*'[^']*'",  # OR ''=''
+        r"OR\s+1\s*=\s*1",           # OR 1=1 永真式
+        r"OR\s+'[^']*'\s*=\s*'[^']*'",  # OR \'\'=\'\' 永真式
         r"OR\s+\d+\s*=\s*\d+",        # OR 1=1 数字
-        r"UNION\s+SELECT",            # UNION 注入
-        r"UNION\s+ALL\s+SELECT",      # UNION ALL 注入
-        r"-\s*-",                     # SQL 注释注入
+        r"-\s*-$",                    # 行尾注释注入
         r"#\s*\w+",                  # MySQL 注释注入
         r"/\*.*\*/",                 # 注释块注入
         r"EXEC\s*\(",                 # 存储过程注入
         r"0x[0-9a-fA-F]+",           # 十六进制编码注入
+        r";\s*DROP",                  # 多语句 DROP
+        r";\s*DELETE",                # 多语句 DELETE
+        r";\s*UPDATE",                # 多语句 UPDATE
+        r";\s*INSERT",                # 多语句 INSERT
     ]
 
     # 预编译正则
@@ -83,45 +85,25 @@ class SQLValidator:
         if not sql_upper.strip().startswith("SELECT") and not sql_upper.strip().startswith("WITH"):
             return False, "只允许 SELECT 查询"
         
-        # 5. 检查是否包含注释（防止注释注入）
-        if "--" in sql or "/*" in sql or "*/" in sql:
-            return False, "不允许使用注释"
-        
-        # 6. 检查是否包含分号（防止多语句注入）
+        # 5. 检查是否包含分号（防止多语句注入）
         if ";" in sql:
             return False, "不允许使用分号"
         
-        # 7. 检查括号匹配（防止语法错误）
+        # 6. 检查括号匹配（防止语法错误）
         if sql.count("(") != sql.count(")"):
             return False, "括号不匹配"
         
-        # 8. 检查 SQL 长度（防止过长的恶意查询）
+        # 7. 检查 SQL 长度（防止过长的恶意查询）
         if len(sql) > 10000:
             return False, "SQL 语句过长"
         
         return True, "验证通过"
 
-    @classmethod
-    def extract_tables(cls, sql: str) -> List[str]:
-        """从 SQL 中提取表名"""
-        pattern = r"FROM\s+([^\s,]+)|JOIN\s+([^\s,]+)"
-        matches = re.findall(pattern, sql, re.IGNORECASE)
-        tables = []
-        for match in matches:
-            for table in match:
-                if table and table not in tables:
-                    tables.append(table)
-        return tables
-    
-    @classmethod
-    def validate_where_clause(cls, where: str) -> Tuple[bool, str]:
-        """验证 WHERE 子句（更严格的检查）"""
-        # 检查等号两边是否有数字或字符串直接比较
-        if re.search(r"\d+\s*=\s*\d+", where):
-            return False, "不允许数字直接比较"
-        
-        # 检查是否有危险的比较
-        if re.search(r"['\"]\s*=\s*['\"]", where):
-            return False, "不允许空字符串比较"
-        
-        return True, "验证通过"
+
+# 辅助函数：生成安全的 LIMIT/OFFSET
+def safe_limit_offset(page: int, page_size: int, max_page_size: int = 1000) -> Tuple[int, int]:
+    """生成安全的分页参数"""
+    page = max(1, page)
+    page_size = min(max(1, page_size), max_page_size)
+    offset = (page - 1) * page_size
+    return offset, page_size
