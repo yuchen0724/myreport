@@ -414,9 +414,11 @@ class NL2SQLService:
 1. 日期函数限制：
    - ❌ 不支持 `CURRENT_DATE`（不带括号），必须使用 `CURRENT_DATE()` 
    - ❌ 不支持 `NOW()`（不带括号），必须使用 `NOW()`
-   - 昨日: `DATE_SUB(CURDATE(), INTERVAL 1 DAY)` 或 `DATE_ADD(CURDATE(), INTERVAL -1 DAY)`
-   - 【关键】dt 字段是日期分区，格式为 `yyyymmdd`（字符串或整数），例如 `dt = '20260512'` 或 `dt = 20260512`
-   - 【必须】涉及到 dt 字段的日期查询时，日期数据格式是 `yyyyMMdd`（如 20260512），请勿使用其他格式！
+   - 【禁止】涉及 dt 字段时，禁止使用日期函数（如 DATE_SUB、CURDATE() 等）！dt 字段是字符串格式 yyyymmdd（如 '20260512'），日期函数返回的是日期类型格式（如 2026-05-11），两者不匹配会导致查询失败！
+   - 【必须】涉及 dt 字段时，必须使用字符串格式的日期值，例如：
+     - 昨日: `dt = '20260511'` 或 `dt = 20260511`
+     - 今日: `dt = '20260512'` 或 `dt = 20260512`
+     - 直接写死日期值，禁止使用日期函数转换！
 
 2. 字符串函数限制：
    - ❌ 不支持 `GROUP_CONCAT`（MySQL 特有），使用 `GROUP_CONCAT_DISTINCT` 或 `STRING_AGG`
