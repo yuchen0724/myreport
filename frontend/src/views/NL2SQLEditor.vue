@@ -79,6 +79,46 @@
               <el-option label="💖 粉色" value="pink" />
             </el-select>
           </div>
+          <!-- 字段映射选择 -->
+          <div v-if="queryResult && queryResult.columns && queryResult.columns.length >= 1" class="field-mapping-section">
+            <div class="field-mapping-header">
+              <span>字段映射（选择图表 X/Y 轴对应的字段）</span>
+            </div>
+            <div class="field-mapping-controls">
+              <el-form :inline="true" size="small" label-width="40px">
+                <el-form-item label="X 轴">
+                  <el-select
+                    v-model="fieldMapping.xAxis"
+                    @change="rebuildChartFromFields"
+                    placeholder="选择X轴字段"
+                    style="width: 180px"
+                  >
+                    <el-option
+                      v-for="col in queryResult.columns"
+                      :key="col"
+                      :label="col"
+                      :value="col"
+                    />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="Y 轴">
+                  <el-select
+                    v-model="fieldMapping.yAxis"
+                    @change="rebuildChartFromFields"
+                    placeholder="选择Y轴字段"
+                    style="width: 180px"
+                  >
+                    <el-option
+                      v-for="col in queryResult.columns"
+                      :key="col"
+                      :label="col"
+                      :value="col"
+                    />
+                  </el-select>
+                </el-form-item>
+              </el-form>
+            </div>
+          </div>
           <ChartRenderer
             :chart-type="chartType"
             :data="chartData"
@@ -134,15 +174,20 @@ const chartData = ref([])
 const chartColorTheme = ref('blue')
 const chartHeight = ref('350px')
 
-// 根据查询结果自动推荐图表类型
+// 字段映射（用户可手动选择 X/Y 轴对应的列）
+const fieldMapping = ref({ xAxis: '', yAxis: '' })
+
+// 根据字段映射生成图表配置
 const chartConfig = computed(() => {
-  if (!queryResult.value || !queryResult.value.columns || queryResult.value.columns.length < 2) {
+  if (!queryResult.value || !queryResult.value.columns || queryResult.value.columns.length < 1) {
     return {}
   }
+  const xField = fieldMapping.value.xAxis || queryResult.value.columns[0]
+  const yField = fieldMapping.value.yAxis || (queryResult.value.columns.length > 1 ? queryResult.value.columns[1] : queryResult.value.columns[0])
   return {
-    title: queryResult.value.columns[1] || '数据',
-    x_axis: queryResult.value.columns[0],
-    y_axis: queryResult.value.columns[1]
+    title: yField || '数据',
+    x_axis: xField,
+    y_axis: yField
   }
 })
 
@@ -207,6 +252,10 @@ const analyzeChartData = () => {
   const xField = columns[xFieldIndex]
   const yField = columns[yFieldIndex]
   console.log('[Chart] 智能选择字段:', { xField, yField, xFieldIndex, yFieldIndex })
+
+  // 设置字段映射默认值
+  fieldMapping.value.xAxis = xField
+  fieldMapping.value.yAxis = yField
 
   // 尝试将数据转换为图表格式，支持对象和数组两种格式
   const data = rows.slice(0, 20).map(row => {
@@ -276,6 +325,14 @@ const buildChartFromLLMRecommendation = (config) => {
 
   console.log('[Chart] 🤖 字段索引:', { xField, xFieldIndex, yField, yFieldIndex })
 
+  // 设置字段映射默认值
+  if (xFieldIndex !== -1) {
+    fieldMapping.value.xAxis = columns[xFieldIndex]
+  }
+  if (yFieldIndex !== -1) {
+    fieldMapping.value.yAxis = columns[yFieldIndex]
+  }
+
   // 如果找不到对应字段，回退到智能分析
   if (xFieldIndex === -1 || yFieldIndex === -1) {
     console.log('[Chart] ⚠️ LLM 推荐的字段未找到，回退到智能分析')
@@ -308,6 +365,38 @@ const buildChartFromLLMRecommendation = (config) => {
 
   console.log('[Chart] 🤖 LLM 推荐构建的图表数据:', data)
   chartData.value = data
+}
+
+/**
+ * 根据用户选择的字段映射重建图表数据
+ */
+const rebuildChartFromFields = () => {
+  if (!queryResult.value || !queryResult.value.columns || !queryResult.value.rows) {
+    return
+  }
+
+  const columns = queryResult.value.columns
+  const rows = queryResult.value.rows
+  const xField = fieldMapping.value.xAxis
+  const yField = fieldMapping.value.yAxis
+
+  if (!xField || !yField) return
+
+  const xIndex = columns.indexOf(xField)
+  const yIndex = columns.indexOf(yField)
+
+  if (xIndex === -1 || yIndex === -1) return
+
+  console.log('[Chart] 🔄 根据字段映射重建图表数据:', { xField, yField, xIndex, yIndex })
+
+  chartData.value = rows.slice(0, 20).map(row => {
+    const xVal = Array.isArray(row) ? row[xIndex] : row[columns[xIndex]]
+    const yVal = Array.isArray(row) ? row[yIndex] : row[columns[yIndex]]
+    return {
+      x: String(xVal ?? ''),
+      y: Number(yVal ?? 0)
+    }
+  }).filter(item => !isNaN(item.y))
 }
 
 onMounted(async () => {
@@ -377,7 +466,7 @@ const handleParse = async () => {
     if (recommendedChart.value && recommendedChart.value.chart_type) {
       console.log('[NL2SQL] 📊 使用 LLM 推荐的图表配置')
       chartType.value = recommendedChart.value.chart_type
-      // 根据 LLM 推荐的���段构建图表数据
+      // 根据 LLM 推荐的字段构建图表数据
       buildChartFromLLMRecommendation(recommendedChart.value)
     } else {
       // 分析数据生成图表
@@ -417,7 +506,8 @@ const handleClear = () => {
   executionTimeMs.value = null
   chartData.value = []
   chartType.value = 'bar'
-  
+  fieldMapping.value = { xAxis: '', yAxis: '' }
+
   console.log('└─ 清空完成')
   console.groupEnd()
 }
@@ -579,6 +669,28 @@ const handleChartTypeChange = (type) => {
 }
 
 .chart-section .el-radio-group {
+  margin-bottom: 0;
+}
+
+.field-mapping-section {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background-color: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+}
+
+.field-mapping-header {
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #666;
+}
+
+.field-mapping-header span::before {
+  content: '⚙ ';
+}
+
+.field-mapping-controls .el-form-item {
   margin-bottom: 0;
 }
 </style>
