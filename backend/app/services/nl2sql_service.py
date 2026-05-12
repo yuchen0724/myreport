@@ -304,8 +304,14 @@ class NL2SQLService:
         print(f"[NL2SQL] │   │   ├─ Explanation: {explanation[:80]}..." if len(explanation) > 80 else f"[NL2SQL] │   │   ├─ Explanation: {explanation}", flush=True)
         print(f"[NL2SQL] │   │   └─ Chart Config: {chart_config}", flush=True)
         
-        # 【新增】详细日志：提取 SQL 中使用的所有表名
+        # 详细日志：提取 SQL 中使用的所有表名
         import re
+        # 提取 WITH 定义的 CTE 名称（别名不需要库名前缀）
+        cte_names = set()
+        cte_section_match = re.search(r'WITH\s+(.*?)\s+(?:SELECT|INSERT|UPDATE|DELETE)', sql, re.IGNORECASE | re.DOTALL)
+        if cte_section_match:
+            cte_section = cte_section_match.group(1)
+            cte_names = set(re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*)\s+AS', cte_section, re.IGNORECASE))
         # 匹配 FROM/JOIN 后面的表名，支持: 库名.表名, 别名, 库名.表名 AS 别名
         table_pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)'
         tables_used = re.findall(table_pattern, sql, re.IGNORECASE)
@@ -320,7 +326,7 @@ class NL2SQLService:
             simple_table_pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)'
             simple_tables = re.findall(simple_table_pattern, sql, re.IGNORECASE)
             # 过滤掉 DUAL 和 SQL 关键字
-            skip_words = {'SELECT', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'ON', 'AS', 
+            skip_words = {'SELECT', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'ON', 'AS',
                          'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'CROSS', 'JOIN',
                          'GROUP', 'ORDER', 'BY', 'HAVING', 'LIMIT', 'OFFSET', 'UNION',
                          'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'NULL', 'TRUE', 'FALSE',
@@ -329,6 +335,17 @@ class NL2SQLService:
                          'SCHEMA', 'INDEX', 'VIEW', 'TRIGGER', 'FUNCTION', 'PROCEDURE',
                          'DUAL', 'WITH', 'RECURSIVE', 'UNION', 'ALL', 'DISTINCT'}
             simple_tables = [t for t in simple_tables if t.upper() not in skip_words]
+            # 过滤掉 CTE 名称（虚拟表不需要库名前缀）
+            if cte_names:
+                orig_len = len(simple_tables)
+                simple_tables = [t for t in simple_tables if t.upper() not in {n.upper() for n in cte_names}]
+                if len(simple_tables) < orig_len:
+                    print(f"[NL2SQL] │   ├─ 过滤掉 CTE 别名: {cte_names}", flush=True)
+            # 过滤掉短别名（1~2个字符，通常是子查询别名如 t, t1, tt, x 等）
+            aliases = [t for t in simple_tables if len(t) <= 2]
+            if aliases:
+                print(f"[NL2SQL] │   ├─ 过滤掉短别名: {aliases}", flush=True)
+                simple_tables = [t for t in simple_tables if len(t) > 2]
             if simple_tables:
                 print(f"[NL2SQL] │   ⚠️ SQL 中有表未带库名: {simple_tables}", flush=True)
                 logger.warning(f"[NL2SQL] │   ⚠️ SQL 中有表未带库名前缀: {simple_tables}")
