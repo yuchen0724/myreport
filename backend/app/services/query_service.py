@@ -209,11 +209,42 @@ class QueryService:
                         # 提取 ORDER BY 子句（用户必须自己定义排序，否则拒绝查询）
                         order_by_match = re.search(r'\bORDER\s+BY\s+(.+?)(?:\s+LIMIT|\s+OFFSET|\s*$)', converted_sql, re.IGNORECASE)
                         if not order_by_match:
-                            # 如果设置了跳过深度分页检查，则自动添加默认排序
+                            # 如果设置了跳过深度分页检查，则不添加 ORDER BY，直接使用普通分页
                             if request.skip_deep_pagination_check:
-                                converted_sql += " ORDER BY 1"
-                                order_by_clause = "1"
-                                logger.info("自动添加默认排序 ORDER BY 1（跳过深度分页检查）")
+                                # 移除之前的 ORDER BY 检查逻辑，直接使用普通分页
+                                converted_sql = converted_sql.rstrip(';').strip()
+                                # 去掉任何现有的 ORDER BY
+                                converted_sql = re.sub(r'\s+ORDER\s+BY\s+.+?(?=\s*LIMIT|\s*$)', '', converted_sql, flags=re.IGNORECASE).strip()
+                                # 直接添加 LIMIT OFFSET（不使用游标分页）
+                                converted_sql = f"{converted_sql} LIMIT {page_size} OFFSET {offset}"
+                                logger.info("跳过深度分页检查，使用普通分页 LIMIT OFFSET")
+                                
+                                # 跳过后续的分页逻辑，直接执行查询
+                                logger.info(f"执行查询(跳过ORDER BY): page={page}, page_size={page_size}")
+                                has_placeholders = bool(re.search(r':(\w+)', converted_sql))
+                                
+                                if has_placeholders and params:
+                                    all_placeholders = set(re.findall(r':(\w+)', converted_sql))
+                                    filtered_params = {}
+                                    for placeholder in all_placeholders:
+                                        if placeholder in params and params[placeholder] is not None and params[placeholder] != '':
+                                            filtered_params[placeholder] = params[placeholder]
+                                    result = conn.execute(text(converted_sql), filtered_params)
+                                else:
+                                    result = conn.execute(text(converted_sql))
+                                
+                                # 获取列名
+                                columns = [col[0] for col in result.cursor.description] if result.cursor.description else []
+                                rows = [list(row) for row in result.fetchall()]
+                                
+                                return SQLQueryResponse(
+                                    columns=columns,
+                                    rows=rows,
+                                    total=len(rows),  # 简化处理
+                                    page=page,
+                                    page_size=page_size,
+                                    execution_time_ms=int((time.time() - start_time) * 1000)
+                                )
                             else:
                                 raise ValueError("深度分页需要明确的 ORDER BY，请在 SQL 中添加 ORDER BY 子句。例如：ORDER BY id, dt")
                         
