@@ -214,7 +214,7 @@ class NL2SQLService:
 3. 使用精确的表名和列名
 4. 条件要准确匹配问题中的语义
 5. 日期格式使用 YYYYMMDD（如 20260508）
-6. 【重要】必须包含 ORDER BY 子句以支持分页，没有 ORDER BY 会导致查询失败！
+6. 【可选】可以包含 ORDER BY 子句以支持分页，但没有 ORDER BY 也能正常查询（系统会自动处理分页）
 7. 不要使用 SQL 注释（-- 或 /* */）
 8. 不要在 SQL 末尾添加分号
 9. 根据查询结果判断合适的图表类型：
@@ -234,7 +234,7 @@ class NL2SQLService:
     - 如果你不想使用带库名的表名，直接返回空 SQL 并在 explanation 中说明原因
 13. 【禁止】不要使用 `information_schema.TABLES` 作为数据来源，Doris 不支持！
     - Doris 支持没有 FROM 子句的查询
-    - 如果必须使用占位来源，直接用 `(SELECT 'x')`
+    - 如果必须使用占位来源直接用 `(SELECT 'x')`
 
 ## 输出格式
 请返回以下 JSON 格式（不要添加任何其他文字）：
