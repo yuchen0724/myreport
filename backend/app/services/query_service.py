@@ -234,14 +234,13 @@ class QueryService:
                             columns = [col[0] for col in result.cursor.description] if result.cursor.description else []
                             rows = [list(row) for row in result.fetchall()]
                             
-                            return SQLQueryResponse(
-                                columns=columns,
-                                rows=rows,
-                                total=len(rows),
-                                page=page,
-                                page_size=page_size,
-                                execution_time_ms=int((time_module.time() - start_time) * 1000)
-                            )
+                            return {
+                                "columns": columns,
+                                "rows": rows,
+                                "total": len(rows),
+                                "has_more": False,
+                                "order_cols": [],
+                            }
                         
                         # 提取 ORDER BY 子句，用于后续分页
                         order_by_match = re.search(r'\bORDER\s+BY\s+(.+?)(?:\s+LIMIT|\s+OFFSET|\s*$)', converted_sql, re.IGNORECASE)

@@ -250,6 +250,11 @@ const generateLineOption = (baseOption) => {
     xAxis: {
       type: 'category',
       data: xData,
+      name: props.config.x_axis_label || props.config.x_axis || '',
+      nameTextStyle: {
+        color: props.darkMode ? '#a0a0a0' : '#666',
+        fontSize: 12,
+      },
       axisLine: {
         lineStyle: {
           color: props.darkMode ? 'rgba(255, 255, 255, 0.2)' : '#ddd',
@@ -261,6 +266,11 @@ const generateLineOption = (baseOption) => {
     },
     yAxis: {
       type: 'value',
+      name: props.config.y_axis_label || props.config.y_axis || '数值',
+      nameTextStyle: {
+        color: props.darkMode ? '#a0a0a0' : '#666',
+        fontSize: 12,
+      },
       splitLine: {
         lineStyle: {
           color: props.darkMode ? 'rgba(255, 255, 255, 0.08)' : '#eee',
@@ -272,7 +282,7 @@ const generateLineOption = (baseOption) => {
     },
     series: [
       {
-        name: props.config.y_axis || '数值',
+        name: props.config.y_axis_label || props.config.y_axis || '数值',
         type: 'line',
         data: yData,
         smooth: true,
@@ -317,6 +327,11 @@ const generateBarOption = (baseOption) => {
     xAxis: {
       type: 'category',
       data: xData,
+      name: props.config.x_axis_label || props.config.x_axis || '',
+      nameTextStyle: {
+        color: props.darkMode ? '#a0a0a0' : '#666',
+        fontSize: 12,
+      },
       axisLine: {
         lineStyle: {
           color: props.darkMode ? 'rgba(255, 255, 255, 0.2)' : '#ddd',
@@ -329,6 +344,11 @@ const generateBarOption = (baseOption) => {
     },
     yAxis: {
       type: 'value',
+      name: props.config.y_axis_label || props.config.y_axis || '数值',
+      nameTextStyle: {
+        color: props.darkMode ? '#a0a0a0' : '#666',
+        fontSize: 12,
+      },
       splitLine: {
         lineStyle: {
           color: props.darkMode ? 'rgba(255, 255, 255, 0.08)' : '#eee',
@@ -340,7 +360,7 @@ const generateBarOption = (baseOption) => {
     },
     series: [
       {
-        name: props.config.y_axis || '数值',
+        name: props.config.y_axis_label || props.config.y_axis || '数值',
         type: 'bar',
         data: yData,
         barMaxWidth: 60,
@@ -402,7 +422,7 @@ const generatePieOption = (baseOption) => {
     },
     series: [
       {
-        name: props.config.title || '占比',
+        name: props.config.y_axis_label || props.config.y_axis || props.config.title || '占比',
         type: 'pie',
         radius: ['40%', '70%'],
         center: ['40%', '50%'],

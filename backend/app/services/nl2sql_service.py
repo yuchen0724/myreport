@@ -194,16 +194,28 @@ class NL2SQLService:
         logger.info("[NL2SQL] ═══════════════════════════════════════════")
         logger.info("[NL2SQL] 🔧 _generate_sql_with_llm 方法开始执行")
         
+        # 0. 获取数据源信息（数据库类型）
+        ds = self.ds_repo.get_by_id(data_source_id) if self.ds_repo else None
+        db_type = ds.type.upper() if ds and ds.type else "DORIS"
+        db_name = ds.database if ds and ds.database else "unknown"
+        
+        # 构建数据库类型相关的限制提示
+        db_limitations = self._get_db_limitations(db_type)
+        
         # 1. 构建 schema prompt
         logger.info("[NL2SQL] ├─ 步骤1: 构建 Schema prompt...")
         schema_prompt = self.build_schema_prompt(data_source_id)
         logger.info(f"[NL2SQL] │   └─ Schema 长度: {len(schema_prompt)} 字符")
 
-        # 2. 构建系统提示词
+# 2. 构建系统提示词
         print(f"[NL2SQL] ├─ 步骤2: 构建系统提示词...", flush=True)
         
         # 使用 print 输出完整的 system prompt，方便调试
         system_prompt = f"""你是一个数据分析专家，擅长将自然语言问题转换为 SQL 查询，并推荐合适的可视化图表。
+
+## 数据库类型
+当前数据源类型: **{db_type}**
+{db_limitations}
 
 ## 数据源信息
 {schema_prompt}
@@ -211,7 +223,10 @@ class NL2SQLService:
 ## 规则
 1. 只生成 SELECT 查询，禁止生成 UPDATE/DELETE/DROP 等操作
 2. 【重要】所有表名必须带库名前缀，如 `库名.表名`（例如 `ads_cockpit_freedom.store_sales`），否则跨库查询会失败！
-3. 使用精确的表名和列名
+3. 【关键】必须严格使用下方语义层文档中定义的字段名，**禁止使用文档中不存在的字段**！
+   - 字段名必须完全匹配（如 `store_code` 不能写成 `store_name` 或 `store`）
+   - 在生成 SQL 前，请先确认你使用的每个字段都在文档中明确定义
+   - 如果需要的字段在文档中不存在，请在 explanation 中说明，并使用文档中存在的相似字段
 4. 条件要准确匹配问题中的语义
 5. 日期格式使用 YYYYMMDD（如 20260508）
 6. 【重要】必须包含 ORDER BY 子句以支持分页，没有 ORDER BY 会导致查询失败！
@@ -223,25 +238,13 @@ class NL2SQLService:
    - 饼图(pie)：适合展示占比关系
    - 散点图(scatter)：适合展示相关性
 10. X轴选择维度/分类字段，Y轴选择数值/指标字段
-11. 【重要】日期函数注意：
-    - Doris/StarRocks 不支持 `CURRENT_DATE`，请使用 `CURRENT_DATE()` (带括号)
-    - 昨日: `DATE_SUB(CURDATE(), INTERVAL 1 DAY)` 或 `DATE_ADD(CURDATE(), INTERVAL -1 DAY)`
-    - 日期格式: `YYYYMMDD`（如 20260510）
-    - dt 字段是日期分区，格式为 `yyyymmdd`（字符串或整数）
-12. 【强制】SQL 中所有表名**必须**带库名前缀，格式为 `库名.表名`：
-    - 正确: `SELECT * FROM ads_cockpit_freedom.ads_cockpit_fd_store_ware_d`
-    - 错误: `SELECT * FROM ads_cockpit_fd_store_ware_d` （漏掉库名！）
-    - 如果你不想使用带库名的表名，直接返回空 SQL 并在 explanation 中说明原因
-13. 【禁止】不要使用 `information_schema.TABLES` 作为数据来源，Doris 不支持！
-    - Doris 支持 DUAL 虚拟表（如 `SELECT 1 FROM DUAL`）
-    - 如果必须使用占位来源，使用 `FROM DUAL`
 
 ## 输出格式
 请返回以下 JSON 格式（不要添加任何其他文字）：
 {{
   "sql": "生成的 SQL 语句",
   "confidence": 0.0-1.0,
-  "explanation": "SQL 生成逻辑的简要说明",
+  "explanation": "SQL 生成逻辑的简要说明（必须说明使用了哪些字段，这些字段在文档中是否存在）",
   "chart_config": {{
     "chart_type": "bar|line|pie|scatter",
     "x_axis": "X轴字段名（维度/分类）",
@@ -378,11 +381,59 @@ class NL2SQLService:
 
         return None
 
+    def _get_db_limitations(self, db_type: str) -> str:
+        """
+        根据数据库类型返回不支持的函数和语法限制
+
+        Args:
+            db_type: 数据库类型 (DORIS, MYSQL, POSTGRESQL 等)
+
+        Returns:
+            数据库限制说明文本
+        """
+        limitations = {
+            "DORIS": """
+【重要】Doris/StarRocks 数据库特定限制：
+1. 日期函数限制：
+   - ❌ 不支持 `CURRENT_DATE`（不带括号），必须使用 `CURRENT_DATE()` 
+   - ❌ 不支持 `NOW()`（不带括号），必须使用 `NOW()`
+   - 昨日: `DATE_SUB(CURDATE(), INTERVAL 1 DAY)` 或 `DATE_ADD(CURDATE(), INTERVAL -1 DAY)`
+   - 日期格式: `YYYYMMDD`（如 20260510）
+   - dt 字段是日期分区，格式为 `yyyymmdd`（字符串或整数）
+
+2. 字符串函数限制：
+   - ❌ 不支持 `GROUP_CONCAT`（MySQL 特有），使用 `GROUP_CONCAT_DISTINCT` 或 `STRING_AGG`
+   - ❌ 不支持 `FIND_IN_SET`，使用 `array_contains` 或 `IN`
+
+3. 其他限制：
+   - ❌ 不支持 `information_schema.TABLES`
+   - ✅ 支持 `DUAL` 虚拟表（如 `SELECT 1 FROM DUAL`）
+   - ✅ 支持窗口函数 (ROW_NUMBER, RANK, DENSE_RANK 等)
+   - ✅ 支持 CTEs (WITH 子句)
+""",
+            "MYSQL": """
+【重要】MySQL 数据库特定限制：
+1. 日期函数：推荐使用 `CURRENT_DATE()`, `DATE_SUB(CURDATE(), INTERVAL 1 DAY)`
+2. 字符串函数：支持 `GROUP_CONCAT`, `FIND_IN_SET`
+3. 其他：注意版本兼容性
+""",
+            "POSTGRESQL": """
+【重要】PostgreSQL 数据库特定限制：
+1. 日期函数：使用 `CURRENT_DATE`, `NOW()`
+2. 字符串函数：使用 `STRING_AGG` 替代 `GROUP_CONCAT`
+3. 其他：支持丰富的 JSON/数组函数
+""",
+        }
+        
+        return limitations.get(db_type, """
+【注意】未知数据库类型，请使用标准 SQL 语法。
+""")
+
     def build_schema_prompt(self, data_source_id: int) -> str:
         """
         构建 Schema 描述 prompt
 
-        优先使用语义层文档，次之动态查询数据库结构
+        优先使用语义层文档次之动态查询数据库结构
 
         Args:
             data_source_id: 数据源 ID
