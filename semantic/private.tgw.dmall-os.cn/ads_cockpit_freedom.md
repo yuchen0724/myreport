@@ -42,6 +42,7 @@
 | store_business_district | VARCHAR(128) | 商圈性质 |
 | supplier_code | VARCHAR(32) | 供应商编码 |
 | sell_type | INT | 经营方式：1-自营、2-联营 |
+| u_id | VARCHAR(128) | 数据唯一键 |
 | sell_type_name | VARCHAR(128) | 经营方式名称 |
 | status_code | VARCHAR(32) | 商品状态编码 |
 | status_name | VARCHAR(128) | 商品状态名称：正常销售、停售等 |
@@ -133,8 +134,8 @@
 
 | 字段分组 | 字段列表 | 说明 |
 |----------|----------|------|
-| **维度** | dt, group_id, store_code, matnr, supplier_code, sell_type, u_id, week_id, month_id, quarter_id, year_id, date_type | 日期、门店、商品、供应商、经营方式标识 |
-| **时间维度** | week_id, month_id, quarter_id, year_id, date_type | date_type: 1-天、2-周、3-月、31-月累计、51-年累计、5-年 |
+| **维度** | dt(INT), group_id(BIGINT), store_code, matnr, supplier_code, sell_type, u_id, week_id, month_id, quarter_id, year_id, date_type(VARCHAR(8)) | 日期、门店、商品、供应商、经营方式标识 |
+| **时间维度** | week_id, month_id, quarter_id, year_id, date_type | date_type(VARCHAR(8)),取值: 1-天、2-周、3-月、31-月累计、51-年累计、5-年 |
 | **门店属性** | store_type, sell_type_name | 门店类型、经营方式名称 |
 | **商品属性** | status_code, status_name, item_num, ware_name, purchase_taxed_price, offline_current_price, offline_original_price, ware_tax_rate, order_sched_binary, supplier_name, brand_flag | 商品基础信息、价格、税率 |
 | **商品类目** | purchase_category1~5(code+name), operation_category1~5(code+name) | 采购类目(5级)和营运类目(5级) |
@@ -159,6 +160,7 @@
 | **预警标识** | extra_stock(高库存), low_stock(低库存), lack_stock(畅缺), stasis_sales(滞销), zero_stock(库零), negative_profit(负毛利), negative_stock(负库存), losing_ware(过季清仓), overdue_ware(临期), none_sales(进货未销) | 均为0/1布尔标识 |
 | **高库滞销** | extra_stock_count, extra_stock_cost_taxed/untaxed, stasis_sales_stock_count, stasis_sales_stock_cost_taxed/untaxed | 高库存/滞销库存成本明细 |
 | **SL指标** | sl_numerator, sl_denominator | SL分子分母 |
+| **滞销库存** | sale_num_flag(动销标识), last_end_stock_num(上期末库存), last_end_stock_taxed_cost/untaxed_cost | 动销标记与上期结转库存成本 |
 | **累计成本** | self_stock_cost_taxed_amt_mtd/untaxed_amt_mtd, self_end_stock_taxed_cost_mtd/untaxed_cost_mtd | 自营月累计成本(仅天维度使用) |
 | **库凭销售** | sale_stock_num, sale_stock_taxed_cost/untaxed_cost, bom_sale_stock_num, bom_sale_stock_taxed_cost/untaxed_cost | 库凭销售数量/成本、BOM销售数量/成本 |
 | **配出返仓** | distribute_out_stock_num, distribute_out_stock_taxed_amt/untaxed_amt | 门店退DC配出数量/成本 |

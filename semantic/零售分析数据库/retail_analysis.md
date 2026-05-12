@@ -36,7 +36,7 @@
 | city | VARCHAR(50) | 城市 - 门店所在城市 |
 | district | VARCHAR(50) | 区县 - 门店所在区县 |
 | store_type | VARCHAR(20) | 门店类型 - 如：旗舰店、标准店、社区店 |
-| open_date | DATE | 开业日期 - ��店开业时间 |
+| open_date | DATE | 开业日期 - 门店开业时间 |
 | area_sqm | NUMERIC | 营业面积 - 门店面积（平方米） |
 | manager_name | VARCHAR(50) | 店长姓名 - 门店负责人 |
 
@@ -65,7 +65,7 @@
 | parent_category_id | INTEGER | 父分类ID - 上级分类的ID，NULL表示顶级分类 |
 | level | INTEGER | 分类层级 - 1为一级分类，2为二级分类 |
 
-**分类层���**:
+**分类层级**:
 | category_id | category_name | parent | level |
 |-------------|---------------|--------|-------|
 | 1 | 电子产品 | - | 1 |
@@ -102,7 +102,7 @@
 | product_id | product_name | brand | unit_price | cost_price |
 |------------|--------------|-------|------------|------------|
 | 1 | iPhone 15 Pro | Apple | 8999 | 7500 |
-| 2 | 华���Mate 60 | 华为 | 5999 | 4800 |
+| 2 | 华为Mate 60 | 华为 | 5999 | 4800 |
 | 3 | 小米14 | 小米 | 3999 | 3000 |
 | 4 | MacBook Pro 14寸 | Apple | 15999 | 13000 |
 | 5 | ThinkPad X1 Carbon | 联想 | 9999 | 8000 |
@@ -134,7 +134,7 @@
 | customer_name | VARCHAR(100) | 客户姓名 - 客户名称 |
 | gender | VARCHAR(10) | 性别 - 男/女 |
 | age | INTEGER | 年龄 - 客户年龄 |
-| member_level | VARCHAR(20) | 会��等级 - 普通会员/银卡会员/金卡会员/钻石会员 |
+| member_level | VARCHAR(20) | 会员等级 - 普通会员/银卡会员/金卡会员/钻石会员 |
 | register_date | DATE | 注册日期 - 客户首次注册日期 |
 | phone | VARCHAR(20) | 联系电话 |
 
@@ -179,7 +179,7 @@
 | end_date | DATE | 结束日期 |
 | discount_rate | NUMERIC | 折扣率 - 0.8表示8折 |
 | discount_amount | NUMERIC | 减免金额（元） |
-| promotion_type | VARCHAR(20) | 促销类型 - 折扣/满减/买赠 |
+| promotion_type | VARCHAR(20) | 促销类型 - 折扣/满减 |
 
 **2024年促销活动**:
 | promotion_id | promotion_name | start_date | end_date | discount_rate | type |
@@ -199,7 +199,7 @@
 
 ### 7. sales (销售记录表)
 
-**说明**: 存储销售���易明细
+**说明**: 存储销售交易明细
 
 | 字段 | 类型 | 注释 |
 |------|------|------|
@@ -300,8 +300,9 @@ promotions (10条)
 - sales.store_id → stores.store_id
 - sales.product_id → products.product_id
 - sales.customer_id → customers.customer_id
-- sales.promotion_id → promotions.promotion_id
+- sales.promotion_id → promotions.promotion_id（逻辑关联，无外键约束）
 - products.category_id → categories.category_id
+- categories.parent_category_id → categories.category_id（自引用，层级分类）
 - inventory.store_id → stores.store_id
 - inventory.product_id → products.product_id
 

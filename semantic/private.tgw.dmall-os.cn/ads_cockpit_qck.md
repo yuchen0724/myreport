@@ -227,7 +227,7 @@
 | **团购指标** | tg_sale_num, tg_actual_sale_taxed_amt, tg_actual_sale_untaxed_amt | 团购相关 |
 | **成本指标** | cost_taxed_amt, cost_untaxed_amt, bgp_taxed_amt, bgp_untaxed_amt | 成本与基础毛利 |
 | **退货指标** | refund_sale_num, refund_actual_sale_taxed_amt, refund_actual_sale_untaxed_amt | 退货数量/金额 |
-| **其他指标** | promotion_amt, sale_item_num, trade_num, v_actual_sale_untaxed_amt | 促销、动销、交易次数 |
+| **其他指标** | promotion_amt, v_actual_sale_untaxed_amt | 促销金额、V9实销金额 |
 
 **主键/Key**: (dt, group_id, store_code, u_id)
 
@@ -250,8 +250,6 @@
 | refund_actual_sale_taxed_amt | 退款金额(含税)，单位:分 |
 | refund_actual_sale_untaxed_amt | 退款金额(未税)，单位:分 |
 | promotion_amt | 促销金额，单位:分 |
-| sale_item_num | 动销品数 |
-| trade_num | 交易次数 |
 | v_actual_sale_untaxed_amt | v9实销金额(未税) |
 
 ---
@@ -718,7 +716,7 @@ dim_promotion_store      │
 SELECT store_code, matnr, ware_name,
        SUM(actual_sale_untaxed_amt)/100 AS sale_amt,
        SUM(sale_num) AS sale_qty
-FROM ads_cockpit_qck.store_ware_item_agg_d_v1
+FROM ads_cockpit_qck.ads_cockpit_qck_store_ware_item_agg_d_v1
 WHERE dt = 20240510
   AND group_id = 123
   AND store_code = 'S001'
@@ -733,7 +731,7 @@ ORDER BY sale_amt DESC;
 SELECT purchase_category1_name,
        SUM(actual_sale_untaxed_amt)/100 AS total_amt,
        SUM(trade_num) AS trade_cnt
-FROM ads_cockpit_qck.store_ware_pcat_agg_d_v1
+FROM ads_cockpit_qck.ads_cockpit_qck_store_ware_pcat_agg_d_v1
 WHERE dt >= 20240501 AND dt <= 20240510
   AND group_id = 123
   AND agg_level = 1  -- 一级类目
@@ -749,7 +747,7 @@ SELECT store_code,
        SUM(actual_sale_untaxed_amt)/100 AS sale_amt,
        SUM(promotion_actual_sale_untaxed_amt)/100 AS promo_amt,
        SUM(coupon_actual_sale_untaxed_amt)/100 AS coupon_amt
-FROM ads_cockpit_qck.order_ware_post_item_agg_d_v1
+FROM ads_cockpit_qck.ads_cockpit_qck_order_ware_post_item_agg_d_v1
 WHERE dt = 20240510
   AND group_id = 123
 GROUP BY store_code;
@@ -762,7 +760,7 @@ GROUP BY store_code;
 SELECT store_code, matnr, ware_name,
        end_stock_num,
        end_stock_untaxed_cost/100 AS stock_cost
-FROM ads_cockpit_qck.store_ware_stock_item_agg_d_v1
+FROM ads_cockpit_qck.ads_cockpit_qck_store_ware_stock_item_agg_d_v1
 WHERE dt = 20240510
   AND group_id = 123
   AND end_stock_num > 0
@@ -776,7 +774,7 @@ LIMIT 20;
 -- 某档期各门店销售
 SELECT store_code,
        SUM(actual_sale_untaxed_amt)/100 AS sale_amt
-FROM ads_cockpit_qck.store_ware_schedule_pcat_agg_d_v1
+FROM ads_cockpit_qck.ads_cockpit_qck_store_ware_schedule_pcat_agg_d_v1
 WHERE schedule_no = 'SCH20240501'
   AND group_id = 123
   AND agg_level = 0  -- 门店级
@@ -789,7 +787,7 @@ GROUP BY store_code;
 -- 各供应商销售排名
 SELECT supplier_name,
        SUM(actual_sale_untaxed_amt)/100 AS total_amt
-FROM ads_cockpit_qck.supplier_store_pcat_agg_d_v1
+FROM ads_cockpit_qck.ads_cockpit_qck_supplier_store_pcat_agg_d_v1
 WHERE dt >= 20240501 AND dt <= 20240510
   AND group_id = 123
 GROUP BY supplier_name
@@ -803,7 +801,7 @@ ORDER BY total_amt DESC;
 SELECT category1_name,
        SUM(actual_sale_untaxed_amt)/100 AS actual_amt,
        SUM(untaxed_amt_budget)/100 AS budget_amt
-FROM ads_cockpit_qck.store_cat_budget_d_v1
+FROM ads_cockpit_qck.ads_cockpit_qck_store_cat_budget_d_v1
 WHERE month_id = '202405'
   AND group_id = 123
   AND category_type = 'pur'  -- 采销类目
@@ -820,7 +818,7 @@ SELECT dt,
        sleep_member_num,
        lost_member_num,
        new_member_num
-FROM ads_cockpit_qck.group_d_v1
+FROM ads_cockpit_qck.ads_cockpit_qck_group_d_v1
 WHERE dt >= 20240501 AND dt <= 20240510
   AND group_id = 123
 ORDER BY dt;
@@ -832,7 +830,7 @@ ORDER BY dt;
 -- 使用 AGGREGATE KEY 表的 BITMAP 字段
 SELECT store_code,
        BITMAP_COUNT(user_id_normal) AS user_cnt
-FROM ads_cockpit_qck.order_matnr_d_v1
+FROM ads_cockpit_qck.ads_cockpit_qck_order_matnr_d_v1
 WHERE dt = 20240510
   AND group_id = 123
 GROUP BY store_code;
@@ -845,7 +843,7 @@ GROUP BY store_code;
 SELECT supplier_name,
        SUM(book_confirm_num) AS confirm_qty,
        SUM(book_confirm_cost_untaxed_amt)/100 AS confirm_cost
-FROM ads_cockpit_qck.scm_receive_ware_pcat_agg_d_v1
+FROM ads_cockpit_qck.ads_cockpit_qck_scm_receive_ware_pcat_agg_d_v1
 WHERE dt >= 20240501 AND dt <= 20240510
   AND group_id = 123
 GROUP BY supplier_name;
