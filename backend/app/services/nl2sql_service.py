@@ -313,9 +313,19 @@ class NL2SQLService:
             print(f"[NL2SQL] │   ├─ SQL 使用的表: {table_list}", flush=True)
             logger.info(f"[NL2SQL] │   ├─ SQL 使用了 {len(unique_tables)} 个表: {table_list}")
         else:
-            # 尝试匹配不带库名的表名（可能存在问题）
+            # 尝试匹配不带库名的表名（可能存在问题），过滤掉 DUAL 和 SQL 关键字
             simple_table_pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)'
             simple_tables = re.findall(simple_table_pattern, sql, re.IGNORECASE)
+            # 过滤掉 DUAL 和 SQL 关键字
+            skip_words = {'SELECT', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'ON', 'AS', 
+                         'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'CROSS', 'JOIN',
+                         'GROUP', 'ORDER', 'BY', 'HAVING', 'LIMIT', 'OFFSET', 'UNION',
+                         'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'NULL', 'TRUE', 'FALSE',
+                         'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'COALESCE', 'IFNULL', 'IF',
+                         'FROM', 'JOIN', 'SET', 'VALUES', 'INTO', 'TABLE', 'DATABASE',
+                         'SCHEMA', 'INDEX', 'VIEW', 'TRIGGER', 'FUNCTION', 'PROCEDURE',
+                         'DUAL', 'WITH', 'RECURSIVE', 'UNION', 'ALL', 'DISTINCT'}
+            simple_tables = [t for t in simple_tables if t.upper() not in skip_words]
             if simple_tables:
                 print(f"[NL2SQL] │   ⚠️ SQL 中有表未带库名: {simple_tables}", flush=True)
                 logger.warning(f"[NL2SQL] │   ⚠️ SQL 中有表未带库名前缀: {simple_tables}")
