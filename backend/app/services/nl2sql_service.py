@@ -125,7 +125,8 @@ class NL2SQLService:
         query_request = SQLQueryRequest(
             data_source_id=request.data_source_id,
             sql=sql,
-            params={}
+            params={},
+            skip_deep_pagination_check=True  # NL2SQL 查询跳过深度分页检查
         )
 
         try:

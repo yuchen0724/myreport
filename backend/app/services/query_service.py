@@ -209,7 +209,13 @@ class QueryService:
                         # 提取 ORDER BY 子句（用户必须自己定义排序，否则拒绝查询）
                         order_by_match = re.search(r'\bORDER\s+BY\s+(.+?)(?:\s+LIMIT|\s+OFFSET|\s*$)', converted_sql, re.IGNORECASE)
                         if not order_by_match:
-                            raise ValueError("深度分页需要明确的 ORDER BY，请在 SQL 中添加 ORDER BY 子句。例如：ORDER BY id, dt")
+                            # 如果设置了跳过深度分页检查，则自动添加默认排序
+                            if request.skip_deep_pagination_check:
+                                converted_sql += " ORDER BY 1"
+                                order_by_clause = "1"
+                                logger.info("自动添加默认排序 ORDER BY 1（跳过深度分页检查）")
+                            else:
+                                raise ValueError("深度分页需要明确的 ORDER BY，请在 SQL 中添加 ORDER BY 子句。例如：ORDER BY id, dt")
                         
                         order_by_clause = order_by_match.group(1)
                         order_cols = [col.strip().split()[0] for col in order_by_clause.split(',')]

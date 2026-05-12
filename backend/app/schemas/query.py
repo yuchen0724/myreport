@@ -11,6 +11,8 @@ class SQLQueryRequest(BaseModel):
     page_size: int = Field(50, ge=1, le=1000, description="每页条数")
     # 游标分页：传递上一页最后一行排序列的值，格式如 "S99,2025-40"
     cursor: Optional[str] = Field(None, description="游标（上一页最后一行排序列的值）")
+    # 是否跳过深度分页的 ORDER BY 检查（NL2SQL 查询不需要，模板查询需要）
+    skip_deep_pagination_check: bool = Field(False, description="是否跳过深度分页 ORDER BY 检查")
 
 
 class SQLQueryResponse(BaseModel):
