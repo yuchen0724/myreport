@@ -232,6 +232,7 @@ class NL2SQLService:
     - 正确: `SELECT * FROM ads_cockpit_freedom.ads_cockpit_fd_store_ware_d`
     - 错误: `SELECT * FROM ads_cockpit_fd_store_ware_d` （漏掉库名！）
     - 如果你不想使用带库名的表名，直接返回空 SQL 并在 explanation 中说明原因
+13. 【禁止】不要使用 `information_schema.TABLES` 作为数据来源，Doris 不支持！如果必须使用占位来源，使用 `WITH dual AS (SELECT 'x')`
 
 ## 输出格式
 请返回以下 JSON 格式（不要添加任何其他文字）：
