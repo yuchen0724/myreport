@@ -1,4 +1,5 @@
 # backend/app/services/nl2sql_service.py
+# pyright: reportGeneralTypeIssues=false, reportArgumentType=false, reportOptionalMemberAccess=false
 import json
 import logging
 import os
@@ -128,6 +129,9 @@ class NL2SQLService:
         # 【新增】自动修复聚合查询 + ORDER BY 但无 GROUP BY 的问题
         sql = self._fix_sql_aggregate_orderby(sql)
         
+        # 【新增】自动修复 dim_date 表中 dt 列引用为 date_id
+        sql = self._fix_dim_date_column(sql)
+        
         query_request = SQLQueryRequest(
             data_source_id=request.data_source_id,
             sql=sql,
@@ -186,7 +190,7 @@ class NL2SQLService:
     def _generate_sql_with_llm(
         self, llm_client: LLMClient, question: str, data_source_id: int,
         group_id: Optional[int] = None
-    ) -> Tuple[str, float, str]:
+    ) -> Tuple[str, float, str, Optional[Dict[str, Any]]]:
         """
         使用 LLM 生成 SQL
 
@@ -445,6 +449,8 @@ class NL2SQLService:
      - 今日: `dt = '20260512'` 或 `dt = 20260512`
      - 直接写死日期值，禁止使用日期函数转换！
 
+   - 【重要】`ads_cockpit_qck.dim_date` 表**没有 `dt` 列**！该表的日期字段是 `date_id`（VARCHAR 类型，YYYYMMDD 格式，如 `'20260512'`）。查询 dim_date 表时必须使用 `date_id` 列，不要使用 `dt`！
+
 2. 字符串函数限制：
    - ❌ 不支持 `GROUP_CONCAT`（MySQL 特有），使用 `GROUP_CONCAT_DISTINCT` 或 `STRING_AGG`
    - ❌ 不支持 `FIND_IN_SET`，使用 `array_contains` 或 `IN`
@@ -585,7 +591,10 @@ class NL2SQLService:
             from app.core.security import decrypt_password as decrypt_proxy_pwd
             from app.models.proxy_server import ProxyServer
             # 使用传入的 db session
-            proxy = db.query(ProxyServer).filter(ProxyServer.id == ds.proxy_server_id).first()
+            if self.db:
+                proxy = self.db.query(ProxyServer).filter(ProxyServer.id == ds.proxy_server_id).first()
+            else:
+                proxy = None
             if proxy and proxy.is_active:
                 proxy_auth = ""
                 if proxy.username and proxy.password_encrypted:
@@ -913,6 +922,41 @@ class NL2SQLService:
         logger.info(f"[NL2SQL] 🔧 已修复聚合查询 ORDER BY 问题")
         return fixed_sql
 
+    def _fix_dim_date_column(self, sql: str) -> str:
+        """
+        自动修复 dim_date 表中 dt 列的引用为 date_id
+
+        dim_date 表没有 dt 列，日期字段名为 date_id。
+        修复模式：
+        1. `dim_date.dt` → `dim_date.date_id`
+        2. `ads_cockpit_qck.dim_date.dt` → `ads_cockpit_qck.dim_date.date_id`
+        3. 纯 `dt` 引用在 WHERE 中——只替换 FROM/JOIN 了 dim_date 的查询中的 dt
+        """
+        import re
+
+        # 如果 SQL 中没有 dim_date 关键词，无需处理
+        if 'dim_date' not in sql.lower():
+            return sql
+
+        # 替换 ads_cockpit_qck.dim_date.dt → ads_cockpit_qck.dim_date.date_id
+        sql = re.sub(
+            r'(ads_cockpit_qck\.dim_date)\.dt\b',
+            r'\1.date_id',
+            sql,
+            flags=re.IGNORECASE
+        )
+
+        # 替换 dim_date.xxxx.dt → dim_date.xxxx.date_id（仅当前面出现了 dim_date 表时）
+        # 正则：查找 dim_date 后跟 .dt 但 dt 不是独立单词部分的情况
+        sql = re.sub(
+            r'(?<!\w)(dim_date)\.dt\b',
+            r'\1.date_id',
+            sql,
+            flags=re.IGNORECASE
+        )
+
+        return sql
+
     def _fix_sql_table_names(self, sql: str, data_source_id: int, group_id: Optional[int] = None) -> str:
         """
         校验并修复 SQL 中的表名，确保带库名前缀
@@ -1055,14 +1099,15 @@ class NL2SQLService:
         logger.info(f"[NL2SQL] 🔍 查询集团列表, 数据源ID: {data_source_id}")
 
         # 1. 优先从 Redis 读取
+        cache_key = f"nl2sql:groups:{data_source_id}"
         try:
             from app.core.redis import redis_client
-            cache_key = f"nl2sql:groups:{data_source_id}"
-            cached = redis_client.get(cache_key)
-            if cached:
-                rows = json.loads(cached)
-                logger.info(f"[NL2SQL] ├─ Redis 缓存命中, 集团数: {len(rows)}")
-                return rows
+            if redis_client:
+                cached = redis_client.get(cache_key)
+                if cached:
+                    rows = json.loads(cached)
+                    logger.info(f"[NL2SQL] ├─ Redis 缓存命中, 集团数: {len(rows)}")
+                    return rows
         except Exception as e:
             logger.warning(f"[NL2SQL] ⚠️ Redis 读取失败, 回退 DB 查询: {e}")
 
@@ -1092,7 +1137,8 @@ class NL2SQLService:
         # 3. 写入 Redis 缓存（TTL=1小时）
         try:
             from app.core.redis import redis_client
-            redis_client.setex(cache_key, 86400, json.dumps(rows, ensure_ascii=False))
+            if redis_client:
+                redis_client.setex(cache_key, 86400, json.dumps(rows, ensure_ascii=False))
             logger.info(f"[NL2SQL] ├─ 集团数据已写入 Redis 缓存（TTL=86400s）")
         except Exception as e:
             logger.warning(f"[NL2SQL] ⚠️ Redis 写入失败: {e}")

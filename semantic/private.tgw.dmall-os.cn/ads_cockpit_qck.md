@@ -617,12 +617,29 @@
 | ads_cockpit_qck.dim_vender_ware_status | 商家商品状态 |
 | ads_cockpit_qck.dim_promotion_store | 促销门店 |
 | ads_cockpit_qck.dim_schedule_os | 档期信息 |
-| ads_cockpit_qck.dim_store_ware_promotion_item_d_v1 | 促销商品明细 |
-| ads_cockpit_qck.dim_ware_package | 商品包装信息 |
-| ads_cockpit_qck.dim_supplier_contract | 供应商合同 |
-| ads_cockpit_qck.dim_os_store_d_v2 | OS门店信息 |
 
----
+#### ads_cockpit_qck.dim_date 列结构
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| date_id | VARCHAR(32) | 日期ID (YYYYMMDD格式，如20260512) |
+| date_desc | VARCHAR(32) | 日期描述 (YYYY-MM-DD格式) |
+| lunar_date_id | VARCHAR(32) | 农历日期ID |
+| lunar_date_desc | VARCHAR(32) | 农历日期描述 |
+| year_id | VARCHAR(32) | 年ID (如2026) |
+| year_desc | VARCHAR(32) | 年描述 |
+| month_id | VARCHAR(32) | 月ID (如202605) |
+| month_desc | VARCHAR(32) | 月描述 |
+| day_of_week | INT | 星期几 (1=周日, 2=周一, ...) |
+| day_of_week_desc | VARCHAR(32) | 星期描述 |
+| week_id | VARCHAR(32) | 周ID |
+| week_desc | VARCHAR(32) | 周描述 |
+| quarter_of_year | INT | 季度编号 |
+| zodiac | VARCHAR(32) | 生肖 |
+| gregorian_fes | VARCHAR(256) | 公历节日 |
+| lunar_fes | VARCHAR(256) | 农历节日 |
+
+**【注意】dim_date 表中不包含 `dt` 字段！日期字段为 `date_id`（VARCHAR类型，格式YYYYMMDD）。**
 
 ## 表关系
 
