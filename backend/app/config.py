@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     nl2sql_timeout: int = 300  # LLM 调用超时 5 分钟（可配置）
     nl2sql_cache_ttl: int = 3600  # 缓存 1 小时
 
+    # Prediction (销售预测)
+    prediction_enabled: bool = False
+    prediction_model_dir: str = "./models/prediction"
+    prediction_train_default_days: int = 365
+    prediction_forecast_days: int = 30
+    prediction_min_history_days: int = 90
+    prediction_retrain_cron: str = "0 2 * * *"  # 每天凌晨2点重训练
+
     @field_validator("database_url", "secret_key")
     @classmethod
     def validate_required(cls, v: str) -> str:

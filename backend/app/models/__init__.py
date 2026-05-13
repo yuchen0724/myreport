@@ -8,6 +8,7 @@ from app.models.export_task import ExportTask
 from app.models.associations import role_permissions
 from app.models.dashboard_widget import DashboardWidgetConfig
 from app.models.menu import Menu
+from app.models.prediction import PredictionResult, PredictionModel
 
 __all__ = [
     "User",
@@ -20,4 +21,6 @@ __all__ = [
     "DashboardWidgetConfig",
     "Menu",
     "role_permissions",
+    "PredictionModel",
+    "PredictionResult",
 ]

@@ -1,5 +1,6 @@
 # backend/app/celery_app.py
 from celery import Celery
+from celery.schedules import crontab
 import os
 
 def create_celery_app():
@@ -23,6 +24,14 @@ def create_celery_app():
         task_soft_time_limit=25 * 60,
         worker_prefetch_multiplier=1,
         worker_max_tasks_per_child=1000,
+        beat_schedule={
+            "weekly-retrain-prediction": {
+                "task": "app.tasks.prediction_tasks.train_prediction_model",
+                "schedule": crontab(hour=2, minute=0),
+                "args": (1,),
+                "kwargs": {"train_days": 365},
+            },
+        },
     )
 
     return celery
@@ -31,3 +40,4 @@ celery_app = create_celery_app()
 
 # 导入任务模块以向该 celery_app 注册任务
 from app.tasks import export_tasks  # noqa: E402, F401
+from app.tasks import prediction_tasks  # noqa: E402, F401

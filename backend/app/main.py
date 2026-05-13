@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from app.config import get_settings
 from app.api import auth, data_sources, query, report, nl2sql, charts, templates, stats, async_export, users, cache, audit_logs, dashboard, menus, proxy_servers, config
+from app.api import prediction as prediction_api
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.audit_log import AuditLogMiddleware
 from app.middleware.error_handler import register_exception_handlers
@@ -94,6 +95,7 @@ app.include_router(audit_logs.router)
 app.include_router(dashboard.router)
 app.include_router(menus.router)
 app.include_router(config.router)
+app.include_router(prediction_api.router)
 
 
 # 启动时预加载集团缓存已移除（需手工调用 POST /api/nl2sql/groups/refresh）
