@@ -22,7 +22,10 @@ def train_model(
     """触发模型训练"""
     service = PredictionService(db)
     try:
-        model_id = service.train(req.data_source_id, req.train_days)
+        model_id = service.train(
+            req.data_source_id, req.train_days,
+            table_name=req.table_name,
+        )
         return TrainResponse(model_id=model_id, status="success", message="训练完成")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -37,7 +40,7 @@ def run_prediction(
     """运行预测"""
     service = PredictionService(db)
     try:
-        count = service.predict(req.data_source_id, req.forecast_days)
+        count = service.predict(req.data_source_id, req.forecast_days, table_name=req.table_name)
         return PredictResponse(count=count, message=f"成功预测 {count} 条记录")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

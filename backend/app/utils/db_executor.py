@@ -19,11 +19,12 @@ def execute_query(ds, sql: str) -> tuple:
     password = decrypt_password(ds.password_encrypted)
     ds_type = ds.type.upper() if ds.type else "DORIS"
 
-    user_pass = f"{ds.username}:{password}" if password else ds.username
-    if ds_type in ("MYSQL", "DORIS"):
-        conn_url = f"mysql+pymysql://{user_pass}@{ds.host}:{ds.port}/{ds.database}"
-    elif ds_type == "POSTGRESQL":
-        conn_url = f"postgresql://{user_pass}@{ds.host}:{ds.port}/{ds.database}"
+    if ds_type == "POSTGRESQL":
+        conn_url = f"postgresql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
+    elif ds_type in ("MYSQL", "DORIS"):
+        conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
+    elif ds_type == "HIVE":
+        conn_url = f"hive://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
     else:
         raise ValueError(f"不支持的数据源类型: {ds.type}")
 

@@ -21,6 +21,9 @@
         <el-form-item label="预测天数">
           <el-input-number v-model="form.forecastDays" :min="7" :max="365" :step="7" />
         </el-form-item>
+        <el-form-item label="数据表名">
+          <el-input v-model="form.tableName" placeholder="可选，默认: 库名.ads_cockpit_fd_store_ware_d" style="width: 320px" clearable />
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleTrain" :loading="training" :disabled="!form.dataSourceId">
             <el-icon><Refresh /></el-icon> 训练模型
@@ -122,6 +125,7 @@ export default {
       dataSourceId: null,
       trainDays: 365,
       forecastDays: 30,
+      tableName: '',
     })
     const dataSources = ref([])
     const training = ref(false)
@@ -232,7 +236,8 @@ export default {
       training.value = true
       trainResult.value = ''
       try {
-        const res = await trainModel(form.value.dataSourceId, form.value.trainDays)
+        const tableName = form.value.tableName.trim() || null
+        const res = await trainModel(form.value.dataSourceId, form.value.trainDays, tableName)
         trainResult.value = '模型训练成功！'
       } catch (e) {
         trainResult.value = `训练失败: ${e.message || e}`
@@ -243,7 +248,8 @@ export default {
       predicting.value = true
       trainResult.value = ''
       try {
-        const res = await runPredict(form.value.dataSourceId, form.value.forecastDays)
+        const tableName = form.value.tableName.trim() || null
+        const res = await runPredict(form.value.dataSourceId, form.value.forecastDays, tableName)
         trainResult.value = `预测成功！共 ${res.count || res.data?.count || 0} 条记录`
         await loadForecast()
         await nextTick(renderChart)

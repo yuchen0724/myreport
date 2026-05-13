@@ -6,6 +6,14 @@ from datetime import date
 class TrainRequest(BaseModel):
     data_source_id: int = Field(..., description="数据源ID")
     train_days: Optional[int] = Field(None, description="训练用历史天数，默认使用配置值")
+    table_name: Optional[str] = Field(
+        None,
+        description="销售数据表名（完整名称，如 retail_analysis.ads_cockpit_fd_store_ware_d）"
+    )
+    date_field: Optional[str] = Field(None, description="日期字段名，默认 dt")
+    store_field: Optional[str] = Field(None, description="门店字段名，默认 store_code")
+    sku_field: Optional[str] = Field(None, description="商品字段名，默认 matnr")
+    target_field: Optional[str] = Field(None, description="目标值字段名，默认 actual_sale_untaxed_amt")
 
 
 class TrainResponse(BaseModel):
@@ -18,6 +26,10 @@ class TrainResponse(BaseModel):
 class PredictRequest(BaseModel):
     data_source_id: int
     forecast_days: Optional[int] = Field(None, description="预测天数，默认30")
+    table_name: Optional[str] = Field(
+        None,
+        description="销售数据表名（完整名称），与训练时一致"
+    )
 
 
 class PredictResponse(BaseModel):

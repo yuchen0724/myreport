@@ -37,7 +37,7 @@ class PredictionService:
         self.model_dir = settings.prediction_model_dir
         os.makedirs(self.model_dir, exist_ok=True)
 
-    def _fetch_history_data(self, ds_id: int, days: int) -> pd.DataFrame:
+    def _fetch_history_data(self, ds_id: int, days: int, table_name: str = None) -> pd.DataFrame:
         """从 Doris 拉取历史销售数据"""
         ds = self.ds_repo.get_by_id(ds_id)
         if not ds:
@@ -48,9 +48,11 @@ class PredictionService:
         start_str = start_date.strftime("%Y%m%d")
         end_str = end_date.strftime("%Y%m%d")
 
-        sql = f"""
+        table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
+
+        sql = f"""\
             SELECT dt, store_code, matnr, {TARGET_COL}
-            FROM {ds.database}.ads_cockpit_fd_store_ware_d
+            FROM {table}
             WHERE dt >= {start_str} AND dt <= {end_str}
               AND exclude_flag != 1
               AND (service_flag != 1 OR service_flag IS NULL)
@@ -67,7 +69,7 @@ class PredictionService:
         df[TARGET_COL] = df[TARGET_COL] / 100.0
         return df
 
-    def train(self, ds_id: int, train_days: int = None) -> int:
+    def train(self, ds_id: int, train_days: int = None, table_name: str = None) -> int:
         """
         训练模型。
         
@@ -85,7 +87,7 @@ class PredictionService:
 
         try:
             # 1. 拉取历史数据
-            df = self._fetch_history_data(ds_id, train_days)
+            df = self._fetch_history_data(ds_id, train_days, table_name=table_name)
             if len(df) < settings.prediction_min_history_days * 10:
                 raise ValueError(
                     f"历史数据不足({len(df)}行)，需要至少 {settings.prediction_min_history_days * 10} 行"
@@ -145,7 +147,7 @@ class PredictionService:
             )
             raise
 
-    def predict(self, ds_id: int, forecast_days: int = None) -> int:
+    def predict(self, ds_id: int, forecast_days: int = None, table_name: str = None) -> int:
         """
         用最新模型预测未来 N 天销售额。
         
@@ -160,7 +162,7 @@ class PredictionService:
         feature_cols = get_feature_columns()
 
         # 拉取最新数据构造特征
-        df = self._fetch_history_data(ds_id, days=60)
+        df = self._fetch_history_data(ds_id, days=60, table_name=table_name)
         df_feat = build_features_from_history(df)
         df_feat = df_feat.dropna(subset=feature_cols)
 
