@@ -112,3 +112,18 @@ export function parseQuestion(data) {
       throw error
     })
 }
+
+/**
+ * 获取集团列表
+ * @param {number} dataSourceId - 数据源ID
+ * @returns {Promise<Array<{group_id: number, group_name: string}>>}
+ */
+export function getGroups(dataSourceId) {
+  return request({
+    url: "/nl2sql/groups",
+    method: "get",
+    params: { data_source_id: dataSourceId }
+  }).then(response => {
+    return response.data || []
+  })
+}

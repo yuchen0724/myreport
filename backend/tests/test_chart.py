@@ -8,6 +8,7 @@ def test_generate_chart(db_session):
     """测试生成图表（使用 mock）"""
     from app.services.chart_service import ChartService
     from app.services.query_service import QueryService
+    from app.repositories.data_source_repository import DataSourceRepository
     
     # Mock QueryService 返回带 rows/columns 属性的对象
     mock_result = MagicMock()
@@ -16,6 +17,9 @@ def test_generate_chart(db_session):
     
     mock_query_service = Mock(spec=QueryService)
     mock_query_service.execute_sql.return_value = mock_result
+    # ChartService 需要 ds_repo 来加载字段名映射
+    mock_query_service.ds_repo = Mock(spec=DataSourceRepository)
+    mock_query_service.ds_repo.get_by_id.return_value = None
     
     chart_service = ChartService(mock_query_service)
 

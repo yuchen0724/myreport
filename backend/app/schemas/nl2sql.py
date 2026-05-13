@@ -7,6 +7,7 @@ class NL2SQLRequest(BaseModel):
     question: str = Field(..., description="自然语言问题")
     data_source_id: int = Field(..., description="数据源 ID")
     context: Optional[str] = Field(None, description="上下文信息")
+    group_id: Optional[int] = Field(None, description="用户所属集团ID，用于分表选择")
 class SQLSuggestion(BaseModel):
     """SQL 建议"""
     sql: str = Field(..., description="生成的 SQL")

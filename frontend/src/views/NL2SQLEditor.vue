@@ -20,6 +20,17 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item v-if="showGroupSelect" label="集团（选填）">
+          <el-select v-model="form.group_id" placeholder="选择集团（自动从 dim_store 加载）" clearable filterable :loading="groupLoading" style="width: 320px">
+            <el-option
+              v-for="g in groupOptions"
+              :key="g.group_id"
+              :label="g.group_name"
+              :value="g.group_id"
+            />
+          </el-select>
+        </el-form-item>
+
         <el-form-item label="自然语言问题">
           <el-input
             v-model="form.question"
@@ -41,13 +52,24 @@
       <div v-if="suggestions.length > 0" class="suggestions">
         <h4>SQL 建议</h4>
         <el-table :data="suggestions" style="width: 100%">
-          <el-table-column prop="sql" label="SQL" />
+          <el-table-column label="SQL" min-width="350">
+            <template #default="{ row }">
+              <pre class="sql-code-block">{{ formatSQL(row.sql) }}</pre>
+            </template>
+          </el-table-column>
           <el-table-column prop="confidence" label="置信度" width="120">
             <template #default="{ row }">
               {{ (row.confidence * 100).toFixed(1) }}%
             </template>
           </el-table-column>
-          <el-table-column prop="explanation" label="解释" />
+          <el-table-column min-width="200">
+            <template #header>
+              <span>解释</span>
+            </template>
+            <template #default="{ row }">
+              <span class="explanation-text">{{ row.explanation }}</span>
+            </template>
+          </el-table-column>
         </el-table>
       </div>
 
@@ -149,19 +171,27 @@
   </div></template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { InfoFilled } from '@element-plus/icons-vue'
-import { parseQuestion } from '@/api/nl2sql'
+import { parseQuestion, getGroups } from '@/api/nl2sql'
 import { getDataSourceList } from '@/api/data_source'
 import ChartRenderer from '@/components/ChartRenderer.vue'
+import { formatSQL } from '@/utils/sqlFormat'
 
 const form = ref({
   data_source_id: null,
-  question: ''
+  question: '',
+  group_id: null
 })
 
 const dataSource = ref([])
+const dsLoadGroupMap = ref({})  // {dsId: true/false} — 记录每个数据源是否开启集团加载
+const showGroupSelect = computed(() => {
+  return dsLoadGroupMap.value[form.value.data_source_id] === true
+})
+const groupOptions = ref([])
+const groupLoading = ref(false)
 const suggestions = ref([])
 const queryResult = ref(null)
 const executionTimeMs = ref(null)
@@ -397,18 +427,66 @@ onMounted(async () => {
   await loadDataSources()
 })
 
+watch(() => form.value.data_source_id, () => {
+  const dsId = form.value.data_source_id
+  if (!dsId) {
+    groupOptions.value = []
+    form.value.group_id = null
+    return
+  }
+  // 只有开启集团加载的数据源才调用加载接口
+  if (dsLoadGroupMap.value[dsId]) {
+    loadGroups()
+  } else {
+    groupOptions.value = []
+    form.value.group_id = null
+  }
+})
+
 const loadDataSources = async () => {
   console.group('[NL2SQL] 📥 加载数据源列表')
   try {
     const response = await getDataSourceList()
     dataSource.value = response
+    // 记录每个数据源的 load_group 属性
+    const map = {}
+    response.forEach(ds => { map[ds.id] = ds.load_group })
+    dsLoadGroupMap.value = map
     console.log('[NL2SQL] ✅ 数据源加载成功, 数量:', response.length)
-    console.log('[NL2SQL] │ 数据源列表:', response.map(ds => ({ id: ds.id, name: ds.name, type: ds.type })))
+    console.log('[NL2SQL] │ 数据源列表:', response.map(ds => ({ id: ds.id, name: ds.name, load_group: ds.load_group })))
     console.groupEnd()
   } catch (error) {
     console.error('[NL2SQL] ❌ 数据源加载失败:', error)
     console.groupEnd()
     ElMessage.error('加载数据源失败')
+  }
+}
+
+const loadGroups = async () => {
+  const dsId = form.value.data_source_id
+  if (!dsId) {
+    groupOptions.value = []
+    form.value.group_id = null
+    return
+  }
+  groupLoading.value = true
+  console.group('[NL2SQL] 📥 加载集团列表')
+  try {
+    const groups = await getGroups(dsId)
+    groupOptions.value = groups
+    console.log('[NL2SQL] ✅ 集团列表加载成功, 数量:', groups.length)
+    console.groupEnd()
+    // 如果当前 group_id 不在新列表中，清空
+    if (form.value.group_id && !groups.find(g => g.group_id === form.value.group_id)) {
+      form.value.group_id = null
+    }
+  } catch (error) {
+    console.error('[NL2SQL] ❌ 集团列表加载失败:', error)
+    console.groupEnd()
+    groupOptions.value = []
+    // 加载失败时不清空当前选择，允许用户手动输入
+  } finally {
+    groupLoading.value = false
   }
 }
 
@@ -428,6 +506,7 @@ const handleParse = async () => {
   console.group('[NL2SQL] 🔄 开始解析')
   console.log('├─ 数据源ID:', form.value.data_source_id)
   console.log('├─ 问题:', form.value.question)
+  console.log('├─ 集团ID:', form.value.group_id)
   console.log('└─ 发起时间:', new Date().toISOString())
   console.groupEnd()
 
@@ -686,5 +765,31 @@ const handleChartTypeChange = (type) => {
 
 .field-mapping-controls .el-form-item {
   margin-bottom: 0;
+}
+
+/* SQL 格式化代码块样式 */
+.sql-code-block {
+  margin: 0;
+  padding: 8px 12px;
+  background-color: #f6f8fa;
+  border: 1px solid #e1e4e8;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 200px;
+  overflow-y: auto;
+  color: #24292e;
+}
+
+.explanation-text {
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.5;
+  display: block;
+  max-height: 120px;
+  overflow-y: auto;
 }
 </style>

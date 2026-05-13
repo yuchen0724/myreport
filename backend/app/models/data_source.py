@@ -17,6 +17,7 @@ class DataSource(Base):
     password_encrypted = Column(String(255), nullable=False)
     use_proxy = Column(Boolean, default=False, comment="是否使用代理")
     proxy_server_id = Column(Integer, ForeignKey("proxy_servers.id"), nullable=True, comment="关联的代理服务器")
+    load_group = Column(Boolean, default=False, comment="是否加载集团数据（NL2SQL 下拉选择）")
     is_active = Column(Boolean, default=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

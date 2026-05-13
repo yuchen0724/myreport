@@ -54,6 +54,8 @@ class DataSourceService:
             update_data['use_proxy'] = ds_data.use_proxy
         if hasattr(ds_data, 'proxy_server_id') and ds_data.proxy_server_id is not None:
             update_data['proxy_server_id'] = ds_data.proxy_server_id
+        if hasattr(ds_data, 'load_group') and ds_data.load_group is not None:
+            update_data['load_group'] = ds_data.load_group
         
         # 检查密码是否需要更新
         password_value = update_data.get('password')

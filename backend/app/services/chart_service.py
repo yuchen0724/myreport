@@ -99,6 +99,8 @@ class ChartService:
             raise ValueError(error_msg)
 
         logger.info(f"字段校验通过: x_axis={x_axis}, y_axis={y_axis}")
+
+    def _load_field_name_map(self, data_source_id: int) -> Dict[str, str]:
         """
         加载字段中文名映射
 

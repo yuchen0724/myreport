@@ -82,6 +82,7 @@ async def get_data_source(
         "use_proxy": db_ds.use_proxy,
         "proxy_server_id": db_ds.proxy_server_id,
         "is_active": db_ds.is_active,
+        "load_group": db_ds.load_group,
         "created_by": db_ds.created_by,
         "created_at": db_ds.created_at,
         "updated_at": db_ds.updated_at,

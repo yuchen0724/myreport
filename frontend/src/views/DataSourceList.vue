@@ -9,6 +9,13 @@
         <el-table-column prop="host" label="主机" />
         <el-table-column prop="port" label="端口" />
         <el-table-column prop="database" label="数据库" />
+        <el-table-column prop="load_group" label="加载集团" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.load_group ? 'success' : 'info'" size="small">
+              {{ row.load_group ? '是' : '否' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="is_active" label="状态">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'danger'">

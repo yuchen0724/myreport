@@ -32,7 +32,14 @@
           </el-form-item>
           
           <el-divider>代理设置</el-divider>
-          
+
+          <el-form-item label="加载集团">
+            <el-switch v-model="form.load_group" />
+            <span class="el-form-item__label" style="margin-left: 8px; color: #909399; font-size: 12px;">
+              开启后，NL2SQL 查询中该数据源将显示集团下拉选项
+            </span>
+          </el-form-item>
+
           <el-form-item label="使用代理">
             <el-switch v-model="form.use_proxy" @change="handleProxyChange" />
           </el-form-item>
@@ -86,7 +93,8 @@ export default {
       username: '',
       password: '',
       use_proxy: false,
-      proxy_server_id: null
+      proxy_server_id: null,
+      load_group: false
     })
     const rules = {
       name: [{ required: true, message: '请输入数据源名称', trigger: 'blur' }],
@@ -170,7 +178,8 @@ export default {
             username: data.username,
             password: data.password_decrypted || '',
             use_proxy: data.use_proxy || false,
-            proxy_server_id: data.proxy_server_id || null
+            proxy_server_id: data.proxy_server_id || null,
+            load_group: data.load_group || false
           }
         } catch (error) {
           ElMessage.error('加载数据源失败')

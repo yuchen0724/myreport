@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
@@ -50,6 +51,8 @@ class NL2SQLService:
         logger.info(f"[NL2SQL] ├─ 用户ID: {user_id}")
         logger.info(f"[NL2SQL] ├─ 数据源ID: {request.data_source_id}")
         logger.info(f"[NL2SQL] ├─ 问题: {request.question}")
+        if request.group_id:
+            logger.info(f"[NL2SQL] ├─ 集团ID: {request.group_id}")
         logger.info(f"[NL2SQL] └─ 请求时间: {__import__('datetime').datetime.now().isoformat()}")
         
         sql = None
@@ -65,7 +68,7 @@ class NL2SQLService:
             logger.info(f"[NL2SQL] ├─ LLM 客户端初始化完成, timeout={llm_client.timeout}")
             
             sql, confidence, explanation, chart_config = self._generate_sql_with_llm(
-                llm_client, request.question, request.data_source_id
+                llm_client, request.question, request.data_source_id, group_id=request.group_id
             )
             used_llm = True
             logger.info(f"[NL2SQL] ✅ LLM 生成 SQL 成功:")
@@ -120,7 +123,10 @@ class NL2SQLService:
         logger.info("[NL2SQL] 📌 步骤4: 执行 SQL 查询...")
         
         # 【新增】校验并修复 SQL 中的表名（确保带库名前缀）
-        sql = self._fix_sql_table_names(sql, request.data_source_id)
+        sql = self._fix_sql_table_names(sql, request.data_source_id, group_id=request.group_id)
+        
+        # 【新增】自动修复聚合查询 + ORDER BY 但无 GROUP BY 的问题
+        sql = self._fix_sql_aggregate_orderby(sql)
         
         query_request = SQLQueryRequest(
             data_source_id=request.data_source_id,
@@ -178,7 +184,8 @@ class NL2SQLService:
             )
 
     def _generate_sql_with_llm(
-        self, llm_client: LLMClient, question: str, data_source_id: int
+        self, llm_client: LLMClient, question: str, data_source_id: int,
+        group_id: Optional[int] = None
     ) -> Tuple[str, float, str]:
         """
         使用 LLM 生成 SQL
@@ -187,6 +194,7 @@ class NL2SQLService:
             llm_client: LLM 客户端
             question: 自然语言问题
             data_source_id: 数据源 ID
+            group_id: 用户所属集团ID（用于分表选择和WHERE条件）
 
         Returns:
             (sql, confidence, explanation): 生成的 SQL、置信度和解释
@@ -220,6 +228,9 @@ class NL2SQLService:
 ## 数据源信息
 {schema_prompt}
 
+## 当前用户上下文
+- 当前用户集团ID：{'**' + str(group_id) + '**（已确认，该用户的查询应基于此集团的数据）' if group_id else '未知（未指定，按全局数据查询）'}
+
 ## 规则
 1. 只生成 SELECT 查询，禁止生成 UPDATE/DELETE/DROP 等操作
 2. 【重要】所有表名必须带库名前缀，如 `库名.表名`（例如 `ads_cockpit_freedom.store_sales`），否则跨库查询会失败！
@@ -231,8 +242,17 @@ class NL2SQLService:
    - 如果需要的字段在文档中不存在，请在 explanation 中说明，并使用文档中存在的相似字段
 4. 条件要准确匹配问题中的语义
 5. 日期格式使用 YYYYMMDD（如 20260508）
-6. 【重要】必须包含 ORDER BY 子句以支持分页，没有 ORDER BY 会导致查询失败！
-7. 【严禁】除非用户明确提到"集团"、"集团ID"等关键词，绝对禁止在 WHERE 中添加 group_id 过滤条件！即使用户问的是全量数据，也不要自作主张加 group_id 限制。错误示例：`WHERE group_id = 'xxx'`（用户未提集团）→ 必须去掉！
+6. 【重要】必须包含 ORDER BY 子句以支持分页，没有 ORDER BY 会导致查询失败！如果查询是聚合查询（SUM/COUNT/AVG等），**ORDER BY 的列必须在 SELECT 中或 GROUP BY 子句中**，且必须包含 GROUP BY！
+7. 【重要】关于 group_id 和分表选择规则（ads_cockpit_fd_store_ware_d 系列表按集团分表）：
+   - 【核心规则】ads_cockpit_fd_store_ware_d 表是按集团分表的！！！不同集团的数据存不同后缀的表中。**必须根据「当前用户上下文」中的集团ID使用对应的分表名，不能使用无后缀的基础表名！**
+   - 【分表规则】分表后缀 = group_id，例如 group_id=812 时表名应为 ads_cockpit_fd_store_ware_d_812
+   - 已知分表映射：
+     - group_id=57362 → `ads_cockpit_fd_store_ware_d_57362`
+     - group_id=812 → `ads_cockpit_fd_store_ware_d_812`
+     - group_id=其他 → `ads_cockpit_fd_store_ware_d_其他`
+   - 【重要】基础表名 `ads_cockpit_fd_store_ware_d`（无后缀）是除已列举集团以外的其他集团数据，**不要使用它**，除非「当前用户上下文」明确说集团ID未知
+   - 【必须】如果「当前用户上下文」中给出了集团ID，必须在 SQL 中使用对应的分表名，并且在 WHERE 条件中添加 `group_id = xxx`
+   - 注意：此规则同样适用于同结构的 ads_fd_dim_store_ware 维度表
 8. 不要使用 SQL 注释（-- 或 /* */）
 9. 不要在 SQL 末尾添加分号
 10. 根据查询结果判断合适的图表类型：
@@ -842,7 +862,58 @@ class NL2SQLService:
         # 返回第一个可能的目录（用于创建）
         return possible_dirs[0]
 
-    def _fix_sql_table_names(self, sql: str, data_source_id: int) -> str:
+    def _fix_sql_aggregate_orderby(self, sql: str) -> str:
+        """
+        自动修复聚合查询 + ORDER BY 但无 GROUP BY 的问题
+        
+        场景：LLM 生成了 SELECT SUM(...) AS `别名` FROM ... ORDER BY dt
+        Doris 要求 ORDER BY 的列必须在 SELECT 中或 GROUP BY 中
+        修复：如果检测到聚合函数 + ORDER BY + 无 GROUP BY，移除 ORDER BY
+        """
+        import re
+        
+        # 检查是否有聚合函数
+        has_aggregate = bool(re.search(
+            r'\b(SUM|COUNT|AVG|MAX|MIN|GROUP_CONCAT|STRING_AGG|COUNT_DISTINCT)\s*\(',
+            sql, re.IGNORECASE
+        ))
+        if not has_aggregate:
+            return sql
+        
+        # 检查是否有 GROUP BY
+        has_groupby = bool(re.search(r'\bGROUP\s+BY\b', sql, re.IGNORECASE))
+        if has_groupby:
+            return sql
+        
+        # 检查是否有 ORDER BY
+        orderby_match = re.search(r'\bORDER\s+BY\s+.+', sql, re.IGNORECASE | re.DOTALL)
+        if not orderby_match:
+            return sql
+        
+        orderby_clause = orderby_match.group(0)
+        
+        # 尝试从 ORDER BY 中提取列名作为 GROUP BY 的候选
+        # 匹配 ORDER BY 后到 LIMIT/OFFSET/结束 之间的字段
+        orderby_cols = re.findall(
+            r'ORDER\s+BY\s+(.+?)(?:\s+(?:ASC|DESC))?(?:\s*,\s*)?',
+            sql, re.IGNORECASE
+        )
+        
+        logger.warning(f"[NL2SQL] ⚠️ 检测到聚合查询有 ORDER BY 但无 GROUP BY，移除 ORDER BY 子句")
+        logger.warning(f"[NL2SQL] ⚠️ 移除的 ORDER BY: {orderby_clause}")
+        
+        # 移除 ORDER BY 子句（保留其后的 LIMIT/OFFSET）
+        fixed_sql = re.sub(
+            r'\s+ORDER\s+BY\s+.+?(?=\s*(?:LIMIT|OFFSET|$))',
+            '',
+            sql,
+            flags=re.IGNORECASE | re.DOTALL
+        )
+        
+        logger.info(f"[NL2SQL] 🔧 已修复聚合查询 ORDER BY 问题")
+        return fixed_sql
+
+    def _fix_sql_table_names(self, sql: str, data_source_id: int, group_id: Optional[int] = None) -> str:
         """
         校验并修复 SQL 中的表名，确保带库名前缀
         
@@ -851,6 +922,7 @@ class NL2SQLService:
         2. 如果已带库名（有点号），跳过
         3. 如果没有库名，添加数据源的默认库名
         4. 跳过 WITH 定义的 CTE（虚拟表）
+        5. 分表替换：优先使用 SQL 中 group_id WHERE 条件，其次使用传入的 group_id 参数
         """
         import re
         
@@ -919,7 +991,110 @@ class NL2SQLService:
             )
             logger.info(f"[NL2SQL] 🔧 修复表名: {full_table} -> {fixed_name}")
         
+        # 【分表替换】从 SQL 中提取 group_id 条件值，匹配分表后缀
+        # 对 ads_cockpit_fd_store_ware_d 系列表，按 group_id 分表
+        base_shard_tables = ['ads_cockpit_fd_store_ware_d', 'ads_fd_dim_store_ware']
+        
+        for base_table_name in base_shard_tables:
+            # 检查 SQL 中是否包含该基础表名（可能带库名或不带）
+            full_base_table = f"{db_name}.{base_table_name}"
+            has_table = full_base_table in fixed_sql or base_table_name in fixed_sql
+            
+            if not has_table:
+                continue
+            
+            # 尝试提取 group_id 值（支持 group_id = X 或 group_id = 'X' 或 group_id IN (X)）
+            sql_group_id_match = re.search(
+                r'group_id\s*=\s*(\d+)',
+                fixed_sql, re.IGNORECASE
+            )
+            
+            effective_group_id = None
+            if sql_group_id_match:
+                effective_group_id = int(sql_group_id_match.group(1))
+                logger.info(f"[NL2SQL] 🔍 从 SQL WHERE 条件检测到 group_id={effective_group_id}")
+            elif group_id is not None:
+                effective_group_id = group_id
+                logger.info(f"[NL2SQL] 🔍 使用调用方传入的 group_id={effective_group_id}")
+            
+            if effective_group_id is not None:
+                gid = effective_group_id
+                logger.info(f"[NL2SQL] 🔧 检查是否需要分表替换（group_id={gid}）")
+                
+                # 构建分表名：原表名 + _ + group_id
+                shard_table = f"{base_table_name}_{gid}"
+                
+                # 替换 SQL 中的表名（先替换带库名的，再替换不带库名的）
+                db_shard_table = f"{db_name}.{shard_table}"
+                
+                # 替换带库名的表名（使用词边界，避免 ads_cockpit_fd_store_ware_d 错误匹配 ads_cockpit_fd_store_ware_d_812）
+                if full_base_table in fixed_sql:
+                    # 用 regex 做完整词边界替换：库名.表名 后跟空格/逗号/结束/换行
+                    fixed_sql = re.sub(
+                        re.escape(full_base_table) + r'(?=[\s,)]|$)',
+                        db_shard_table,
+                        fixed_sql
+                    )
+                    logger.info(f"[NL2SQL] 🔧 分表替换: {full_base_table} -> {db_shard_table} (group_id={gid})")
+                else:
+                    # 替换不带库名的表名（同样词边界）
+                    fixed_sql = re.sub(
+                        re.escape(base_table_name) + r'(?=[\s,.)]|$)',
+                        shard_table,
+                        fixed_sql
+                    )
+                    logger.info(f"[NL2SQL] 🔧 分表替换: {base_table_name} -> {shard_table} (group_id={gid})")
+        
         if fixed_sql != sql:
-            logger.info(f"[NL2SQL] 🔧 SQL 表名已修复:\n  原SQL: {sql[:150]}...\n  新SQL: {fixed_sql[:150]}...")
+            logger.info(f"[NL2SQL] 🔧 SQL 表名已修复:\\n  原SQL: {sql[:150]}...\\n  新SQL: {fixed_sql[:150]}...")
         
         return fixed_sql
+
+    def get_groups(self, data_source_id: int) -> list:
+        """从 dim_store 查询集团列表（优先从 Redis 缓存读取）"""
+        logger.info(f"[NL2SQL] 🔍 查询集团列表, 数据源ID: {data_source_id}")
+
+        # 1. 优先从 Redis 读取
+        try:
+            from app.core.redis import redis_client
+            cache_key = f"nl2sql:groups:{data_source_id}"
+            cached = redis_client.get(cache_key)
+            if cached:
+                rows = json.loads(cached)
+                logger.info(f"[NL2SQL] ├─ Redis 缓存命中, 集团数: {len(rows)}")
+                return rows
+        except Exception as e:
+            logger.warning(f"[NL2SQL] ⚠️ Redis 读取失败, 回退 DB 查询: {e}")
+
+        # 2. Redis 未命中, 从 Doris 查询
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.pool import QueuePool
+
+        ds = self.ds_repo.get_by_id(data_source_id)
+        if not ds:
+            raise ValueError("数据源不存在")
+
+        password = decrypt_password(ds.password_encrypted)
+        conn_url = f"mysql+pymysql://{ds.username}:***@{ds.host}:{ds.port}/{ds.database}"
+        engine = create_engine(conn_url.replace('***', password), poolclass=QueuePool, pool_size=2, max_overflow=2, pool_pre_ping=True, connect_args={"connect_timeout": 5})
+
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text("SELECT DISTINCT group_id, group_name FROM ads_cockpit_qck.dim_store ORDER BY group_id"))
+                rows = [{"group_id": row[0], "group_name": row[1]} for row in result.fetchall()]
+                logger.info(f"[NL2SQL] └─ Doris 查询成功, 集团数: {len(rows)}")
+        except Exception as e:
+            logger.error(f"[NL2SQL] ❌ 查询集团列表失败: {e}")
+            raise
+        finally:
+            engine.dispose()
+
+        # 3. 写入 Redis 缓存（TTL=1小时）
+        try:
+            from app.core.redis import redis_client
+            redis_client.setex(cache_key, 86400, json.dumps(rows, ensure_ascii=False))
+            logger.info(f"[NL2SQL] ├─ 集团数据已写入 Redis 缓存（TTL=86400s）")
+        except Exception as e:
+            logger.warning(f"[NL2SQL] ⚠️ Redis 写入失败: {e}")
+
+        return rows

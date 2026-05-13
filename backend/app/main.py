@@ -96,6 +96,9 @@ app.include_router(menus.router)
 app.include_router(config.router)
 
 
+# 启动时预加载集团缓存已移除（需手工调用 POST /api/nl2sql/groups/refresh）
+
+
 @app.get("/")
 async def root():
     return {"message": "Custom Report System API", "version": settings.app_version}
