@@ -145,6 +145,12 @@ const routes = [
     name: "ReportView",
     component: () => import("@/views/ReportView.vue"),
     meta: { requiresAuth: true }
+  },
+  {
+    path: "/sales-forecast",
+    name: "SalesForecast",
+    component: () => import("@/views/SalesForecast.vue"),
+    meta: { requiresAuth: true, roles: ["admin", "editor"] }
   }
 ]
 

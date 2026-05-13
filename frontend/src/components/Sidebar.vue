@@ -95,6 +95,12 @@
           <span>异步导出</span>
         </el-menu-item>
       </el-sub-menu>
+
+      <!-- 智能分析 -->
+      <el-menu-item index="/sales-forecast">
+        <el-icon><TrendCharts /></el-icon>
+        <span>销售预测</span>
+      </el-menu-item>
     </el-menu>
   </div>
 </template>
