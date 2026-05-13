@@ -107,11 +107,17 @@ start_celery() {
     cd $BACKEND_DIR
     export PYTHONPATH=$BACKEND_DIR:$PYTHONPATH
     
+    # 使用 venv 中的 celery（确保 lightgbm 等依赖可用）
+    CELERY_BIN="$BACKEND_DIR/.venv/bin/celery"
+    if [ ! -f "$CELERY_BIN" ]; then
+        CELERY_BIN="celery"
+    fi
+    
     # 检查是否已有celery进程
     if pgrep -f "celery.*worker" > /dev/null; then
         echo -e "${YELLOW}Celery Worker 已在运行${NC}"
     else
-        nohup celery -A celery_config worker --loglevel=info --concurrency=4 -Q export \
+        nohup $CELERY_BIN -A celery_config worker --loglevel=info --concurrency=4 -Q export \
             > "$LOG_DIR/celery.log" 2>&1 &
         echo $! > $CELERY_PID
         
@@ -133,7 +139,14 @@ start_backend() {
     
     if check_port $BACKEND_PORT "后端服务"; then
         cd $BACKEND_DIR
-        nohup uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT --reload \
+        
+        # 使用 venv 中的 uvicorn
+        UVICORN_BIN="$BACKEND_DIR/.venv/bin/uvicorn"
+        if [ ! -f "$UVICORN_BIN" ]; then
+            UVICORN_BIN="uvicorn"
+        fi
+        
+        nohup $UVICORN_BIN app.main:app --host 0.0.0.0 --port $BACKEND_PORT --reload \
             > "$LOG_DIR/backend.log" 2>&1 &
         echo $! > $BACKEND_PID
         
