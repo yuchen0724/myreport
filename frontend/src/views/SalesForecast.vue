@@ -35,37 +35,85 @@
       </el-form>
     </el-card>
 
-    <!-- 训练进度显示 -->
-    <el-card v-if="taskProgress || trainResult" class="progress-card" shadow="never">
-      <div class="progress-body">
-        <!-- 有进度时显示进度条 -->
-        <template v-if="taskProgress">
-          <div class="progress-info">
-            <span class="progress-phase">{{ taskProgress.phase }}</span>
-            <span class="progress-percent">{{ taskProgress.percent }}%</span>
+    <!-- 多任务进度显示 -->
+    <div v-if="taskProgresses.length > 0" class="progress-list">
+      <el-card
+        v-for="tp in taskProgresses"
+        :key="tp.taskId"
+        class="progress-card"
+        shadow="never"
+      >
+        <div class="progress-body">
+          <div class="progress-header">
+            <div class="progress-info">
+              <span class="progress-phase">{{ tp.phase }}</span>
+              <span class="progress-percent">{{ tp.percent }}%</span>
+            </div>
+            <div class="progress-actions">
+              <el-button
+                v-if="tp.status === 'running'"
+                size="small"
+                type="danger"
+                @click="handleStopTask(tp)"
+              >
+                停止
+              </el-button>
+            </div>
           </div>
           <el-progress
-            :percentage="taskProgress.percent"
-            :status="taskProgress.status === 'success' ? 'success' : taskProgress.status === 'failed' ? 'exception' : undefined"
+            :percentage="tp.percent"
+            :status="tp.status === 'success' ? 'success' : tp.status === 'failed' ? 'exception' : undefined"
             :stroke-width="16"
             :text-inside="false"
             striped
             striped-flow
             :duration="6"
           />
-          <div class="progress-detail">{{ taskProgress.detail }}</div>
-        </template>
+          <div class="progress-detail">{{ tp.detail }}</div>
+          <div class="progress-time" v-if="tp.createdAt">提交时间: {{ tp.createdAt }}</div>
+        </div>
+      </el-card>
+    </div>
 
-        <!-- 训练结束提示（覆盖进度条） -->
-        <el-alert
-          v-if="trainResult"
-          :title="trainResult"
-          :type="trainResult.includes('失败') || trainResult.includes('超时') ? 'error' : trainResult.includes('已提交') ? 'info' : 'success'"
-          show-icon
-          closable
-          @close="trainResult = ''; taskProgress = null"
-        />
-      </div>
+    <!-- 训练结束提示 -->
+    <el-alert
+      v-if="trainResult"
+      :title="trainResult"
+      :type="trainResult.includes('失败') || trainResult.includes('超时') ? 'error' : trainResult.includes('已提交') ? 'info' : 'success'"
+      show-icon
+      closable
+      @close="trainResult = ''"
+    />
+
+    <!-- 训练历史区域 -->
+    <el-card v-if="trainHistory.length > 0" class="history-card" shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>训练历史</span>
+        </div>
+      </template>
+      <el-table :data="trainHistory" border stripe style="width: 100%">
+        <el-table-column prop="data_source_name" label="数据源" width="140" />
+        <el-table-column prop="status" label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'ready' ? 'success' : row.status === 'failed' ? 'danger' : 'warning'" size="small">
+              {{ row.status === 'ready' ? '成功' : row.status === 'failed' ? '失败' : row.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="task_id" label="任务ID" min-width="200">
+          <template #default="{ row }">
+            <code style="font-size: 12px">{{ row.task_id ? row.task_id.slice(0, 20) + '...' : '-' }}</code>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="提交时间" width="170" />
+        <el-table-column prop="error_message" label="错误信息" min-width="150" show-overflow-tooltip />
+        <el-table-column label="操作" width="80" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" type="danger" link @click="handleDeleteHistory(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
 
     <!-- 预测结果图表 -->
@@ -134,10 +182,11 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { Refresh, TrendCharts } from '@element-plus/icons-vue'
-import { trainModel, runPredict, getForecast, getTrainStatus, getMyTrainTasks } from '@/api/prediction'
+import { trainModel, runPredict, getForecast, getTrainStatus, getMyTrainTasks, stopTrainTask, deleteTrainHistory, deleteTrainHistoryByTask } from '@/api/prediction'
 import { getDataSourceList } from '@/api/data_source'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 
 export default {
@@ -155,9 +204,15 @@ export default {
     const predicting = ref(false)
     const loading = ref(false)
     const trainResult = ref('')
+    // 兼容旧代码：taskProgress 引用保持不变（但不再使用）
     const taskProgress = ref(null)
+    // 多任务进度列表
+    const taskProgresses = ref([])
+    // 训练历史（已完成的任务列表）
+    const trainHistory = ref([])
     let _pollingTaskId = null  // 防重复轮询标记
     let _trainingLock = false  // 防重复提交训练
+    let _pollingInterval = null  // 统一轮询定时器
     const forecastData = ref([])
     const total = ref(0)
     const page = ref(1)
@@ -258,14 +313,163 @@ export default {
 
     watch(selectedStores, () => nextTick(renderChart), { deep: true })
 
+    // 统一轮询：每5秒查询所有 active 任务
+    function startPolling() {
+      if (_pollingInterval) return
+      _pollingInterval = setInterval(async () => {
+        const tasks = taskProgresses.value
+        if (tasks.length === 0) {
+          stopPolling()
+          return
+        }
+        for (const tp of tasks) {
+          if (tp.status !== 'running') continue
+          try {
+            const statusRes = await getTrainStatus(tp.taskId)
+            const s = statusRes.data || statusRes
+            tp.percent = s.percent || 0
+            tp.phase = s.phase || '运行中'
+            tp.detail = s.detail || ''
+            if (s.status === 'success') {
+              tp.status = 'success'
+              tp.percent = 100
+              tp.phase = '完成'
+              // 从活动列表移除，加入历史
+              removeFromActive(tp.taskId)
+              addToHistory({
+                status: 'ready',
+                task_id: tp.taskId,
+                model_id: s.model_id || tp.modelId,
+                created_at: tp.createdAt,
+                data_source_name: tp.dataSourceName,
+              })
+              trainResult.value = `模型训练成功！model_id=${s.model_id}`
+            } else if (s.status === 'failed') {
+              tp.status = 'failed'
+              // 从活动列表移除，加入历史
+              removeFromActive(tp.taskId)
+              addToHistory({
+                status: 'failed',
+                task_id: tp.taskId,
+                model_id: s.model_id || tp.modelId,
+                created_at: tp.createdAt,
+                error_message: s.error || '未知错误',
+                data_source_name: tp.dataSourceName,
+              })
+              trainResult.value = `训练失败: ${s.error || '未知错误'}`
+            }
+          } catch {
+            // 状态查询失败，继续
+          }
+        }
+      }, 5000)
+    }
+
+    function stopPolling() {
+      if (_pollingInterval) {
+        clearInterval(_pollingInterval)
+        _pollingInterval = null
+        _pollingTaskId = null
+      }
+    }
+
+    function removeFromActive(taskId) {
+      const idx = taskProgresses.value.findIndex(t => t.taskId === taskId)
+      if (idx !== -1) {
+        taskProgresses.value.splice(idx, 1)
+      }
+    }
+
+    function addToHistory(item) {
+      // 去重：避免重复添加
+      const exists = trainHistory.value.find(h => h.task_id === item.task_id)
+      if (!exists) {
+        trainHistory.value.unshift(item)
+        // 最多保留10条
+        if (trainHistory.value.length > 10) {
+          trainHistory.value = trainHistory.value.slice(0, 10)
+        }
+      }
+    }
+
+    async function handleStopTask(tp) {
+      try {
+        await ElMessageBox.confirm(
+          `确认停止训练任务 "${tp.taskId.slice(0, 12)}..." 吗？`,
+          '确认停止',
+          { confirmButtonText: '确认停止', cancelButtonText: '取消', type: 'warning' }
+        )
+      } catch {
+        return // 用户取消
+      }
+      try {
+        const stopRes = await stopTrainTask(tp.taskId)
+        ElMessage.success('训练任务已停止')
+        // 从活动列表移除
+        const taskId = tp.taskId
+        const dataSourceName = tp.dataSourceName
+        const createdAt = tp.createdAt
+        const modelId = (stopRes && stopRes.model_id) || tp.modelId
+        removeFromActive(taskId)
+        addToHistory({
+          status: 'failed',
+          task_id: taskId,
+          model_id: modelId,
+          created_at: createdAt,
+          error_message: '用户手动停止',
+          data_source_name: dataSourceName,
+        })
+        trainResult.value = '训练已停止'
+      } catch (e) {
+        ElMessage.error(`停止任务失败: ${e.message || e}`)
+      }
+    }
+
+    async function handleDeleteHistory(row) {
+      const modelId = row.model_id
+      const taskId = row.task_id
+      console.log('[delete] row:', { modelId, taskId })
+      if (!modelId && !taskId) {
+        ElMessage.warning('该记录缺少标识信息，无法删除')
+        return
+      }
+      try {
+        await ElMessageBox.confirm(
+          '确认删除该训练历史记录吗？',
+          '确认删除',
+          { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' }
+        )
+      } catch {
+        return // 用户取消
+      }
+      try {
+        if (modelId) {
+          console.log('[delete] calling deleteTrainHistory with modelId:', modelId)
+          await deleteTrainHistory(modelId)
+        } else {
+          console.log('[delete] calling deleteTrainHistoryByTask with taskId:', taskId)
+          await deleteTrainHistoryByTask(taskId)
+        }
+        // 成功删除后从本地列表移除
+        const idx = trainHistory.value.findIndex(
+          h => (modelId && h.model_id === modelId) || (taskId && h.task_id === taskId)
+        )
+        console.log('[delete] found in trainHistory at index:', idx)
+        if (idx !== -1) trainHistory.value.splice(idx, 1)
+        ElMessage.success('删除成功')
+        console.log('[delete] after removal, trainHistory length:', trainHistory.value.length)
+      } catch (e) {
+        console.error('[delete] failed:', e)
+        ElMessage.error(`删除失败: ${e.message || e}`)
+      }
+    }
+
     async function handleTrain() {
       if (_trainingLock) return
       _trainingLock = true
       training.value = true
       trainResult.value = ''
-      taskProgress.value = null
-      // 清除正在轮询的任务，让新任务能启动轮询
-      _pollingTaskId = null
+      // 不清除 _pollingTaskId 以防止新的幽灵轮询；只清除 trainResult
       try {
         const tableName = form.value.tableName.trim() || null
         const res = await trainModel(form.value.dataSourceId, form.value.trainDays, tableName)
@@ -278,12 +482,25 @@ export default {
         // 保存 taskId 到 localStorage，用于页面刷新后恢复进度
         localStorage.setItem('lastTrainTaskId', taskId)
 
-        // 先显示一个初始进度
-        taskProgress.value = { percent: 0, phase: '初始化', detail: '任务已提交', status: 'running' }
+        // 找到数据源名称
+        const ds = dataSources.value.find(d => d.id === form.value.dataSourceId)
+        const dsName = ds ? ds.name : `数据源#${form.value.dataSourceId}`
 
-        await pollTaskProgress(taskId)
+        // 加入多任务列表
+        const newTask = {
+          taskId,
+          percent: 0,
+          phase: '初始化',
+          detail: '任务已提交',
+          status: 'running',
+          createdAt: new Date().toLocaleString(),
+          dataSourceName: dsName,
+        }
+        taskProgresses.value.push(newTask)
+
+        // 开始轮询（如果尚未开始）
+        startPolling()
       } catch (e) {
-        taskProgress.value = null
         trainResult.value = `训练失败: ${e.message || e}`
       } finally { training.value = false; _trainingLock = false }
     }
@@ -311,73 +528,54 @@ export default {
       checkRunningTasks()
     })
 
+    onBeforeUnmount(() => {
+      stopPolling()
+    })
+
     async function checkRunningTasks() {
       // 从 API 查询后端 running 的任务
       try {
         const tasksRes = await getMyTrainTasks()
         const list = Array.isArray(tasksRes) ? tasksRes : (tasksRes.data || [])
-        const running = list.find(t => t.status === 'training')
-        if (running && running.task_id) {
-          localStorage.setItem('lastTrainTaskId', running.task_id)
-          trainResult.value = `检测到后台运行中的任务 (${running.task_id.slice(0, 8)}...)，正在恢复进度...`
-          await pollTaskProgress(running.task_id)
+        let hasRunning = false
+        for (const t of list) {
+          if (t.status === 'training' && t.task_id) {
+            hasRunning = true
+            // 检查是否已经在列表中
+            const exists = taskProgresses.value.find(p => p.taskId === t.task_id)
+            if (!exists) {
+              const progress = t.progress || {}
+              taskProgresses.value.push({
+                taskId: t.task_id,
+                modelId: t.model_id,
+                percent: progress.percent || 0,
+                phase: progress.phase || '正在恢复',
+                detail: progress.detail || '查询任务状态...',
+                status: 'running',
+                createdAt: t.created_at ? new Date(t.created_at).toLocaleString() : '',
+                dataSourceName: t.data_source_name || '',
+              })
+            }
+          } else if (t.status === 'ready' || t.status === 'failed') {
+            // 加入历史
+            addToHistory(t)
+          }
+        }
+        if (hasRunning) {
+          trainResult.value = '检测到后台运行中的任务，正在恢复进度...'
+          startPolling()
         }
       } catch {
         // 静默失败
       }
     }
 
-    async function pollTaskProgress(taskId) {
-      // 如果已经有其他任务在轮询，放弃当前请求
-      if (_pollingTaskId && _pollingTaskId !== taskId) {
-        return
-      }
-      _pollingTaskId = taskId
-      taskProgress.value = { percent: 0, phase: '正在恢复', detail: '查询任务状态...', status: 'running' }
-
-      const maxWait = 600000
-      const interval = 1500
-      const start = Date.now()
-
-      while (Date.now() - start < maxWait) {
-        await new Promise(r => setTimeout(r, interval))
-        try {
-          const statusRes = await getTrainStatus(taskId)
-          const s = statusRes.data || statusRes
-
-          if (s.status === 'success') {
-            _pollingTaskId = null
-            localStorage.removeItem('lastTrainTaskId')
-            taskProgress.value = { percent: 100, phase: '完成', detail: s.detail || '', status: 'success' }
-            trainResult.value = `模型训练成功！model_id=${s.model_id}`
-            return
-          }
-          if (s.status === 'failed') {
-            _pollingTaskId = null
-            localStorage.removeItem('lastTrainTaskId')
-            taskProgress.value = null
-            trainResult.value = `训练失败: ${s.error || '未知错误'}`
-            return
-          }
-          taskProgress.value = {
-            percent: s.percent || 0,
-            phase: s.phase || '运行中',
-            detail: s.detail || '',
-            status: 'running',
-          }
-        } catch {
-          // 状态查询失败，继续轮询
-        }
-      }
-      taskProgress.value = null
-      trainResult.value = '训练超时，请稍后重新查询'
-      _pollingTaskId = null
-    }
-
     return {
       form, dataSources, training, predicting, loading, trainResult, taskProgress,
+      taskProgresses, trainHistory,
       forecastData, total, page, pageSize, chartRef, selectedStores, storeOptions,
-      handleTrain, handlePredict, handleRefresh, loadForecast,
+      handleTrain, handlePredict, handleRefresh, loadForecast, handleStopTask,
+      handleDeleteHistory,
     }
   }
 }
@@ -403,17 +601,30 @@ export default {
   display: flex;
   justify-content: flex-end;
 }
-.progress-card {
+.progress-list {
   margin-bottom: 16px;
+}
+.progress-card {
+  margin-bottom: 12px;
 }
 .progress-body {
   padding: 4px 0;
 }
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
 .progress-info {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 8px;
+  flex: 1;
   font-size: 14px;
+  margin-right: 12px;
+}
+.progress-actions {
+  flex-shrink: 0;
 }
 .progress-phase {
   color: var(--el-text-color-primary);
@@ -426,5 +637,13 @@ export default {
   margin-top: 6px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+.progress-time {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+.history-card {
+  margin-bottom: 16px;
 }
 </style>

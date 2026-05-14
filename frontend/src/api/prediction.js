@@ -24,6 +24,18 @@ export function getTrainStatus(taskId) {
   return request.get(`/prediction/train/status/${taskId}`)
 }
 
-export function getMyTrainTasks() {
-  return request.get('/prediction/train/tasks')
+export function getMyTrainTasks(withProgress = true) {
+  return request.get('/prediction/train/tasks', { params: { with_progress: withProgress, _t: Date.now() } })
+}
+
+export function stopTrainTask(taskId) {
+  return request.post(`/prediction/train/${taskId}/stop`)
+}
+
+export function deleteTrainHistory(modelId) {
+  return request.delete(`/prediction/train/${modelId}/history`)
+}
+
+export function deleteTrainHistoryByTask(taskId) {
+  return request.delete(`/prediction/train/by-task/${taskId}/history`)
 }

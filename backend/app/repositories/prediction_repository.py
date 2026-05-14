@@ -49,6 +49,7 @@ class PredictionModelRepository:
             .filter(
                 PredictionModel.created_by == user_id,
                 PredictionModel.status == "training",
+                PredictionModel.deleted_at.is_(None),
             )
             .order_by(PredictionModel.id.desc())
             .all()
