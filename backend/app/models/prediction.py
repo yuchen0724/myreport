@@ -36,3 +36,5 @@ class PredictionModel(Base):
     error_message = Column(Text, nullable=True, comment="训练失败原因")
     created_at = Column(DateTime, default=datetime.utcnow)
     trained_at = Column(DateTime, nullable=True, comment="训练完成时间")
+    task_id = Column(String(64), nullable=True, index=True, comment="Celery 任务 ID")
+    created_by = Column(Integer, nullable=True, comment="发起训练的用户 ID")

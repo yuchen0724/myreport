@@ -42,6 +42,18 @@ class PredictionModelRepository:
             q = q.filter(PredictionModel.data_source_id == data_source_id)
         return q.order_by(PredictionModel.id.desc()).offset(skip).limit(limit).all()
 
+    def get_running_by_user(self, user_id: int) -> List[PredictionModel]:
+        """获取用户正在进行的训练任务"""
+        return (
+            self.db.query(PredictionModel)
+            .filter(
+                PredictionModel.created_by == user_id,
+                PredictionModel.status == "training",
+            )
+            .order_by(PredictionModel.id.desc())
+            .all()
+        )
+
 
 class PredictionResultRepository:
     def __init__(self, db: Session):

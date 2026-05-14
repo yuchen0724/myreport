@@ -35,15 +35,38 @@
       </el-form>
     </el-card>
 
-    <!-- 训练结果显示 -->
-    <el-alert
-      v-if="trainResult"
-      :title="trainResult"
-      :type="trainResult.includes('成功') ? 'success' : 'error'"
-      show-icon
-      closable
-      style="margin-bottom: 16px"
-    />
+    <!-- 训练进度显示 -->
+    <el-card v-if="taskProgress || trainResult" class="progress-card" shadow="never">
+      <div class="progress-body">
+        <!-- 有进度时显示进度条 -->
+        <template v-if="taskProgress">
+          <div class="progress-info">
+            <span class="progress-phase">{{ taskProgress.phase }}</span>
+            <span class="progress-percent">{{ taskProgress.percent }}%</span>
+          </div>
+          <el-progress
+            :percentage="taskProgress.percent"
+            :status="taskProgress.status === 'success' ? 'success' : taskProgress.status === 'failed' ? 'exception' : undefined"
+            :stroke-width="16"
+            :text-inside="false"
+            striped
+            striped-flow
+            :duration="6"
+          />
+          <div class="progress-detail">{{ taskProgress.detail }}</div>
+        </template>
+
+        <!-- 训练结束提示（覆盖进度条） -->
+        <el-alert
+          v-if="trainResult"
+          :title="trainResult"
+          :type="trainResult.includes('失败') || trainResult.includes('超时') ? 'error' : trainResult.includes('已提交') ? 'info' : 'success'"
+          show-icon
+          closable
+          @close="trainResult = ''; taskProgress = null"
+        />
+      </div>
+    </el-card>
 
     <!-- 预测结果图表 -->
     <el-card v-if="forecastData.length > 0" class="chart-card" shadow="never">
@@ -113,7 +136,7 @@
 <script>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { Refresh, TrendCharts } from '@element-plus/icons-vue'
-import { trainModel, runPredict, getForecast } from '@/api/prediction'
+import { trainModel, runPredict, getForecast, getTrainStatus, getMyTrainTasks } from '@/api/prediction'
 import { getDataSourceList } from '@/api/data_source'
 import * as echarts from 'echarts'
 
@@ -132,6 +155,9 @@ export default {
     const predicting = ref(false)
     const loading = ref(false)
     const trainResult = ref('')
+    const taskProgress = ref(null)
+    let _pollingTaskId = null  // 防重复轮询标记
+    let _trainingLock = false  // 防重复提交训练
     const forecastData = ref([])
     const total = ref(0)
     const page = ref(1)
@@ -233,15 +259,33 @@ export default {
     watch(selectedStores, () => nextTick(renderChart), { deep: true })
 
     async function handleTrain() {
+      if (_trainingLock) return
+      _trainingLock = true
       training.value = true
       trainResult.value = ''
+      taskProgress.value = null
+      // 清除正在轮询的任务，让新任务能启动轮询
+      _pollingTaskId = null
       try {
         const tableName = form.value.tableName.trim() || null
         const res = await trainModel(form.value.dataSourceId, form.value.trainDays, tableName)
-        trainResult.value = '模型训练成功！'
+        const taskId = res.task_id || (res.data && res.data.task_id)
+        if (!taskId) {
+          trainResult.value = '模型训练成功！'
+          return
+        }
+
+        // 保存 taskId 到 localStorage，用于页面刷新后恢复进度
+        localStorage.setItem('lastTrainTaskId', taskId)
+
+        // 先显示一个初始进度
+        taskProgress.value = { percent: 0, phase: '初始化', detail: '任务已提交', status: 'running' }
+
+        await pollTaskProgress(taskId)
       } catch (e) {
+        taskProgress.value = null
         trainResult.value = `训练失败: ${e.message || e}`
-      } finally { training.value = false }
+      } finally { training.value = false; _trainingLock = false }
     }
 
     async function handlePredict() {
@@ -264,10 +308,74 @@ export default {
 
     onMounted(() => {
       loadDataSources()
+      checkRunningTasks()
     })
 
+    async function checkRunningTasks() {
+      // 从 API 查询后端 running 的任务
+      try {
+        const tasksRes = await getMyTrainTasks()
+        const list = Array.isArray(tasksRes) ? tasksRes : (tasksRes.data || [])
+        const running = list.find(t => t.status === 'training')
+        if (running && running.task_id) {
+          localStorage.setItem('lastTrainTaskId', running.task_id)
+          trainResult.value = `检测到后台运行中的任务 (${running.task_id.slice(0, 8)}...)，正在恢复进度...`
+          await pollTaskProgress(running.task_id)
+        }
+      } catch {
+        // 静默失败
+      }
+    }
+
+    async function pollTaskProgress(taskId) {
+      // 如果已经有其他任务在轮询，放弃当前请求
+      if (_pollingTaskId && _pollingTaskId !== taskId) {
+        return
+      }
+      _pollingTaskId = taskId
+      taskProgress.value = { percent: 0, phase: '正在恢复', detail: '查询任务状态...', status: 'running' }
+
+      const maxWait = 600000
+      const interval = 1500
+      const start = Date.now()
+
+      while (Date.now() - start < maxWait) {
+        await new Promise(r => setTimeout(r, interval))
+        try {
+          const statusRes = await getTrainStatus(taskId)
+          const s = statusRes.data || statusRes
+
+          if (s.status === 'success') {
+            _pollingTaskId = null
+            localStorage.removeItem('lastTrainTaskId')
+            taskProgress.value = { percent: 100, phase: '完成', detail: s.detail || '', status: 'success' }
+            trainResult.value = `模型训练成功！model_id=${s.model_id}`
+            return
+          }
+          if (s.status === 'failed') {
+            _pollingTaskId = null
+            localStorage.removeItem('lastTrainTaskId')
+            taskProgress.value = null
+            trainResult.value = `训练失败: ${s.error || '未知错误'}`
+            return
+          }
+          taskProgress.value = {
+            percent: s.percent || 0,
+            phase: s.phase || '运行中',
+            detail: s.detail || '',
+            status: 'running',
+          }
+        } catch {
+          // 状态查询失败，继续轮询
+        }
+      }
+      taskProgress.value = null
+      trainResult.value = '训练超时，请稍后重新查询'
+      _pollingTaskId = null
+    }
+
     return {
-      form, dataSources, training, predicting, loading, trainResult,
+      form, dataSources, training, predicting, loading, trainResult, taskProgress,
       forecastData, total, page, pageSize, chartRef, selectedStores, storeOptions,
       handleTrain, handlePredict, handleRefresh, loadForecast,
     }
@@ -294,5 +402,29 @@ export default {
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+.progress-card {
+  margin-bottom: 16px;
+}
+.progress-body {
+  padding: 4px 0;
+}
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+.progress-phase {
+  color: var(--el-text-color-primary);
+  font-weight: 500;
+}
+.progress-percent {
+  color: var(--el-text-color-secondary);
+}
+.progress-detail {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 </style>

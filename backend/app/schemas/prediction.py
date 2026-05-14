@@ -21,6 +21,7 @@ class TrainResponse(BaseModel):
     status: str
     metrics: Optional[Dict[str, Any]] = None
     message: str
+    task_id: Optional[str] = Field(None, description="异步任务 ID，可用于查询训练进度")
 
 
 class PredictRequest(BaseModel):
@@ -59,3 +60,13 @@ class ForecastItem(BaseModel):
 class ForecastListResponse(BaseModel):
     items: List[ForecastItem]
     total: int
+
+
+class TaskStatusResponse(BaseModel):
+    task_id: str
+    status: str  # pending / running / success / failed / unknown
+    model_id: Optional[int] = None
+    error: Optional[str] = None
+    percent: Optional[int] = None
+    phase: Optional[str] = None
+    detail: Optional[str] = None

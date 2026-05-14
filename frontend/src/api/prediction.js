@@ -19,3 +19,11 @@ export function runPredict(dataSourceId, forecastDays, tableName) {
 export function getForecast(params) {
   return request.get('/prediction/forecast', { params })
 }
+
+export function getTrainStatus(taskId) {
+  return request.get(`/prediction/train/status/${taskId}`)
+}
+
+export function getMyTrainTasks() {
+  return request.get('/prediction/train/tasks')
+}

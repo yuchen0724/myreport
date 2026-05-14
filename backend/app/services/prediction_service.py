@@ -37,33 +37,61 @@ class PredictionService:
         self.model_dir = settings.prediction_model_dir
         os.makedirs(self.model_dir, exist_ok=True)
 
-    def _fetch_history_data(self, ds_id: int, days: int, table_name: str = None) -> pd.DataFrame:
-        """从 Doris 拉取历史销售数据"""
+    def _fetch_history_data(self, ds_id: int, days: int, table_name: str = None,
+                           progress_callback: callable = None) -> pd.DataFrame:
+        """从 Doris 按天分页拉取历史销售数据，避免单次查询内存/超时问题。
+        
+        每页拉取 1 天数据，在服务器端排序后插入结果列表。
+        最终 pd.concat 合并为完整 DataFrame（特征工程内部会重新排序）。
+        
+        Args:
+            progress_callback: 可选回调 fn(current_page, total_pages, current_rows)
+                              用于更新进度到 Redis
+        """
         ds = self.ds_repo.get_by_id(ds_id)
         if not ds:
             raise ValueError(f"数据源 {ds_id} 不存在")
 
         end_date = date.today()
         start_date = end_date - timedelta(days=days)
-        start_str = start_date.strftime("%Y%m%d")
-        end_str = end_date.strftime("%Y%m%d")
-
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
-
-        sql = f"""\
-            SELECT dt, store_code, matnr, {TARGET_COL}
-            FROM {table}
-            WHERE dt >= {start_str} AND dt <= {end_str}
-              AND exclude_flag != 1
-              AND (service_flag != 1 OR service_flag IS NULL)
-              AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
-            ORDER BY store_code, matnr, dt
-        """
-
         from app.utils.db_executor import execute_query
-        rows, columns = execute_query(ds, sql)
 
-        df = pd.DataFrame(rows, columns=columns)
+        # 先获取总天数作为批次数量
+        total_pages = (end_date - start_date).days
+        batches = []
+        current = start_date
+        page_no = 0
+        while current < end_date:
+            s = current.strftime("%Y%m%d")
+            sql = f"""\
+                SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
+                    dt, store_code, matnr, {TARGET_COL}
+                FROM {table}
+                WHERE dt = {s}
+                  AND exclude_flag != 1
+                  AND (service_flag != 1 OR service_flag IS NULL)
+                  AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
+                ORDER BY store_code, matnr, dt
+            """
+            rows, columns = execute_query(ds, sql)
+            if rows:
+                batch_df = pd.DataFrame(rows, columns=columns)
+                batches.append(batch_df)
+
+            page_no += 1
+            # 日志记录每一页拉取情况
+            import logging as _log
+            _log.getLogger(__name__).info(f"[拉取] page={page_no}/{total_pages}, rows={len(rows) if rows else 0}")
+            if progress_callback:
+                progress_callback(page_no, total_pages, len(rows) if rows else 0)
+
+            current += timedelta(days=1)
+
+        if not batches:
+            return pd.DataFrame(columns=["dt", "store_code", "matnr", TARGET_COL])
+
+        df = pd.concat(batches, ignore_index=True)
         df[TARGET_COL] = pd.to_numeric(df[TARGET_COL], errors="coerce").fillna(0)
         # 金额分转元
         df[TARGET_COL] = df[TARGET_COL] / 100.0

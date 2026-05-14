@@ -6,6 +6,9 @@ from app.models.proxy_server import ProxyServer
 from app.models.query_history import QueryHistory
 from app.models.export_task import ExportTask
 from app.models.associations import role_permissions
+from app.models.template_version import TemplateVersion
+from app.models.template_share import TemplateShare
+from app.models.template import Template
 from app.models.dashboard_widget import DashboardWidgetConfig
 from app.models.menu import Menu
 from app.models.prediction import PredictionResult, PredictionModel
