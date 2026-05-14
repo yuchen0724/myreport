@@ -34,10 +34,10 @@ def execute_query(ds, sql: str) -> tuple:
     max_retries = 2
     for attempt in range(max_retries):
         try:
-            with engine.connect().execution_options(stream_results=True) as conn:
+            with engine.connect() as conn:
                 result = conn.execute(text(sql))
                 columns = list(result.keys())
-                # 分批拉取，避免 OOM（stream_results=True 确保 pymysql 游标分批返回）
+                # 分批拉取，避免 OOM
                 rows = []
                 BATCH_SIZE = 100000
                 while True:

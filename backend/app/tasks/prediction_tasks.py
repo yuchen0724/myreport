@@ -2,10 +2,12 @@
 
 import json
 import logging
+import lightgbm as lgb
 from typing import Optional
 from app.celery_app import celery_app
 from app.core.database import SessionLocal
 from app.services.prediction_service import PredictionService
+from app.utils.feature_engineering import get_feature_columns
 
 logger = logging.getLogger(__name__)
 
@@ -116,43 +118,18 @@ def _train_with_progress(
         )
         _update_progress(task_id, _PHASE_INIT, f"模型记录已创建，id={model_record.id}", model_record.id)
 
-        _update_progress(task_id, _PHASE_FETCH, f"数据源={data_source_id}，天数={train_days}")
+        _update_progress(task_id, _PHASE_FETCH, f"数据源={data_source_id}，天数={train_days}", model_record.id)
 
         # 定义分页拉取进度回调
         def _fetch_page_progress(page, total, page_rows):
-            pct = min(int(page / total * 30), 30)  # 拉取阶段占 0-30%
+            pct = 15 + int(page / total * 15)  # 拉取阶段 15-30%
             _update_progress(
                 task_id, _PHASE_FETCH,
-                f"拉取中 {page}/{total} 天 (本页 {page_rows} 行)",
+                f"逐店拉取中 {page}/{total} 店 (本店 {page_rows} 行)",
                 model_record.id, percent=pct
             )
 
-        df = service._fetch_history_data(
-            ds.id, train_days, table_name=table_name,
-            progress_callback=_fetch_page_progress,
-        )
-        if len(df) < service.settings.prediction_min_history_days * 10:
-            raise ValueError(
-                f"历史数据不足({len(df)}行)，需要至少 "
-                f"{service.settings.prediction_min_history_days * 10} 行"
-            )
-        _update_progress(task_id, _PHASE_FETCH, f"已拉取 {len(df)} 行数据", model_record.id)
-
-        from app.utils.feature_engineering import build_features_from_history, get_feature_columns
-
-        _update_progress(task_id, _PHASE_FEATURE, "构造时间特征")
-        df_feat = build_features_from_history(df)
         feature_cols = get_feature_columns()
-        df_feat = df_feat.dropna(subset=feature_cols).reset_index(drop=True)
-        _update_progress(task_id, _PHASE_FEATURE, f"特征维度={len(feature_cols)}，样本数={len(df_feat)}", model_record.id)
-
-        import lightgbm as lgb
-        import numpy as np
-
-        _update_progress(task_id, _PHASE_TRAINING, "LightGBM: n_estimators=500, max_depth=8")
-        X = df_feat[feature_cols].values
-        y = df_feat["actual_sale_untaxed_amt"].values
-
         model = lgb.LGBMRegressor(
             n_estimators=500,
             learning_rate=0.05,
@@ -163,11 +140,14 @@ def _train_with_progress(
             random_state=42,
             verbose=-1,
         )
-        model.fit(X, y)
 
-        y_pred = model.predict(X)
-        mae = float(np.mean(np.abs(y - y_pred)))
-        rmse = float(np.sqrt(np.mean((y - y_pred) ** 2)))
+        # 增量训练：边拉取边喂数据，不累积全量 DataFrame
+        model, _, total_rows, train_start, train_end, mae, rmse = service._fetch_and_train_incremental(
+            ds.id, train_days, model, feature_cols,
+            table_name=table_name,
+            progress_callback=_fetch_page_progress,
+        )
+        _update_progress(task_id, _PHASE_FETCH, f"增量拉取完成，共 {total_rows} 行训练数据", model_record.id)
         _update_progress(task_id, _PHASE_TRAINING, f"MAE={mae:.2f}, RMSE={rmse:.2f}", model_record.id)
 
         import joblib
@@ -183,9 +163,9 @@ def _train_with_progress(
             "ready",
             model_path=model_path,
             feature_count=len(feature_cols),
-            train_start_date=df["dt"].min().date(),
-            train_end_date=df["dt"].max().date(),
-            train_row_count=len(df_feat),
+            train_start_date=train_start,
+            train_end_date=train_end,
+            train_row_count=total_rows,
             model_metrics={"mae": mae, "rmse": rmse},
             trained_at=datetime.utcnow(),
         )

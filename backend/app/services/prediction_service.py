@@ -97,6 +97,122 @@ class PredictionService:
         df[TARGET_COL] = df[TARGET_COL] / 100.0
         return df
 
+    def _fetch_and_train_incremental(self, ds_id: int, days: int, model, feature_cols,
+                                      table_name: str = None, progress_callback: callable = None) -> tuple:
+        """按 store_code 分批拉取增量训练 - 峰值内存约一个门店的数据
+
+        先获取所有门店列表，逐店拉取历史数据、构造特征、增量训练。
+        每店数据量约几十行/天 × 365天 ≈ 万行级别，不会 OOM。
+        """
+        ds = self.ds_repo.get_by_id(ds_id)
+        if not ds:
+            raise ValueError(f"数据源 {ds_id} 不存在")
+
+        end_date = date.today()
+        start_date = end_date - timedelta(days=days)
+        table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
+        from app.utils.db_executor import execute_query
+        from app.utils.feature_engineering import build_features_from_history
+
+        # 1. 获取所有门店列表
+        store_sql = f"SELECT DISTINCT store_code FROM {table} WHERE dt >= '{start_date.strftime('%Y%m%d')}' AND exclude_flag != 1"
+        store_rows, _ = execute_query(ds, store_sql)
+        store_codes = [r[0] for r in store_rows] if store_rows else []
+        if not store_codes:
+            raise ValueError("未找到门店数据")
+
+        total_stores = len(store_codes)
+        store_page_no = 0
+        total_rows = 0
+        first_fit = True
+        train_start = start_date
+        train_end = end_date
+        accum_buffer = None
+
+        for store_code in store_codes:
+            store_page_no += 1
+
+            # 2. 拉取该店 365 天的全部历史数据（单店数据量很小，无需分页）
+            store_sql = f"""\
+                SELECT /*+ SET_VAR(exec_mem_limit=536870912, query_timeout=600) */
+                    dt, store_code, matnr, {TARGET_COL}
+                FROM {table}
+                WHERE dt >= '{start_date.strftime('%Y%m%d')}' AND dt < '{end_date.strftime('%Y%m%d')}'
+                  AND store_code = '{store_code}'
+                  AND exclude_flag != 1
+                  AND (service_flag != 1 OR service_flag IS NULL)
+                  AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
+                ORDER BY store_code, matnr, dt
+            """
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[训练] 门店 {store_page_no}/{total_stores} store_code={store_code}, SQL: {store_sql.replace(chr(10), ' ').strip()}")
+            rows, cols = execute_query(ds, store_sql)
+            if not rows:
+                continue
+
+            chunk_df = pd.DataFrame(rows, columns=cols)
+            chunk_df[TARGET_COL] = pd.to_numeric(chunk_df[TARGET_COL], errors="coerce").fillna(0)
+            chunk_df[TARGET_COL] = chunk_df[TARGET_COL] / 100.0
+
+            # 需要至少 28 天数据才能构造 lag 特征
+            unique_days = chunk_df["dt"].nunique()
+            if unique_days < 28:
+                continue
+
+            # 跳过数据量过大的门店（避免特征工程耗时过长）
+            if len(chunk_df) > 500000:
+                # 采样：每个门店最多保留 5000 个 SKU（最近 40 天的完整数据）
+                sku_counts = chunk_df.groupby("matnr")["dt"].nunique()
+                top_skus = sku_counts.nlargest(5000).index.tolist()
+                chunk_df = chunk_df[chunk_df["matnr"].isin(top_skus)]
+                if len(chunk_df) == 0:
+                    continue
+
+            # 3. 构造特征
+            feat = build_features_from_history(chunk_df)
+            feat = feat.dropna(subset=feature_cols)
+
+            if len(feat) == 0:
+                continue
+
+            # 4. 增量训练
+            X = feat[feature_cols].values
+            y = feat[TARGET_COL].values
+
+            if first_fit:
+                model.fit(X, y)
+                first_fit = False
+                total_rows += len(feat)
+            else:
+                model.fit(X, y, init_model=model)
+                total_rows += len(feat)
+
+            if progress_callback and store_page_no % 1 == 0:
+                progress_callback(store_page_no, total_stores, len(rows))
+
+        if total_rows == 0:
+            raise ValueError("训练数据不足（无门店满足 28 天以上历史数据）")
+
+        # 5. 评估
+        import numpy as np
+        mae_val, rmse_val = 0.0, 0.0
+        # 用最后 5 家门店数据做评估
+        last_chunk = locals().get("chunk_df")
+        if last_chunk is not None and len(last_chunk) > 0:
+            try:
+                eval_feat = build_features_from_history(last_chunk.tail(7).copy())
+                eval_feat = eval_feat.dropna(subset=feature_cols)
+                if len(eval_feat) > 0:
+                    y_pred = model.predict(eval_feat[feature_cols].values)
+                    y_true = eval_feat[TARGET_COL].values
+                    mae_val = float(np.mean(np.abs(y_true - y_pred)))
+                    rmse_val = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+            except Exception:
+                pass
+
+        return (model, feature_cols, total_rows, train_start, train_end, mae_val, rmse_val)
+
     def train(self, ds_id: int, train_days: int = None, table_name: str = None) -> int:
         """
         训练模型。
