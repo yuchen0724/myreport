@@ -189,9 +189,9 @@
             >
               <el-option
                 v-for="s in filterStoreOptions"
-                :key="s"
-                :label="s"
-                :value="s"
+                :key="s.value"
+                :label="s.text"
+                :value="s.value"
               />
             </el-select>
             <el-date-picker
@@ -395,40 +395,13 @@ export default {
       return true
     }
 
-    // 综合所有前端筛选（已包含 el-table column filter + 商品编码输入框）
+    // 商品编码搜索（独立于 el-table column filter）
     const filteredForecastData = computed(() => {
       let data = forecastData.value
-
-      // 门店 column filter
-      if (filterStoreActive.value) {
-        data = data.filter(d => filterStore(filterStoreActive.value, d))
-      }
-
-      // 日期 column filter
-      if (filterDateActive.value) {
-        data = data.filter(d => filterDate(filterDateActive.value, d))
-      }
-
-      // 商品编码搜索框模糊筛选
       if (matnrSearchInput.value) {
         const kw = matnrSearchInput.value.toLowerCase()
         data = data.filter(d => d.matnr.toLowerCase().includes(kw))
       }
-
-      // 数值列 column filter
-      Object.entries(filterValueRangeActive.value).forEach(([prop, value]) => {
-        if (value) {
-          const colEl = { property: prop }
-          data = data.filter(d => filterValue(value, d, colEl))
-        }
-      })
-
-      // 商品编码输入框搜索
-      if (filterMatnr.value) {
-        const keyword = filterMatnr.value.toLowerCase()
-        data = data.filter(d => d.matnr.toLowerCase().includes(keyword))
-      }
-
       return data
     })
     let chartInstance = null
