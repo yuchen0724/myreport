@@ -219,16 +219,22 @@
           :filter-method="filterStore"
           filter-placement="bottom"
         />
-        <el-table-column prop="matnr" label="商品编码" width="140">
+        <el-table-column
+          prop="matnr"
+          label="商品编码"
+          width="150"
+        >
           <template #header>
             <el-input
-              v-model="filterMatnr"
-              placeholder="搜索商品编码"
+              v-model="matnrSearchInput"
+              placeholder="输入编码搜索..."
               size="small"
               clearable
-              @input="onMatnrFilterChange"
+              @input="onMatnrSearchInput"
+              style="width: 130px"
             />
           </template>
+          <template #default="{ row }">{{ row.matnr }}</template>
         </el-table-column>
         <el-table-column
           prop="forecast_date"
@@ -339,7 +345,7 @@ export default {
     // 明细表筛选
     const filterStoreCode = ref(null)
     const filterDateRange = ref(null)
-    const filterMatnr = ref('')
+    const matnrSearchInput = ref('')
     const filterStoreActive = ref(null)
     const filterDateActive = ref(null)
     const filterValueRangeActive = ref({ predicted_value: null, lower_bound: null, upper_bound: null })
@@ -365,6 +371,8 @@ export default {
       return row.forecast_date && row.forecast_date.startsWith(value)
     }
 
+    function onMatnrSearchInput() {}
+
     const valueFilterOptions = [
       { text: '0 ~ 1,000', value: '0-1000' },
       { text: '1,000 ~ 10,000', value: '1000-10000' },
@@ -387,8 +395,6 @@ export default {
       return true
     }
 
-    function onMatnrFilterChange() {}
-
     // 综合所有前端筛选（已包含 el-table column filter + 商品编码输入框）
     const filteredForecastData = computed(() => {
       let data = forecastData.value
@@ -401,6 +407,12 @@ export default {
       // 日期 column filter
       if (filterDateActive.value) {
         data = data.filter(d => filterDate(filterDateActive.value, d))
+      }
+
+      // 商品编码搜索框模糊筛选
+      if (matnrSearchInput.value) {
+        const kw = matnrSearchInput.value.toLowerCase()
+        data = data.filter(d => d.matnr.toLowerCase().includes(kw))
       }
 
       // 数值列 column filter
@@ -711,8 +723,9 @@ export default {
       form, dataSources, trainAndPredictLoading, loading, resultMsg, taskProgress,
       taskProgresses, trainHistory, forecastHistory,
       forecastData, total, page, pageSize, chartRef, selectedStores, storeOptions,
-      filterStoreCode, filterDateRange, filterStoreOptions, filterStore, filterMatnr, filteredForecastData, onMatnrFilterChange,
+      filterStoreCode, filterDateRange, filterStoreOptions, filterStore, filteredForecastData,
       filterDate, filterDateActive, dateFilterOptions, valueFilterOptions, filterValue, filterValueRangeActive, filterStoreActive,
+      matnrSearchInput, onMatnrSearchInput,
       handleTrainAndPredict, handleRefresh, loadForecast, handleStopTask,
       handleDeleteProgress, handleDeleteHistory, onDataSourceChange,
     }
