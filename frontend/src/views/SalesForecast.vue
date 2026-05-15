@@ -210,17 +210,62 @@
           </div>
         </div>
       </template>
-      <el-table :data="forecastData" border stripe v-loading="loading" style="width: 100%">
-        <el-table-column prop="store_code" label="门店" width="100" />
-        <el-table-column prop="matnr" label="商品编码" width="120" />
-        <el-table-column prop="forecast_date" label="预测日期" width="120" />
-        <el-table-column prop="predicted_value" label="预测值" width="120">
+      <el-table :data="filteredForecastData" border stripe v-loading="loading" style="width: 100%">
+        <el-table-column
+          prop="store_code"
+          label="门店"
+          width="100"
+          :filters="filterStoreOptions"
+          :filter-method="filterStore"
+          filter-placement="bottom"
+        />
+        <el-table-column prop="matnr" label="商品编码" width="140">
+          <template #header>
+            <el-input
+              v-model="filterMatnr"
+              placeholder="搜索商品编码"
+              size="small"
+              clearable
+              @input="onMatnrFilterChange"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="forecast_date"
+          label="预测日期"
+          width="130"
+          :filters="dateFilterOptions"
+          :filter-method="filterDate"
+          filter-placement="bottom"
+        />
+        <el-table-column
+          prop="predicted_value"
+          label="预测值"
+          width="130"
+          :filters="valueFilterOptions"
+          :filter-method="filterValue"
+          filter-placement="bottom"
+        >
           <template #default="{ row }">{{ row.predicted_value?.toFixed(2) }}</template>
         </el-table-column>
-        <el-table-column prop="lower_bound" label="下限" width="120">
+        <el-table-column
+          prop="lower_bound"
+          label="下限"
+          width="130"
+          :filters="valueFilterOptions"
+          :filter-method="filterValue"
+          filter-placement="bottom"
+        >
           <template #default="{ row }">{{ row.lower_bound !== null ? row.lower_bound.toFixed(2) : '-' }}</template>
         </el-table-column>
-        <el-table-column prop="upper_bound" label="上限" width="120">
+        <el-table-column
+          prop="upper_bound"
+          label="上限"
+          width="130"
+          :filters="valueFilterOptions"
+          :filter-method="filterValue"
+          filter-placement="bottom"
+        >
           <template #default="{ row }">{{ row.upper_bound !== null ? row.upper_bound.toFixed(2) : '-' }}</template>
         </el-table-column>
       </el-table>
@@ -294,8 +339,85 @@ export default {
     // 明细表筛选
     const filterStoreCode = ref(null)
     const filterDateRange = ref(null)
+    const filterMatnr = ref('')
+    const filterStoreActive = ref(null)
+    const filterDateActive = ref(null)
+    const filterValueRangeActive = ref({ predicted_value: null, lower_bound: null, upper_bound: null })
+
     const filterStoreOptions = computed(() => {
-      return [...new Set(forecastData.value.map(d => d.store_code))]
+      const stores = [...new Set(forecastData.value.map(d => d.store_code))]
+      return stores.map(s => ({ text: s, value: s }))
+    })
+
+    function filterStore(value, row) {
+      filterStoreActive.value = value
+      return row.store_code === value
+    }
+
+    const dateFilterOptions = computed(() => {
+      const dates = [...new Set(forecastData.value.map(d => d.forecast_date))]
+      const months = [...new Set(dates.map(d => d.slice(0, 7)))]
+      return months.sort().reverse().map(m => ({ text: m, value: m }))
+    })
+
+    function filterDate(value, row) {
+      filterDateActive.value = value
+      return row.forecast_date && row.forecast_date.startsWith(value)
+    }
+
+    const valueFilterOptions = [
+      { text: '0 ~ 1,000', value: '0-1000' },
+      { text: '1,000 ~ 10,000', value: '1000-10000' },
+      { text: '10,000 ~ 100,000', value: '10000-100000' },
+      { text: '> 100,000', value: '100000-' },
+    ]
+
+    function filterValue(value, row, col) {
+      const prop = col.property
+      const v = row[prop]
+      if (v == null) return false
+      const active = { ...filterValueRangeActive.value }
+      active[prop] = value
+      filterValueRangeActive.value = active
+
+      if (value === '0-1000') return v >= 0 && v <= 1000
+      if (value === '1000-10000') return v >= 1000 && v <= 10000
+      if (value === '10000-100000') return v >= 10000 && v <= 100000
+      if (value === '100000-') return v >= 100000
+      return true
+    }
+
+    function onMatnrFilterChange() {}
+
+    // 综合所有前端筛选（已包含 el-table column filter + 商品编码输入框）
+    const filteredForecastData = computed(() => {
+      let data = forecastData.value
+
+      // 门店 column filter
+      if (filterStoreActive.value) {
+        data = data.filter(d => filterStore(filterStoreActive.value, d))
+      }
+
+      // 日期 column filter
+      if (filterDateActive.value) {
+        data = data.filter(d => filterDate(filterDateActive.value, d))
+      }
+
+      // 数值列 column filter
+      Object.entries(filterValueRangeActive.value).forEach(([prop, value]) => {
+        if (value) {
+          const colEl = { property: prop }
+          data = data.filter(d => filterValue(value, d, colEl))
+        }
+      })
+
+      // 商品编码输入框搜索
+      if (filterMatnr.value) {
+        const keyword = filterMatnr.value.toLowerCase()
+        data = data.filter(d => d.matnr.toLowerCase().includes(keyword))
+      }
+
+      return data
     })
     let chartInstance = null
 
@@ -589,7 +711,8 @@ export default {
       form, dataSources, trainAndPredictLoading, loading, resultMsg, taskProgress,
       taskProgresses, trainHistory, forecastHistory,
       forecastData, total, page, pageSize, chartRef, selectedStores, storeOptions,
-      filterStoreCode, filterDateRange, filterStoreOptions,
+      filterStoreCode, filterDateRange, filterStoreOptions, filterStore, filterMatnr, filteredForecastData, onMatnrFilterChange,
+      filterDate, filterDateActive, dateFilterOptions, valueFilterOptions, filterValue, filterValueRangeActive, filterStoreActive,
       handleTrainAndPredict, handleRefresh, loadForecast, handleStopTask,
       handleDeleteProgress, handleDeleteHistory, onDataSourceChange,
     }
