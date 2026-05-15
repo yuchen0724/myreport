@@ -117,7 +117,7 @@ start_celery() {
     if pgrep -f "celery.*worker" > /dev/null; then
         echo -e "${YELLOW}Celery Worker 已在运行${NC}"
     else
-        nohup $CELERY_BIN -A celery_config worker --loglevel=info --concurrency=2 -Q export,celery \
+        nohup $CELERY_BIN -A celery_config worker --loglevel=info --concurrency=1 -Q export,celery \
             > "$LOG_DIR/celery.log" 2>&1 &
         echo $! > $CELERY_PID
         

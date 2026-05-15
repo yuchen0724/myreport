@@ -1,7 +1,6 @@
 """销售预测服务 - LightGBM 训练与推理"""
 
-import os
-import json
+import warnings
 import logging
 import numpy as np
 import pandas as pd
@@ -243,7 +242,7 @@ class PredictionService:
                 eval_feat = build_features_from_history(last_chunk.tail(7).copy())
                 eval_feat = eval_feat.dropna(subset=feature_cols)
                 if len(eval_feat) > 0:
-                    y_pred = model.predict(eval_feat[feature_cols].values)
+                    y_pred = model.predict(eval_feat[feature_cols])
                     y_true = eval_feat[TARGET_COL].values
                     mae_val = float(np.mean(np.abs(y_true - y_pred)))
                     rmse_val = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
@@ -393,7 +392,8 @@ class PredictionService:
                 .reset_index()
             )
             
-            current_features = sku_latest[feature_cols].values
+            # 用 DataFrame 切片（保留列名），避免 sklearn feature names warning
+            current_features = sku_latest[feature_cols]
             
             for i in range(forecast_days):
                 preds = model.predict(current_features)
@@ -411,7 +411,8 @@ class PredictionService:
                 
                 # 简易滚动：用预测值更新 lag_1 特征
                 if i < forecast_days - 1:
-                    current_features[:, feature_cols.index("lag_1")] = preds
+                    current_features = current_features.copy()
+                    current_features["lag_1"] = preds
             
             if progress_callback:
                 progress_callback(model_record.id, store_idx + 1, total_stores, store_code)
@@ -466,7 +467,7 @@ class PredictionService:
                 .reset_index()
             )
 
-            current_features = latest[feature_cols].values
+            current_features = latest[feature_cols]
 
             for i in range(forecast_days):
                 preds = model.predict(current_features)
@@ -484,7 +485,8 @@ class PredictionService:
 
                 # 简易滚动：用预测值更新 lag_1 特征
                 if i < forecast_days - 1:
-                    current_features[:, feature_cols.index("lag_1")] = preds
+                    current_features = current_features.copy()
+                    current_features["lag_1"] = preds
 
             if progress_callback:
                 progress_callback(model_record.id, store_idx + 1, total_stores, store_code)

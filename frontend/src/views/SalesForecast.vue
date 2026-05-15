@@ -48,13 +48,7 @@
           </el-select>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="handleTrain" :loading="training" :disabled="!form.dataSourceId">
-            <el-icon><Refresh /></el-icon> 训练模型
-          </el-button>
-          <el-button type="success" @click="handlePredict" :loading="predicting" :disabled="!form.dataSourceId" style="margin-left: 8px">
-            <el-icon><TrendCharts /></el-icon> 运行预测
-          </el-button>
-          <el-button type="warning" @click="handleTrainAndPredict" :loading="trainAndPredictLoading" :disabled="!form.dataSourceId" style="margin-left: 8px">
+          <el-button type="warning" @click="handleTrainAndPredict" :loading="trainAndPredictLoading" :disabled="!form.dataSourceId">
             <el-icon><Refresh /></el-icon> 训练并预测
           </el-button>
         </el-form-item>
@@ -242,15 +236,15 @@
 
 <script>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
-import { Refresh, TrendCharts } from '@element-plus/icons-vue'
-import { trainModel, runPredict, trainAndPredict, getForecast, getTrainStatus, getPredictStatus, getMyTrainTasks, stopTrainTask, deleteTrainHistory, deleteTrainHistoryByTask, getForecastHistory, getForecastRunning, deleteForecastProgress } from '@/api/prediction'
+import { Refresh } from '@element-plus/icons-vue'
+import { trainAndPredict, getForecast, getTrainStatus, getPredictStatus, getMyTrainTasks, stopTrainTask, deleteTrainHistory, deleteTrainHistoryByTask, getForecastHistory, getForecastRunning, deleteForecastProgress } from '@/api/prediction'
 import { getDataSourceList } from '@/api/data_source'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 
 export default {
   name: 'SalesForecast',
-  components: { Refresh, TrendCharts },
+  components: { Refresh },
   setup() {
     const STORAGE_KEY = 'sales_forecast_form'
 
@@ -280,9 +274,7 @@ export default {
     }, { deep: true })
     const dataSources = ref([])
     const modelOptions = ref([])
-    const training = ref(false)
     const trainAndPredictLoading = ref(false)
-    const predicting = ref(false)
     const loading = ref(false)
     const resultMsg = ref('')
     const taskProgress = ref(null)
@@ -291,7 +283,6 @@ export default {
     const forecastHistory = ref([])
     const forecastData = ref([])
     const total = ref(0)
-    let _trainingLock = false
     let _trainAndPredictLock = false
     let _pollingInterval = null
     let _pollingTaskId = null
@@ -544,41 +535,6 @@ export default {
       } catch (e) { ElMessage.error(`删除失败: ${e.message || e}`) }
     }
 
-    async function handleTrain() {
-      if (_trainingLock) return
-      _trainingLock = true
-      training.value = true
-      resultMsg.value = ''
-      try {
-        const tableName = form.value.tableName.trim() || null
-        const res = await trainModel(form.value.dataSourceId, form.value.trainDays, tableName)
-        const taskId = res.task_id || (res.data && res.data.task_id)
-        if (!taskId) { resultMsg.value = '模型训练成功！'; return }
-        localStorage.setItem('lastTrainTaskId', taskId)
-        const ds = dataSources.value.find(d => d.id === form.value.dataSourceId)
-        const dsName = ds ? ds.name : `数据源#${form.value.dataSourceId}`
-        taskProgresses.value.push({ taskId, percent: 0, phase: '初始化', detail: '任务已提交', status: 'running', taskType: 'train', createdAt: new Date().toLocaleString(), dataSourceName: dsName })
-        startPolling()
-      } catch (e) { resultMsg.value = `训练失败: ${e.message || e}` }
-      finally { training.value = false; _trainingLock = false }
-    }
-
-    async function handlePredict() {
-      predicting.value = true
-      resultMsg.value = ''
-      try {
-        const tableName = form.value.tableName.trim() || null
-        const res = await runPredict(form.value.dataSourceId, form.value.forecastDays, tableName, form.value.modelId)
-        const taskId = res.task_id || (res.data && res.data.task_id)
-        if (!taskId) { resultMsg.value = '预测任务提交失败'; return }
-        const dsName = form.value.modelId ? `模型#${form.value.modelId}` : '最新模型'
-        taskProgresses.value.push({ taskId, percent: 0, phase: '初始化', detail: '预测任务已提交', status: 'running', taskType: 'predict', createdAt: new Date().toLocaleString(), dataSourceName: dsName })
-        startPolling()
-        resultMsg.value = `预测任务已提交，task_id=${taskId.slice(0, 16)}...`
-      } catch (e) { resultMsg.value = `预测失败: ${e.message || e}` }
-      finally { predicting.value = false }
-    }
-
     async function handleTrainAndPredict() {
       if (_trainAndPredictLock) return
       _trainAndPredictLock = true
@@ -653,10 +609,10 @@ export default {
     }
 
     return {
-      form, dataSources, modelOptions, training, trainAndPredictLoading, predicting, loading, resultMsg, taskProgress,
+      form, dataSources, modelOptions, trainAndPredictLoading, loading, resultMsg, taskProgress,
       taskProgresses, trainHistory, forecastHistory,
       forecastData, total, page, pageSize, chartRef, selectedStores, storeOptions,
-      handleTrain, handleTrainAndPredict, handlePredict, handleRefresh, loadForecast, handleStopTask,
+      handleTrainAndPredict, handleRefresh, loadForecast, handleStopTask,
       handleDeleteProgress, handleDeleteHistory, onDataSourceChange,
     }
   }
