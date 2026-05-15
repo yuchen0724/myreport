@@ -179,9 +179,35 @@
       <template #header>
         <div class="card-header">
           <span>预测明细</span>
-          <el-button size="small" @click="handleRefresh" :loading="loading">
-            <el-icon><Refresh /></el-icon> 刷新
-          </el-button>
+          <div class="filter-bar">
+            <el-select
+              v-model="filterStoreCode"
+              placeholder="门店筛选"
+              style="width: 140px"
+              clearable
+              @change="loadForecast"
+            >
+              <el-option
+                v-for="s in filterStoreOptions"
+                :key="s"
+                :label="s"
+                :value="s"
+              />
+            </el-select>
+            <el-date-picker
+              v-model="filterDateRange"
+              type="daterange"
+              range-separator="~"
+              start-placeholder="起始日期"
+              end-placeholder="截止日期"
+              value-format="YYYY-MM-DD"
+              style="width: 240px"
+              @change="loadForecast"
+            />
+            <el-button size="small" @click="handleRefresh" :loading="loading">
+              <el-icon><Refresh /></el-icon> 刷新
+            </el-button>
+          </div>
         </div>
       </template>
       <el-table :data="forecastData" border stripe v-loading="loading" style="width: 100%">
@@ -265,6 +291,12 @@ export default {
     const pageSize = ref(50)
     const chartRef = ref(null)
     const selectedStores = ref([])
+    // 明细表筛选
+    const filterStoreCode = ref(null)
+    const filterDateRange = ref(null)
+    const filterStoreOptions = computed(() => {
+      return [...new Set(forecastData.value.map(d => d.store_code))]
+    })
     let chartInstance = null
 
     const storeOptions = computed(() => {
@@ -293,11 +325,17 @@ export default {
     async function loadForecast() {
       loading.value = true
       try {
-        const res = await getForecast({
+        const params = {
           data_source_id: form.value.dataSourceId,
           page: page.value,
           page_size: pageSize.value,
-        })
+        }
+        if (filterStoreCode.value) params.store_code = filterStoreCode.value
+        if (filterDateRange.value && filterDateRange.value.length === 2) {
+          params.start_date = filterDateRange.value[0]
+          params.end_date = filterDateRange.value[1]
+        }
+        const res = await getForecast(params)
         const data = res.data || res
         forecastData.value = data.items || []
         total.value = data.total || 0
@@ -493,6 +531,9 @@ export default {
     }
 
     function handleRefresh() {
+      filterStoreCode.value = null
+      filterDateRange.value = null
+      page.value = 1
       loadForecast()
       loadForecastHistory()
     }
@@ -548,6 +589,7 @@ export default {
       form, dataSources, trainAndPredictLoading, loading, resultMsg, taskProgress,
       taskProgresses, trainHistory, forecastHistory,
       forecastData, total, page, pageSize, chartRef, selectedStores, storeOptions,
+      filterStoreCode, filterDateRange, filterStoreOptions,
       handleTrainAndPredict, handleRefresh, loadForecast, handleStopTask,
       handleDeleteProgress, handleDeleteHistory, onDataSourceChange,
     }
@@ -580,4 +622,5 @@ export default {
 .model-option-metrics { color: var(--el-color-success); font-size: 12px; }
 .model-option-rows { color: var(--el-color-warning); }
 .model-option-time { margin-left: auto; }
+.filter-bar { display: flex; align-items: center; gap: 8px; }
 </style>
