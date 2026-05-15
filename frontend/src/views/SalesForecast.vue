@@ -24,29 +24,6 @@
         <el-form-item label="数据表名">
           <el-input v-model="form.tableName" placeholder="可选，默认: 库名.ads_cockpit_fd_store_ware_d" style="width: 320px" clearable />
         </el-form-item>
-        <el-form-item label="选择模型">
-          <el-select v-model="form.modelId" placeholder="选择已训练的模型（不选则用最新）" style="width: 420px" clearable>
-            <el-option
-              v-for="m in modelOptions"
-              :key="m.model_id"
-              :value="m.model_id"
-              :label="m.label"
-            >
-              <div class="model-option">
-                <div class="model-option-line1">
-                  <span class="model-option-id">#{{ m.model_id }}</span>
-                  <span class="model-option-store">{{ m.batchCount || '-' }}批</span>
-                  <span class="model-option-metrics">MAE={{ m.mae }} RMSE={{ m.rmse }}</span>
-                </div>
-                <div class="model-option-line2">
-                  <span>{{ m.dateRange }}</span>
-                  <span class="model-option-rows">{{ m.rowCount }}行</span>
-                  <span class="model-option-time">{{ m.trainedTime }}</span>
-                </div>
-              </div>
-            </el-option>
-          </el-select>
-        </el-form-item>
         <el-form-item>
           <el-button type="warning" @click="handleTrainAndPredict" :loading="trainAndPredictLoading" :disabled="!form.dataSourceId">
             <el-icon><Refresh /></el-icon> 训练并预测
@@ -237,7 +214,7 @@
 <script>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
-import { trainAndPredict, getForecast, getTrainStatus, getPredictStatus, getMyTrainTasks, stopTrainTask, deleteTrainHistory, deleteTrainHistoryByTask, getForecastHistory, getForecastRunning, deleteForecastProgress } from '@/api/prediction'
+import { trainAndPredict, getForecast, getTrainStatus, getPredictStatus, getMyTrainTasks, stopTrainTask, getForecastHistory, getForecastRunning, deleteForecastProgress } from '@/api/prediction'
 import { getDataSourceList } from '@/api/data_source'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
@@ -259,11 +236,10 @@ export default {
             trainDays: parsed.trainDays ?? 365,
             forecastDays: parsed.forecastDays ?? 30,
             tableName: parsed.tableName ?? '',
-            modelId: parsed.modelId ?? null,
           }
         }
       } catch { /* 忽略 */ }
-      return { dataSourceId: null, trainDays: 365, forecastDays: 30, tableName: '', modelId: null }
+      return { dataSourceId: null, trainDays: 365, forecastDays: 30, tableName: '' }
     }
 
     const form = ref(loadStoredForm())
@@ -273,7 +249,6 @@ export default {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(form.value))
     }, { deep: true })
     const dataSources = ref([])
-    const modelOptions = ref([])
     const trainAndPredictLoading = ref(false)
     const loading = ref(false)
     const resultMsg = ref('')
@@ -310,44 +285,7 @@ export default {
       } catch { /* silent */ }
     }
 
-    async function loadModelOptions() {
-      if (!form.value.dataSourceId) {
-        modelOptions.value = []
-        return
-      }
-      try {
-        const res = await getMyTrainTasks(false)
-        const list = Array.isArray(res) ? res : (res.data || [])
-        modelOptions.value = list
-          .filter(m => m.status === 'ready' && m.data_source_id === form.value.dataSourceId)
-          .map(m => {
-            const metrics = m.metrics || {}
-            const trainedTime = m.trained_at
-              ? new Date(m.trained_at).toLocaleString()
-              : (m.created_at ? new Date(m.created_at).toLocaleString() : '')
-            const startDate = m.train_start_date
-            const endDate = m.train_end_date
-            const dateRange = startDate && endDate
-              ? `${new Date(startDate).toLocaleDateString()} ~ ${new Date(endDate).toLocaleDateString()}`
-              : ''
-            const rowCount = m.train_row_count ?? metrics.train_row_count ?? '-'
-            return {
-              model_id: m.model_id,
-              trainedTime,
-              batchCount: metrics.batch_count ?? '',
-              dateRange,
-              rowCount,
-              mae: metrics.mae != null ? metrics.mae.toFixed(2) : '-',
-              rmse: metrics.rmse != null ? metrics.rmse.toFixed(2) : '-',
-              label: `#${m.model_id}  ${dateRange}  ${rowCount}行  MAE=${metrics.mae != null ? metrics.mae.toFixed(2) : '-'}  RMSE=${metrics.rmse != null ? metrics.rmse.toFixed(2) : '-'}`,
-            }
-          })
-      } catch { /* silent */ }
-    }
-
     async function onDataSourceChange() {
-      form.value.modelId = null
-      await loadModelOptions()
       await loadForecast()
       await loadForecastHistory()
     }
@@ -556,15 +494,13 @@ export default {
 
     function handleRefresh() {
       loadForecast()
-      loadModelOptions()
       loadForecastHistory()
     }
 
     onMounted(async () => {
       await loadDataSources()
-      // 从 localStorage 恢复后，如果有已选数据源则加载模型选项和预测数据
+      // 从 localStorage 恢复后，如果有已选数据源则加载预测数据
       if (form.value.dataSourceId) {
-        await loadModelOptions()
         await loadForecast()
       }
       await loadForecastHistory()
@@ -609,7 +545,7 @@ export default {
     }
 
     return {
-      form, dataSources, modelOptions, trainAndPredictLoading, loading, resultMsg, taskProgress,
+      form, dataSources, trainAndPredictLoading, loading, resultMsg, taskProgress,
       taskProgresses, trainHistory, forecastHistory,
       forecastData, total, page, pageSize, chartRef, selectedStores, storeOptions,
       handleTrainAndPredict, handleRefresh, loadForecast, handleStopTask,
