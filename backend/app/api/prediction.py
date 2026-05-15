@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from datetime import datetime
+import logging
 from sqlalchemy.orm import Session
 from app.core.auth_deps import get_current_user
 from app.core.database import get_db
@@ -9,12 +10,15 @@ from app.schemas.prediction import (
     PredictRequest, PredictResponse,
     ForecastQuery, ForecastListResponse, ForecastItem,
     TaskStatusResponse,
+    TrainAndPredictRequest,
 )
 from app.models.prediction import PredictionModel
-from app.repositories.prediction_repository import PredictionResultRepository, PredictionModelRepository
+from app.repositories.prediction_repository import PredictionResultRepository, PredictionModelRepository, ForecastHistoryRepository
 from app.models.user import User
 
 router = APIRouter(prefix="/api/prediction", tags=["预测"])
+
+logger = logging.getLogger("myreport")
 
 
 @router.post("/train", response_model=TrainResponse)
@@ -49,8 +53,11 @@ def stop_train_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """停止正在运行的训练任务"""
-    # 验证任务存在：查数据库
+    """停止正在运行的训练任务
+
+    支持清理残留状态：即使数据库状态已不是 training（如 Worker 崩溃后状态未同步），
+    也可执行清理操作（撤销 Celery 任务、清除 Redis 进度、标记数据库为 failed）。
+    """
     repo = PredictionModelRepository(db)
     model = db.query(PredictionModel).filter(
         PredictionModel.task_id == task_id,
@@ -59,31 +66,86 @@ def stop_train_task(
     if not model:
         raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在或无权操作")
 
-    if model.status != "training":
-        raise HTTPException(status_code=400, detail=f"任务状态为 {model.status}，不能停止")
+    is_active = model.status in ("training", "pending")
 
-    # 调用 Celery 撤销任务
-    from app.celery_app import celery_app
-    celery_app.control.revoke(task_id, terminate=True, signal='SIGTERM')
+    if is_active:
+        # 调用 Celery 撤销任务
+        from app.celery_app import celery_app
+        celery_app.control.revoke(task_id, terminate=True, signal='SIGTERM')
 
-    # 更新数据库状态
+    # 更新数据库状态（不管当前是什么状态，都标记为 failed）
     repo.update_status(model.id, "failed", error_message="用户手动停止")
 
-    # 写入 Redis 状态
+    # 清除 Redis 进度
     from app.tasks.prediction_tasks import _get_redis, _progress_key, _PROGRESS_TTL
     r = _get_redis()
     key = _progress_key(task_id)
-    r.hset(key, mapping={
-        "status": "failed",
-        "model_id": str(model.id),
-        "error": "用户手动停止",
-        "percent": "0",
-        "phase": "已停止",
-        "detail": "用户手动停止",
-    })
-    r.expire(key, _PROGRESS_TTL)
+    r.delete(key)
 
-    return {"status": "stopped", "model_id": model.id}
+    action = "已停止" if is_active else "已清理残留状态"
+    return {"status": "stopped", "model_id": model.id, "action": action}
+
+
+@router.post("/train-and-predict", response_model=PredictResponse)
+def train_and_predict(
+    req: TrainAndPredictRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """触发异步训练+预测（三阶段一键完成）"""
+    user_id = current_user.id
+    from app.tasks.prediction_tasks import train_and_predict_prediction_async
+    task = train_and_predict_prediction_async.delay(
+        data_source_id=req.data_source_id,
+        train_days=req.train_days,
+        forecast_days=req.forecast_days,
+        table_name=req.table_name,
+        user_id=user_id,
+    )
+    return PredictResponse(
+        task_id=task.id,
+        status="pending",
+        message=f"训练+预测任务已提交，task_id={task.id}",
+    )
+
+
+@router.post("/train-and-predict/{task_id}/stop")
+def stop_train_and_predict_task(
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """停止正在运行的训练+预测任务"""
+    from app.celery_app import celery_app
+    from app.tasks.prediction_tasks import _get_redis, _progress_key
+
+    # 撤销 Celery 任务
+    celery_app.control.revoke(task_id, terminate=True, signal='SIGTERM')
+
+    # 清除 Redis 进度
+    r = _get_redis()
+    key = _progress_key(task_id)
+    r.delete(key)
+
+    # 更新预测模型状态（如果有）
+    repo = PredictionModelRepository(db)
+    model = db.query(PredictionModel).filter(
+        PredictionModel.task_id == task_id,
+        PredictionModel.created_by == current_user.id,
+    ).first()
+    if model:
+        repo.update_status(model.id, "failed", error_message="用户手动停止")
+
+    # 更新 forecast_history ��态（如果有）
+    from app.repositories.prediction_repository import ForecastHistoryRepository
+    hist_repo = ForecastHistoryRepository(db)
+    hist_records = hist_repo.get_by_task_id(task_id)
+    for hr in hist_records:
+        hr.status = "failed"
+        hr.error_message = "用户手动停止"
+    if hist_records:
+        db.commit()
+
+    return {"status": "stopped", "task_id": task_id, "action": "已停止"}
 
 
 @router.get("/train/status/{task_id}", response_model=TaskStatusResponse)
@@ -111,38 +173,80 @@ def get_my_train_tasks(
     current_user: User = Depends(get_current_user),
     with_progress: bool = True,
 ):
-    """查询当前用户的训练任务"""
+    """查询当前用户的训练任务
+
+    所有"运行中"状态从 Redis 读取，数据库只做历史归档。
+    """
     user_id = current_user.id
     repo = PredictionModelRepository(db)
     from app.repositories.data_source_repository import DataSourceRepository
     ds_repo = DataSourceRepository(db)
+    from app.tasks.prediction_tasks import get_async_task_progress, get_running_task_ids
 
-    models = repo.get_running_by_user(user_id)
-    # 也返回最近的已完成任务（最近5条，排除已删除的）
-    recent = (
-        db.query(PredictionModel)
-        .filter(
+    # 从 Redis 获取当前运行中的 task_id 列表
+    running_task_ids = get_running_task_ids()
+
+    # 获取该用户所有模型记录
+    all_models = repo.get_running_by_user(user_id)
+
+    # 分离运行中 + 已完成，并修复 DB/Redis 不同步
+    running_models = []
+    recent_models = []
+    seen_ids = set()
+    fixed_count = 0
+    for m in all_models:
+        if m.id in seen_ids:
+            continue
+        seen_ids.add(m.id)
+        if m.task_id and m.task_id in running_task_ids:
+            running_models.append(m)
+        elif m.status in ("ready", "failed") and m.deleted_at is None:
+            recent_models.append(m)
+        elif m.status == "training" and m.deleted_at is None:
+            # DB 标记为 training 但 Redis 中已无记录 → 不同步，修正
+            m.status = "failed"
+            m.error_message = "任务因异常中断已恢复"
+            db.flush()
+            fixed_count += 1
+            recent_models.append(m)
+
+    if fixed_count:
+        db.commit()
+
+    logger.info(f"[训练列表] running_models={len(running_models)}, recent={len(recent_models)}, fixed={fixed_count}")
+
+    # 也补上所有 running_task_ids 中能找到 DB 记录但上面没命中的
+    for tid in running_task_ids:
+        already = any(m.task_id == tid for m in running_models)
+        if already:
+            continue
+        m = db.query(PredictionModel).filter(
+            PredictionModel.task_id == tid,
             PredictionModel.created_by == user_id,
-            PredictionModel.status.in_(["ready", "failed"]),
-            PredictionModel.deleted_at.is_(None),
-        )
-        .order_by(PredictionModel.id.desc())
-        .limit(5)
-        .all()
-    )
-    all_items = list(models) + list(recent)
+        ).first()
+        if m:
+            running_models.append(m)
+
+    # 合并，运行中在前
+    all_items = running_models + recent_models[:10]
+
     result = []
-    from app.tasks.prediction_tasks import get_async_task_progress
     for m in all_items:
         ds_name = ""
         ds = ds_repo.get_by_id(m.data_source_id)
         if ds:
             ds_name = ds.name
+
+        # 根据 Redis 状态判定最终状态
+        final_status = m.status
+        if m.task_id and m.task_id in running_task_ids:
+            final_status = "training"
+
         item = {
             "model_id": m.id,
             "data_source_id": m.data_source_id,
             "data_source_name": ds_name,
-            "status": m.status,
+            "status": final_status,
             "task_id": m.task_id,
             "created_at": m.created_at.isoformat() if m.created_at else None,
             "trained_at": m.trained_at.isoformat() if m.trained_at else None,
@@ -214,15 +318,37 @@ def run_prediction(
     req: PredictRequest,
     db: Session = Depends(get_db),
 ):
-    """运行预测"""
-    service = PredictionService(db)
-    try:
-        count = service.predict(req.data_source_id, req.forecast_days, table_name=req.table_name)
-        return PredictResponse(count=count, message=f"成功预测 {count} 条记录")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """触发异步预测 - 返回 task_id"""
+    from app.tasks.prediction_tasks import predict_prediction_model_async
+    task = predict_prediction_model_async.delay(
+        data_source_id=req.data_source_id,
+        forecast_days=req.forecast_days,
+        table_name=req.table_name,
+        model_id=req.model_id,
+    )
+    return PredictResponse(
+        task_id=task.id,
+        status="pending",
+        message=f"预测任务已提交，task_id={task.id}",
+    )
+
+
+@router.get("/predict/status/{task_id}", response_model=TaskStatusResponse)
+def get_predict_status(
+    task_id: str,
+):
+    """查询异步预测任务状态"""
+    from app.tasks.prediction_tasks import get_async_task_progress
+    progress = get_async_task_progress(task_id)
+    return TaskStatusResponse(
+        task_id=task_id,
+        status=progress["status"],
+        model_id=progress.get("model_id"),
+        error=progress.get("error"),
+        percent=progress.get("percent"),
+        phase=progress.get("phase"),
+        detail=progress.get("detail"),
+    )
 
 
 @router.get("/forecast", response_model=ForecastListResponse)
@@ -233,7 +359,7 @@ def get_forecast(
     """查询预测结果"""
     repo = PredictionResultRepository(db)
     results = repo.get_forecast(
-        req.data_source_id, req.store_code,
+        req.data_source_id, req.model_id, req.store_code,
         req.start_date, req.end_date,
         req.page_size, (req.page - 1) * req.page_size,
     )
@@ -243,3 +369,132 @@ def get_forecast(
         lower_bound=r.lower_bound, upper_bound=r.upper_bound,
     ) for r in results]
     return ForecastListResponse(items=items, total=len(items))
+
+
+@router.get("/forecast/running")
+def get_forecast_running(
+    current_user: User = Depends(get_current_user),
+):
+    """查询当前正在运行的预测任务"""
+    from app.tasks.prediction_tasks import get_running_task_ids, get_async_task_progress
+    from app.core.database import SessionLocal
+
+    running_ids = get_running_task_ids()
+    if not running_ids:
+        return []
+
+    db = SessionLocal()
+    try:
+        from app.repositories.prediction_repository import ForecastHistoryRepository
+        from app.repositories.data_source_repository import DataSourceRepository
+        fh_repo = ForecastHistoryRepository(db)
+        ds_repo = DataSourceRepository(db)
+
+        result = []
+        for tid in running_ids:
+            try:
+                prog = get_async_task_progress(tid)
+            except Exception:
+                prog = {}
+            status = prog.get("status", "running")
+            if status != "running":
+                continue
+
+            # 查 forecast_history 获取 data_source_id 等信息
+            hist = None
+            try:
+                hist = db.query(ForecastHistory).filter(
+                    ForecastHistory.task_id == tid,
+                ).first()
+            except Exception:
+                pass
+
+            ds_name = ""
+            data_source_id = None
+            if hist:
+                data_source_id = hist.data_source_id
+                ds = ds_repo.get_by_id(hist.data_source_id)
+                if ds:
+                    ds_name = ds.name
+
+            result.append({
+                "task_id": tid,
+                "model_id": prog.get("model_id"),
+                "data_source_id": data_source_id,
+                "data_source_name": ds_name,
+                "percent": prog.get("percent", 0),
+                "phase": prog.get("phase", ""),
+                "detail": prog.get("detail", ""),
+                "status": status,
+            })
+        return result
+    finally:
+        db.close()
+
+
+@router.get("/forecast/history")
+def get_forecast_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+):
+    """查询当前用户的预测历史列表"""
+    repo = ForecastHistoryRepository(db)
+    from app.repositories.data_source_repository import DataSourceRepository
+    ds_repo = DataSourceRepository(db)
+    records = repo.get_by_user(user_id=current_user.id, skip=skip, limit=limit)
+    result = []
+    for r in records:
+        ds_name = ""
+        ds = ds_repo.get_by_id(r.data_source_id)
+        if ds:
+            ds_name = ds.name
+        result.append({
+            "id": r.id,
+            "task_id": r.task_id,
+            "model_id": r.model_id,
+            "data_source_id": r.data_source_id,
+            "data_source_name": ds_name,
+            "forecast_days": r.forecast_days,
+            "result_count": r.result_count,
+            "status": r.status,
+            "error_message": r.error_message,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return result
+
+
+@router.delete("/forecast/progress/{task_id}")
+def delete_forecast_progress(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """删除预测任务的 Redis 进度记录和 DB 历史"""
+    from app.tasks.prediction_tasks import _get_redis, _progress_key
+    from app.core.database import SessionLocal
+
+    r = _get_redis()
+    if r:
+        try:
+            key = _progress_key(task_id)
+            r.delete(key)
+        except Exception:
+            pass
+
+    # 同时清理数据
+    try:
+        db = SessionLocal()
+        try:
+            records = db.query(ForecastHistory).filter(
+                ForecastHistory.task_id == task_id
+            ).all()
+            for rec in records:
+                db.delete(rec)
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+    return {"success": True, "message": "已清理"}

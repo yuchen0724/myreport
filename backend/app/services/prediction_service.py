@@ -5,7 +5,7 @@ import json
 import logging
 import numpy as np
 import pandas as pd
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 from typing import Optional
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,7 @@ from app.utils.feature_engineering import build_features_from_history, get_featu
 logger = logging.getLogger(__name__)
 
 TARGET_COL = "actual_sale_untaxed_amt"  # 预测目标字段
+TZ_UTC8 = timezone(timedelta(hours=8))
 
 
 class PredictionService:
@@ -98,11 +99,25 @@ class PredictionService:
         return df
 
     def _fetch_and_train_incremental(self, ds_id: int, days: int, model, feature_cols,
-                                      table_name: str = None, progress_callback: callable = None) -> tuple:
-        """按 store_code 分批拉取增量训练 - 峰值内存约一个门店的数据
+                                      table_name: str = None,
+                                      fetch_callback: callable = None,
+                                      train_callback: callable = None,
+                                      predict_callback: callable = None) -> tuple:
+        """按 (group_id, store_code, matnr) 分组分批拉取增量训练
 
-        先获取所有门店列表，逐店拉取历史数据、构造特征、增量训练。
-        每店数据量约几十行/天 × 365天 ≈ 万行级别，不会 OOM。
+        先查询所有分组的行数，然后将多个完整分组合并为一个批次（≈BATCH_SIZE 行），
+        保证同一个 (group_id, store_code, matnr) 的完整时序不被切分到不同批次。
+
+        每个批次拉取数据 → 训练 → 立即回调 predict_callback（不缓存全量数据到内存）。
+
+        Args:
+            fetch_callback: 每批数据拉取完成后回调(batch_no, total_batches, rows_count)
+            train_callback: 每批训练完成后回调(batch_no, total_batches, rows_count)
+            predict_callback: 每批训练完成后回调(chunk_df, batch_no, total_batches) 用于即时预测
+
+        Returns:
+            tuple: (model, feature_cols, total_trained_rows, train_start, train_end,
+                    mae_val, rmse_val, "", batch_no)
         """
         ds = self.ds_repo.get_by_id(ds_id)
         if not ds:
@@ -114,90 +129,114 @@ class PredictionService:
         from app.utils.db_executor import execute_query
         from app.utils.feature_engineering import build_features_from_history
 
-        # 1. 获取所有门店列表
-        store_sql = f"SELECT DISTINCT store_code FROM {table} WHERE dt >= '{start_date.strftime('%Y%m%d')}' AND exclude_flag != 1"
-        store_rows, _ = execute_query(ds, store_sql)
-        store_codes = [r[0] for r in store_rows] if store_rows else []
-        if not store_codes:
-            raise ValueError("未找到门店数据")
+        import logging
+        logger = logging.getLogger(__name__)
 
-        total_stores = len(store_codes)
-        store_page_no = 0
-        total_rows = 0
+        # 0. 快速获取最近活跃分组列表：取前一天峰值排前 N 的分组
+        #    25.7亿行数据，GROUP BY 全表不可行，改为最近一天优先取高频分组
+        from datetime import timedelta as _td
+        latest_day = date.today() - _td(days=1)
+        group_count_sql = f"""\
+            SELECT /*+ SET_VAR(query_timeout=120) */
+                group_id, store_code, matnr, COUNT(*) as cnt
+            FROM {table}
+            WHERE dt >= '{latest_day.strftime('%Y%m%d')}'
+              AND exclude_flag != 1
+              AND (service_flag != 1 OR service_flag IS NULL)
+              AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
+            GROUP BY group_id, store_code, matnr
+            ORDER BY cnt DESC
+            LIMIT 500
+        """
+        logger.info(f"[训练] 取前一天 TOP 500 活跃分组...")
+        group_rows, _ = execute_query(ds, group_count_sql)
+        if not group_rows:
+            raise ValueError("无有效训练数据")
+
+        all_groups = []  # [(group_id, store_code, matnr)]
+        for row in group_rows:
+            all_groups.append((row[0], row[1], row[2]))
+
+        logger.info(f"[训练] 活跃分组数={len(all_groups)}")
+
+        # 每个 (group_id, store_code, matnr) 作为一个独立批次
+        batches = [[(gid, scode, mnr)] for gid, scode, mnr in all_groups]
+        total_batches = len(batches)
+
+        batch_no = 0
+        total_trained_rows = 0
         first_fit = True
         train_start = start_date
         train_end = end_date
-        accum_buffer = None
 
-        for store_code in store_codes:
-            store_page_no += 1
+        for batch_groups in batches:
+            batch_no += 1
 
-            # 2. 拉取该店 365 天的全部历史数据（单店数据量很小，无需分页）
-            store_sql = f"""\
-                SELECT /*+ SET_VAR(exec_mem_limit=536870912, query_timeout=600) */
-                    dt, store_code, matnr, {TARGET_COL}
+            # 构造当前批次 SQL：用 IN 匹配所有分组
+            # 分批用 OR 条件 (group_id=a AND store_code='b' AND matnr='c') OR ...
+            group_conditions = []
+            for gid, scode, mnr in batch_groups:
+                group_conditions.append(
+                    f"(group_id={gid} AND store_code='{scode}' AND matnr='{mnr}')"
+                )
+            where_groups = " OR ".join(group_conditions)
+
+            sql = f"""\
+                SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
+                    dt, group_id, store_code, matnr, {TARGET_COL}
                 FROM {table}
                 WHERE dt >= '{start_date.strftime('%Y%m%d')}' AND dt < '{end_date.strftime('%Y%m%d')}'
-                  AND store_code = '{store_code}'
                   AND exclude_flag != 1
                   AND (service_flag != 1 OR service_flag IS NULL)
                   AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
+                  AND ({where_groups})
                 ORDER BY store_code, matnr, dt
             """
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"[训练] 门店 {store_page_no}/{total_stores} store_code={store_code}, SQL: {store_sql.replace(chr(10), ' ').strip()}")
-            rows, cols = execute_query(ds, store_sql)
+            logger.info(f"[训练] 分批批次 batch={batch_no}/{total_batches}, 该批分组数={len(batch_groups)}, SQL: {sql.replace(chr(10), ' ').strip()}")
+            rows, cols = execute_query(ds, sql)
             if not rows:
+                logger.info(f"[训练] 批次 {batch_no} 无数据，跳过")
                 continue
 
             chunk_df = pd.DataFrame(rows, columns=cols)
             chunk_df[TARGET_COL] = pd.to_numeric(chunk_df[TARGET_COL], errors="coerce").fillna(0)
             chunk_df[TARGET_COL] = chunk_df[TARGET_COL] / 100.0
 
-            # 需要至少 28 天数据才能构造 lag 特征
-            unique_days = chunk_df["dt"].nunique()
-            if unique_days < 28:
-                continue
+            if fetch_callback:
+                fetch_callback(batch_no, total_batches, len(rows))
 
-            # 跳过数据量过大的门店（避免特征工程耗时过长）
-            if len(chunk_df) > 500000:
-                # 采样：每个门店最多保留 5000 个 SKU（最近 40 天的完整数据）
-                sku_counts = chunk_df.groupby("matnr")["dt"].nunique()
-                top_skus = sku_counts.nlargest(5000).index.tolist()
-                chunk_df = chunk_df[chunk_df["matnr"].isin(top_skus)]
-                if len(chunk_df) == 0:
-                    continue
-
-            # 3. 构造特征
+            # 特征工程
             feat = build_features_from_history(chunk_df)
             feat = feat.dropna(subset=feature_cols)
 
             if len(feat) == 0:
                 continue
 
-            # 4. 增量训练
+            # 增量训练
             X = feat[feature_cols].values
             y = feat[TARGET_COL].values
 
             if first_fit:
                 model.fit(X, y)
                 first_fit = False
-                total_rows += len(feat)
             else:
                 model.fit(X, y, init_model=model)
-                total_rows += len(feat)
 
-            if progress_callback and store_page_no % 1 == 0:
-                progress_callback(store_page_no, total_stores, len(rows))
+            total_trained_rows += len(feat)
 
-        if total_rows == 0:
-            raise ValueError("训练数据不足（无门店满足 28 天以上历史数据）")
+            if train_callback:
+                train_callback(batch_no, total_batches, len(feat))
 
-        # 5. 评估
+            # 每批训练完成后立即回调预测（不缓存全量数据）
+            if predict_callback:
+                predict_callback(chunk_df, batch_no, total_batches)
+
+        if total_trained_rows == 0:
+            raise ValueError("训练数据不足（无有效特征行）")
+
+        # 评估：用最后一批数据
         import numpy as np
         mae_val, rmse_val = 0.0, 0.0
-        # 用最后 5 家门店数据做评估
         last_chunk = locals().get("chunk_df")
         if last_chunk is not None and len(last_chunk) > 0:
             try:
@@ -211,7 +250,7 @@ class PredictionService:
             except Exception:
                 pass
 
-        return (model, feature_cols, total_rows, train_start, train_end, mae_val, rmse_val)
+        return (model, feature_cols, total_trained_rows, train_start, train_end, mae_val, rmse_val, "", batch_no)
 
     def train(self, ds_id: int, train_days: int = None, table_name: str = None) -> int:
         """
@@ -278,7 +317,7 @@ class PredictionService:
                 train_end_date=df["dt"].max().date(),
                 train_row_count=len(df_feat),
                 model_metrics={"mae": mae, "rmse": rmse},
-                trained_at=datetime.utcnow(),
+                trained_at=datetime.now(TZ_UTC8),
             )
 
             return model_record.id
@@ -291,16 +330,115 @@ class PredictionService:
             )
             raise
 
-    def predict(self, ds_id: int, forecast_days: int = None, table_name: str = None) -> int:
+    def _predict_from_cache(
+        self,
+        data_df: pd.DataFrame,
+        model,
+        model_record: 'PredictionModel',
+        forecast_days: int,
+        progress_callback: callable = None,
+    ) -> list:
         """
-        用最新模型预测未来 N 天销售额。
+        利用缓存的历史数据 DataFrame 直接进行滚动预测。
         
-        返回: 写入的预测结果条数
+        Args:
+            data_df: 缓存的历史数据（列: group_id, store_code, matnr, dt, TARGET_COL）
+            model: 已训练好的 LightGBM 模型
+            model_record: 模型记录（用于关联预测结果）
+            forecast_days: 预测天数
+            progress_callback: 可选进度回调 fn(model_id, store_idx, total_stores, store_code)
+        
+        Returns:
+            List[PredictionResult]
+        """
+        from app.utils.feature_engineering import build_features_from_history, get_feature_columns
+        from app.models.prediction import PredictionResult
+        
+        feature_cols = get_feature_columns()
+        
+        data_df = data_df.copy()
+        data_df[TARGET_COL] = pd.to_numeric(data_df[TARGET_COL], errors="coerce").fillna(0)
+        
+        # 特征工程
+        df_feat = build_features_from_history(data_df)
+        df_feat = df_feat.dropna(subset=feature_cols).reset_index(drop=True)
+        
+        if df_feat.empty:
+            raise ValueError("缓存数据经特征工程后无有效数据，无法预测")
+        
+        # 按 (store_code, matnr) 分组，取每组最后一条
+        latest = (
+            df_feat.sort_values("dt")
+            .groupby(["store_code", "matnr"])
+            .last()
+            .reset_index()
+        )
+        
+        # 获取所有门店列表（用于进度回调）
+        import numpy as np
+        stores = sorted(latest["store_code"].unique())
+        total_stores = len(stores)
+        
+        results = []
+        for store_idx, store_code in enumerate(stores):
+            store_df = df_feat[df_feat["store_code"] == store_code]
+            if store_df.empty:
+                continue
+            
+            # 取每个 SKU 的最新一条
+            sku_latest = (
+                store_df.sort_values("dt")
+                .groupby(["store_code", "matnr"])
+                .last()
+                .reset_index()
+            )
+            
+            current_features = sku_latest[feature_cols].values
+            
+            for i in range(forecast_days):
+                preds = model.predict(current_features)
+                forecast_date = date.today() + timedelta(days=i + 1)
+                
+                for idx, row in sku_latest.iterrows():
+                    results.append(PredictionResult(
+                        model_id=model_record.id,
+                        data_source_id=model_record.data_source_id,
+                        store_code=row["store_code"],
+                        matnr=row["matnr"],
+                        forecast_date=forecast_date,
+                        predicted_value=round(float(preds[idx]), 2),
+                    ))
+                
+                # 简易滚动：用预测值更新 lag_1 特征
+                if i < forecast_days - 1:
+                    current_features[:, feature_cols.index("lag_1")] = preds
+            
+            if progress_callback:
+                progress_callback(model_record.id, store_idx + 1, total_stores, store_code)
+        
+        return results
+
+    def predict(self, ds_id: int, forecast_days: int = None, table_name: str = None,
+                model_id: int = None, progress_callback: callable = None) -> tuple:
+        """
+        用指定模型预测未来 N 天销售额。
+        
+        如果 model_id 不传，使用该数据源最新 ready 的模型。
+
+        progress_callback(model_id, store_idx, total_stores, store_code) 用于更新进度
+        
+        返回: (写入的预测结果条数, 实际使用的模型ID)
         """
         forecast_days = forecast_days or settings.prediction_forecast_days
-        model_record = self.model_repo.get_latest_ready(ds_id)
-        if not model_record:
-            raise ValueError(f"数据源 {ds_id} 没有已训练好的模型")
+
+        if model_id:
+            model_record = self.model_repo.get_by_id(model_id)
+            if not model_record or model_record.status != "ready":
+                raise ValueError(f"模型 {model_id} 不存在或状态不是 ready")
+        else:
+            model_record = self.model_repo.get_latest_ready(ds_id)
+            if not model_record:
+                raise ValueError(f"数据源 {ds_id} 没有已训练好的模型")
 
         model = joblib.load(model_record.model_path)
         feature_cols = get_feature_columns()
@@ -310,35 +448,47 @@ class PredictionService:
         df_feat = build_features_from_history(df)
         df_feat = df_feat.dropna(subset=feature_cols)
 
-        # 取每个门店-商品的最新一条
-        latest = (
-            df_feat.sort_values("dt")
-            .groupby(["store_code", "matnr"])
-            .last()
-            .reset_index()
-        )
+        # 获取所有门店列表
+        stores = sorted(df_feat["store_code"].unique())
+        total_stores = len(stores)
 
         results = []
-        current_features = latest[feature_cols].values
+        for store_idx, store_code in enumerate(stores):
+            store_df = df_feat[df_feat["store_code"] == store_code]
+            if store_df.empty:
+                continue
 
-        for i in range(forecast_days):
-            preds = model.predict(current_features)
-            forecast_date = date.today() + timedelta(days=i + 1)
+            # 取每个 SKU 的最新一条
+            latest = (
+                store_df.sort_values("dt")
+                .groupby(["store_code", "matnr"])
+                .last()
+                .reset_index()
+            )
 
-            for idx, row in latest.iterrows():
-                results.append(PredictionResult(
-                    model_id=model_record.id,
-                    data_source_id=ds_id,
-                    store_code=row["store_code"],
-                    matnr=row["matnr"],
-                    forecast_date=forecast_date,
-                    predicted_value=round(float(preds[idx]), 2),
-                ))
+            current_features = latest[feature_cols].values
 
-            # 简易滚动：用预测值更新 lag_1 特征（迭代推理）
-            if i < forecast_days - 1:
-                current_features[:, feature_cols.index("lag_1")] = preds
+            for i in range(forecast_days):
+                preds = model.predict(current_features)
+                forecast_date = date.today() + timedelta(days=i + 1)
+
+                for idx, row in latest.iterrows():
+                    results.append(PredictionResult(
+                        model_id=model_record.id,
+                        data_source_id=ds_id,
+                        store_code=row["store_code"],
+                        matnr=row["matnr"],
+                        forecast_date=forecast_date,
+                        predicted_value=round(float(preds[idx]), 2),
+                    ))
+
+                # 简易滚动：用预测值更新 lag_1 特征
+                if i < forecast_days - 1:
+                    current_features[:, feature_cols.index("lag_1")] = preds
+
+            if progress_callback:
+                progress_callback(model_record.id, store_idx + 1, total_stores, store_code)
 
         count = self.result_repo.bulk_save(results)
-        logger.info(f"[预测] 写入 {count} 条预测结果")
-        return count
+        logger.info(f"[预测] 写入 {count} 条预测结果，模型 model_id={model_record.id}")
+        return count, model_record.id

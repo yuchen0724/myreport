@@ -1,6 +1,27 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Text, JSON
 from app.core.database import Base
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+
+def _utc8now():
+    return datetime.now(timezone(timedelta(hours=8)))
+
+
+class ForecastHistory(Base):
+    """预测任务历史记录"""
+    __tablename__ = "forecast_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(64), nullable=False, index=True, comment="Celery 任务 ID")
+    model_id = Column(Integer, nullable=True, comment="实际使用的模型ID")
+    data_source_id = Column(Integer, nullable=False, comment="数据源ID")
+    forecast_days = Column(Integer, nullable=False, comment="预测天数")
+    result_count = Column(Integer, nullable=True, comment="预测结果条数")
+    model_name = Column(String(128), nullable=True, comment="模型描述")
+    status = Column(String(16), nullable=False, default="running", comment="状态: success/failed")
+    error_message = Column(Text, nullable=True, comment="失败原因")
+    created_at = Column(DateTime, default=_utc8now, comment="提交时间")
+    created_by = Column(Integer, nullable=True, comment="发起预测的用户 ID")
 
 
 class PredictionResult(Base):
@@ -16,7 +37,7 @@ class PredictionResult(Base):
     predicted_value = Column(Float, nullable=False, comment="预测值（元）")
     lower_bound = Column(Float, nullable=True, comment="预测下限")
     upper_bound = Column(Float, nullable=True, comment="预测上限")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc8now)
 
 
 class PredictionModel(Base):
@@ -34,7 +55,7 @@ class PredictionModel(Base):
     model_path = Column(String(255), nullable=True, comment="模型文件路径")
     status = Column(String(16), default="training", comment="状态: training/ready/failed")
     error_message = Column(Text, nullable=True, comment="训练失败原因")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc8now)
     trained_at = Column(DateTime, nullable=True, comment="训练完成时间")
     task_id = Column(String(64), nullable=True, index=True, comment="Celery 任务 ID")
     created_by = Column(Integer, nullable=True, comment="发起训练的用户 ID")

@@ -42,7 +42,7 @@ def test_train_with_mock_data(db_session, monkeypatch):
     from app.services.prediction_service import PredictionService
 
     # Mock _fetch_history_data 返回人工数据
-    def mock_fetch(self, ds_id, days):
+    def mock_fetch(self, ds_id, days, table_name=None):
         rows = []
         np.random.seed(42)
         dates = pd.date_range(start="2025-01-01", periods=365, freq="D")
@@ -96,8 +96,7 @@ def test_train_min_history_check(db_session, monkeypatch):
     """验证历史数据不足时训练会失败"""
     from app.services.prediction_service import PredictionService
 
-    def mock_fetch(self, ds_id, days):
-        # 返回极少数据
+    def mock_fetch(self, ds_id, days, table_name=None):
         return pd.DataFrame(columns=["dt", "store_code", "matnr", "actual_sale_untaxed_amt"])
 
     monkeypatch.setattr(PredictionService, "_fetch_history_data", mock_fetch)

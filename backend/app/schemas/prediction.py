@@ -25,7 +25,8 @@ class TrainResponse(BaseModel):
 
 
 class PredictRequest(BaseModel):
-    data_source_id: int
+    data_source_id: int = Field(..., description="数据源ID")
+    model_id: Optional[int] = Field(None, description="模型ID，不传则使用最新模型")
     forecast_days: Optional[int] = Field(None, description="预测天数，默认30")
     table_name: Optional[str] = Field(
         None,
@@ -34,12 +35,14 @@ class PredictRequest(BaseModel):
 
 
 class PredictResponse(BaseModel):
-    count: int
+    task_id: str
+    status: str
     message: str
 
 
 class ForecastQuery(BaseModel):
     data_source_id: int
+    model_id: Optional[int] = Field(None, description="模型ID，筛选该模型生成的预测结果")
     store_code: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
@@ -64,9 +67,19 @@ class ForecastListResponse(BaseModel):
 
 class TaskStatusResponse(BaseModel):
     task_id: str
-    status: str  # pending / running / success / failed / unknown
+    status: str
     model_id: Optional[int] = None
     error: Optional[str] = None
     percent: Optional[int] = None
     phase: Optional[str] = None
     detail: Optional[str] = None
+
+
+class TrainAndPredictRequest(BaseModel):
+    data_source_id: int = Field(..., description="数据源ID")
+    train_days: Optional[int] = Field(None, description="训练用历史天数，默认365")
+    forecast_days: Optional[int] = Field(None, description="预测天数，默认30")
+    table_name: Optional[str] = Field(
+        None,
+        description="销售数据表名（完整名称，如 retail_analysis.ads_cockpit_fd_store_ware_d）"
+    )
