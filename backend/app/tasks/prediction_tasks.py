@@ -418,22 +418,6 @@ def _train_and_predict_with_progress(
                 db.commit()
         except Exception:
             pass
-        # 写入失败预测历史
-        try:
-            from app.repositories.prediction_repository import ForecastHistoryRepository
-            hist_repo = ForecastHistoryRepository(db)
-            hist_repo.create(
-                task_id=task_id,
-                model_id=model_record.id,
-                data_source_id=data_source_id,
-                forecast_days=forecast_days,
-                result_count=result_count,
-                status="failed",
-                error_message=str(e),
-                created_by=user_id,
-            )
-        except Exception:
-            pass
         # 写入失败状态到 Redis
         try:
             r = _get_redis()
@@ -553,16 +537,40 @@ def train_and_predict_prediction_async(
         )
         return {"model_id": model_id, "result_count": result_count, "status": "success"}
     except Exception as e:
-        # 重试前确保 Redis 状态是 running
-        r = _get_redis()
-        key = _progress_key(task_id)
-        r.hset(key, mapping={
-            "status": "running",
-            "percent": "0",
-            "phase": "重试中",
-            "detail": f"即将重试({self.request.retries + 1}/3)",
-        })
-        r.expire(key, _PROGRESS_TTL)
+        is_last_retry = self.request.retries >= self.max_retries
+        if is_last_retry:
+            # 所有重试用尽，写入失败预测历史
+            try:
+                from app.repositories.prediction_repository import ForecastHistoryRepository
+                from app.core.database import SessionLocal
+                fh_db = SessionLocal()
+                try:
+                    hist_repo = ForecastHistoryRepository(fh_db)
+                    hist_repo.create(
+                        task_id=task_id,
+                        model_id=None,
+                        data_source_id=data_source_id,
+                        forecast_days=forecast_days or 30,
+                        result_count=0,
+                        status="failed",
+                        error_message=str(e),
+                        created_by=user_id,
+                    )
+                finally:
+                    fh_db.close()
+            except Exception:
+                pass
+        else:
+            # 还有重试机会，确保 Redis 状态是 running
+            r = _get_redis()
+            key = _progress_key(task_id)
+            r.hset(key, mapping={
+                "status": "running",
+                "percent": "0",
+                "phase": "重试中",
+                "detail": f"即将重试({self.request.retries + 1}/3)",
+            })
+            r.expire(key, _PROGRESS_TTL)
         raise self.retry(exc=e, countdown=300)
 
 
