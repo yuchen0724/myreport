@@ -299,13 +299,11 @@ def _train_and_predict_with_progress(
             task_id=task_id,
             created_by=user_id,
         )
-        _update_progress(task_id, _PHASE_INIT, f"模型记录已创建，id={model_record.id}", model_record.id)
-
-        _update_progress(task_id, _PHASE_FETCH, f"数据源={data_source_id}，天数={train_days}", model_record.id)
+        _update_progress(task_id, _PHASE_INIT, f"任务已提交，数据源={data_source_id}", model_record.id, percent=2)
 
         result_count = 0
 
-        # 定义批次完成回调：每批预测完立即写入 DB，不累积在内存
+        # 定义批次完成回调：分批处理（拉取+训练+预测一体化），进度 2%~85%
         def _batch_complete_callback(chunk_df, batch_no, total_batches):
             nonlocal result_count
             try:
@@ -319,12 +317,12 @@ def _train_and_predict_with_progress(
                 if batch_results:
                     service.result_repo.bulk_save(batch_results)
                     result_count += len(batch_results)
-                pct = int(batch_no / total_batches * 95)
-                if pct > 95:
-                    pct = 95
+                pct = int(batch_no / total_batches * 83) + 2
+                if pct > 85:
+                    pct = 85
                 _update_progress(
                     task_id, _PHASE_PREDICT,
-                    f"已处理 {batch_no}/{total_batches} 批, 本批预测 {len(batch_results)} 条",
+                    f"处理中 {batch_no}/{total_batches} 批, 预测 {len(batch_results)} 条",
                     model_record.id, percent=pct
                 )
             except Exception as e:
@@ -351,14 +349,14 @@ def _train_and_predict_with_progress(
             train_callback=None,
             predict_callback=_batch_complete_callback,
         )
-        _update_progress(task_id, _PHASE_TRAINING, f"训练完成: MAE={mae:.2f}, RMSE={rmse:.2f}", model_record.id, percent=55)
+        _update_progress(task_id, _PHASE_SAVING, f"验证评估: MAE={mae:.2f}, RMSE={rmse:.2f}", model_record.id, percent=88)
 
         # 保存模型文件
         import joblib
         import os
         from datetime import datetime
 
-        _update_progress(task_id, _PHASE_SAVING, "保存模型文件", percent=58)
+        _update_progress(task_id, _PHASE_SAVING, "保存模型文件", percent=92)
         model_path = os.path.join(service.model_dir, f"lgb_{ds.id}_{model_record.id}.pkl")
         joblib.dump(model, model_path)
 
@@ -378,7 +376,7 @@ def _train_and_predict_with_progress(
             trained_at=datetime.utcnow(),
         )
 
-        _update_progress(task_id, _PHASE_SAVING, "训练完成，进入预测阶段…", model_record.id, percent=60)
+        _update_progress(task_id, _PHASE_SAVING, "保存完成", model_record.id, percent=95)
 
         logger.info(f"[训练+预测] 写入 {result_count} 条预测结果，模型 model_id={model_record.id}")
 
