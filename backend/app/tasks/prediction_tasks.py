@@ -410,14 +410,7 @@ def _train_and_predict_with_progress(
 
     except Exception as e:
         logger.error(f"[训练+预测] 失败: task_id={task_id}, error={e}")
-        try:
-            mr = db.query(PredictionModel).filter(PredictionModel.id == model_record.id).first()
-            if mr:
-                mr.status = "failed"
-                mr.error_message = f"训练完成，预测失败: {str(e)}"
-                db.commit()
-        except Exception:
-            pass
+        # 不修改 DB（重试时会被覆盖），只更新 Redis 进度
         # 写入失败状态到 Redis
         try:
             r = _get_redis()
@@ -539,12 +532,16 @@ def train_and_predict_prediction_async(
     except Exception as e:
         is_last_retry = self.request.retries >= self.max_retries
         if is_last_retry:
-            # 所有重试用尽，写入失败预测历史
+            # 所有重试用尽，标记模型为失败并写入失败预测历史
             try:
-                from app.repositories.prediction_repository import ForecastHistoryRepository
                 from app.core.database import SessionLocal
+                from app.models.prediction import PredictionModel, ForecastHistory
+                from app.repositories.prediction_repository import ForecastHistoryRepository
                 fh_db = SessionLocal()
                 try:
+                    fh_db.query(PredictionModel).filter(
+                        PredictionModel.task_id == task_id
+                    ).update({"status": "failed", "error_message": str(e)})
                     hist_repo = ForecastHistoryRepository(fh_db)
                     hist_repo.create(
                         task_id=task_id,
@@ -556,6 +553,7 @@ def train_and_predict_prediction_async(
                         error_message=str(e),
                         created_by=user_id,
                     )
+                    fh_db.commit()
                 finally:
                     fh_db.close()
             except Exception:
