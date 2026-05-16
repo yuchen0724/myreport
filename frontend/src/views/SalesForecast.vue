@@ -301,8 +301,8 @@ export default {
     }
 
     function addToHistory(item) {
-      taskHistory.value.unshift(item)
-      if (taskHistory.value.length > 20) taskHistory.value = taskHistory.value.slice(0, 20)
+      trainHistory.value.unshift(item)
+      if (trainHistory.value.length > 20) trainHistory.value = trainHistory.value.slice(0, 20)
     }
 
     async function handleStopTask(tp) {
@@ -401,6 +401,7 @@ export default {
             addToHistory(t)
           }
         }
+        mergeHistory()
         // 查询执行中的预测任务
         try {
           const forecastRunningRes = await getForecastRunning()
