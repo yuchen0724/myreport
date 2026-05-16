@@ -302,11 +302,11 @@ def _train_and_predict_with_progress(
 
         _update_progress(task_id, _PHASE_FETCH, f"数据源={data_source_id}，天数={train_days}", model_record.id)
 
-        # 收集所有批次的预测结果
-        all_results = []
+        result_count = 0
 
-        # 定义批次完成回调：每批（拉取+训练+预测）全部完成后，按完成的批次数折算进度 0-95%
+        # 定义批次完成回调：每批预测完立即写入 DB，不累积在内存
         def _batch_complete_callback(chunk_df, batch_no, total_batches):
+            nonlocal result_count
             try:
                 batch_results = service._predict_from_cache(
                     data_df=chunk_df,
@@ -315,7 +315,9 @@ def _train_and_predict_with_progress(
                     forecast_days=forecast_days,
                     progress_callback=None,
                 )
-                all_results.extend(batch_results)
+                if batch_results:
+                    service.result_repo.bulk_save(batch_results)
+                    result_count += len(batch_results)
                 pct = int(batch_no / total_batches * 95)
                 if pct > 95:
                     pct = 95
@@ -329,7 +331,7 @@ def _train_and_predict_with_progress(
                 logger.warning(f"[训练+预测] 批次 {batch_no} 预测失败: {e}\n{traceback.format_exc()}")
         feature_cols = get_feature_columns()
         model = lgb.LGBMRegressor(
-            n_estimators=500,
+            n_estimators=200,
             learning_rate=0.05,
             max_depth=8,
             num_leaves=31,
@@ -376,8 +378,6 @@ def _train_and_predict_with_progress(
 
         _update_progress(task_id, _PHASE_SAVING, "训练完成，进入预测阶段…", model_record.id, percent=60)
 
-        # 阶段2: 批量写入预测结果
-        result_count = service.result_repo.bulk_save(all_results)
         logger.info(f"[训练+预测] 写入 {result_count} 条预测结果，模型 model_id={model_record.id}")
 
         # 写入预测历史（成功）
