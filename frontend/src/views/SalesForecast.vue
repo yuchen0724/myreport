@@ -344,13 +344,18 @@ export default {
         await ElMessageBox.confirm(`确认删除 ${label} 吗？`, '确认删除',
           { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' })
       } catch { return }
+      loading.value = true
       try {
-        if (modelId) await deleteTrainHistory(modelId)
-        else if (taskId) await deleteTrainHistoryByTask(taskId)
+        // 多路删除：同时清理训练模型和预测历史
+        const promises = []
+        if (modelId) promises.push(deleteTrainHistory(modelId).catch(() => {}))
+        if (taskId) promises.push(deleteForecastProgress(taskId).catch(() => {}))
+        await Promise.all(promises)
         ElMessage.success('删除成功')
       } catch (e) {
         ElMessage.error(`删除失败: ${e.message || e}`)
       }
+      loading.value = false
       await loadHistory()
     }
 
