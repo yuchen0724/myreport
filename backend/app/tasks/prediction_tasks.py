@@ -412,14 +412,28 @@ def _train_and_predict_with_progress(
 
     except Exception as e:
         logger.error(f"[训练+预测] 失败: task_id={task_id}, error={e}")
-        # 训练成功但预测失败时，模型仍标记为ready
         try:
-            # 尝试检查模型状态，如果还是 training 才设为 failed
             mr = db.query(PredictionModel).filter(PredictionModel.id == model_record.id).first()
-            if mr and mr.status == "training":
-                mr.status = "ready"
+            if mr:
+                mr.status = "failed"
                 mr.error_message = f"训练完成，预测失败: {str(e)}"
                 db.commit()
+        except Exception:
+            pass
+        # 写入失败预测历史
+        try:
+            from app.repositories.prediction_repository import ForecastHistoryRepository
+            hist_repo = ForecastHistoryRepository(db)
+            hist_repo.create(
+                task_id=task_id,
+                model_id=model_record.id,
+                data_source_id=data_source_id,
+                forecast_days=forecast_days,
+                result_count=result_count,
+                status="failed",
+                error_message=str(e),
+                created_by=user_id,
+            )
         except Exception:
             pass
         # 写入失败状态到 Redis
