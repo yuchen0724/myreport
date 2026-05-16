@@ -111,15 +111,18 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="指标" width="160">
+        <el-table-column label="指标" width="200">
           <template #default="{ row }">
-            <span v-if="row.metrics" style="font-size: 12px">
-              MAE={{ row.metrics.mae?.toFixed(2) }}
+            <span style="font-size: 12px">
+              <template v-if="row.metrics">
+                MAE={{ row.metrics.mae?.toFixed(2) }}
+              </template>
+              <template v-if="row.result_count">
+                <template v-if="row.metrics"> | </template>
+                预测{{ row.result_count }}条
+              </template>
+              <template v-if="!row.metrics && !row.result_count">-</template>
             </span>
-            <span v-else-if="row.result_count" style="font-size: 12px">
-              预测{{ row.result_count }}条
-            </span>
-            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column prop="task_id" label="任务ID" min-width="150">
@@ -212,16 +215,21 @@ export default {
     }
 
     function mergeHistory() {
-      const combined = [...trainHistory.value, ...forecastHistory.value]
       const seen = new Set()
-      taskHistory.value = combined
+      taskHistory.value = [...trainHistory.value, ...forecastHistory.value]
+        .sort((a, b) => {
+          // 有指标（MAE）的排在前面，优先保留
+          if (a.metrics && !b.metrics) return -1
+          if (!a.metrics && b.metrics) return 1
+          return (b.created_at || '').localeCompare(a.created_at || '')
+        })
         .filter(item => {
-          const key = item.task_id || `${item.model_id}_${item.created_at}`
+          const key = item.model_id || item.task_id
+          if (!key) return true
           if (seen.has(key)) return false
           seen.add(key)
           return true
         })
-        .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
         .slice(0, 20)
     }
 
