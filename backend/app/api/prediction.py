@@ -277,6 +277,44 @@ def _soft_delete_model(model, db):
     db.commit()
 
 
+@router.delete("/history/{model_id}", response_model=dict)
+def delete_model_history(
+    model_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """硬删除训练模型及所有关联的预测历史"""
+    model = db.query(PredictionModel).filter(
+        PredictionModel.id == model_id,
+        PredictionModel.created_by == current_user.id,
+    ).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="记录不存在或无权操作")
+
+    # 清理预测历史
+    db.query(ForecastHistory).filter(
+        ForecastHistory.model_id == model_id
+    ).delete()
+    if model.task_id:
+        db.query(ForecastHistory).filter(
+            ForecastHistory.task_id == model.task_id
+        ).delete()
+    # 清理模型
+    db.delete(model)
+    db.commit()
+
+    # 清理 Redis 进度
+    try:
+        from app.tasks.prediction_tasks import _get_redis, _progress_key
+        r = _get_redis()
+        if r and model.task_id:
+            r.delete(_progress_key(model.task_id))
+    except Exception:
+        pass
+
+    return {"status": "deleted"}
+
+
 @router.delete("/train/{model_id}/history", response_model=dict)
 def delete_train_history(
     model_id: int,

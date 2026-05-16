@@ -344,13 +344,10 @@ export default {
         await ElMessageBox.confirm(`确认删除 ${label} 吗？`, '确认删除',
           { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' })
       } catch { return }
+      if (!modelId) { ElMessage.warning('缺少模型ID，无法删除'); return }
       loading.value = true
       try {
-        // 多路删除：同时清理训练模型和预测历史
-        const promises = []
-        if (modelId) promises.push(deleteTrainHistory(modelId).catch(() => {}))
-        if (taskId) promises.push(deleteForecastProgress(taskId).catch(() => {}))
-        await Promise.all(promises)
+        await deleteTrainHistory(modelId)
         ElMessage.success('删除成功')
       } catch (e) {
         ElMessage.error(`删除失败: ${e.message || e}`)

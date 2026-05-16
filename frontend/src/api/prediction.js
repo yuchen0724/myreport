@@ -38,7 +38,7 @@ export function stopTrainTask(taskId) {
 }
 
 export function deleteTrainHistory(modelId) {
-  return request.delete(`/prediction/train/${modelId}/history`)
+  return request.delete(`/prediction/history/${modelId}`)
 }
 
 export function deleteTrainHistoryByTask(taskId) {
