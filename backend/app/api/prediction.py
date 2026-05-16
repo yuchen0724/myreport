@@ -12,7 +12,7 @@ from app.schemas.prediction import (
     TaskStatusResponse,
     TrainAndPredictRequest,
 )
-from app.models.prediction import PredictionModel
+from app.models.prediction import PredictionModel, ForecastHistory
 from app.repositories.prediction_repository import PredictionResultRepository, PredictionModelRepository, ForecastHistoryRepository
 from app.models.user import User
 
