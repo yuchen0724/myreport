@@ -22,6 +22,7 @@ from app.repositories.prediction_repository import (
 )
 from app.models.prediction import PredictionResult
 from app.utils.feature_engineering import build_features_from_history, get_feature_columns
+from app.utils.db_executor import execute_query
 
 logger = logging.getLogger(__name__)
 
