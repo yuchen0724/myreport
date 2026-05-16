@@ -159,142 +159,16 @@
       </el-table>
     </el-card>
 
-    <!-- 预测图表 -->
-    <el-card v-if="forecastData.length > 0" class="chart-card" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>预测趋势图</span>
-          <div>
-            <el-checkbox-group v-model="selectedStores" size="small">
-              <el-checkbox v-for="s in storeOptions" :key="s.value" :label="s.value" border>{{ s.label }}</el-checkbox>
-            </el-checkbox-group>
-          </div>
-        </div>
-      </template>
-      <div ref="chartRef" style="height: 400px" />
-    </el-card>
 
-    <!-- 预测明细表 -->
-    <el-card class="table-card" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>预测明细</span>
-          <div class="filter-bar">
-            <el-select
-              v-model="filterStoreCode"
-              placeholder="门店筛选"
-              style="width: 140px"
-              clearable
-              @change="loadForecast"
-            >
-              <el-option
-                v-for="s in filterStoreOptions"
-                :key="s.value"
-                :label="s.text"
-                :value="s.value"
-              />
-            </el-select>
-            <el-date-picker
-              v-model="filterDateRange"
-              type="daterange"
-              range-separator="~"
-              start-placeholder="起始日期"
-              end-placeholder="截止日期"
-              value-format="YYYY-MM-DD"
-              style="width: 240px"
-              @change="loadForecast"
-            />
-            <el-button size="small" @click="handleRefresh" :loading="loading">
-              <el-icon><Refresh /></el-icon> 刷新
-            </el-button>
-          </div>
-        </div>
-      </template>
-      <el-table :data="filteredForecastData" border stripe v-loading="loading" style="width: 100%">
-        <el-table-column
-          prop="store_code"
-          label="门店"
-          width="100"
-          :filters="filterStoreOptions"
-          :filter-method="filterStore"
-          filter-placement="bottom"
-        />
-        <el-table-column
-          prop="matnr"
-          label="商品编码"
-          width="150"
-        >
-          <template #header>
-            <el-input
-              v-model="matnrSearchInput"
-              placeholder="输入编码搜索..."
-              size="small"
-              clearable
-              @input="onMatnrSearchInput"
-              style="width: 130px"
-            />
-          </template>
-          <template #default="{ row }">{{ row.matnr }}</template>
-        </el-table-column>
-        <el-table-column
-          prop="forecast_date"
-          label="预测日期"
-          width="130"
-          :filters="dateFilterOptions"
-          :filter-method="filterDate"
-          filter-placement="bottom"
-        />
-        <el-table-column
-          prop="predicted_value"
-          label="预测值"
-          width="130"
-          :filters="valueFilterOptions"
-          :filter-method="filterValue"
-          filter-placement="bottom"
-        >
-          <template #default="{ row }">{{ row.predicted_value?.toFixed(2) }}</template>
-        </el-table-column>
-        <el-table-column
-          prop="lower_bound"
-          label="下限"
-          width="130"
-          :filters="valueFilterOptions"
-          :filter-method="filterValue"
-          filter-placement="bottom"
-        >
-          <template #default="{ row }">{{ row.lower_bound !== null ? row.lower_bound.toFixed(2) : '-' }}</template>
-        </el-table-column>
-        <el-table-column
-          prop="upper_bound"
-          label="上限"
-          width="130"
-          :filters="valueFilterOptions"
-          :filter-method="filterValue"
-          filter-placement="bottom"
-        >
-          <template #default="{ row }">{{ row.upper_bound !== null ? row.upper_bound.toFixed(2) : '-' }}</template>
-        </el-table-column>
-      </el-table>
-      <div class="pagination">
-        <el-pagination
-          v-model:current-page="page"
-          :page-size="pageSize"
-          :total="total"
-          layout="total, prev, pager, next"
-          @current-change="loadForecast"
-        />
-      </div>
-    </el-card>
   </div>
 </template>
 
 <script>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
-import { trainAndPredict, getForecast, getTrainStatus, getPredictStatus, getMyTrainTasks, stopTrainTask, getForecastHistory, getForecastRunning, deleteForecastProgress } from '@/api/prediction'
+import { trainAndPredict, getTrainStatus, getPredictStatus, getMyTrainTasks, stopTrainTask, getForecastHistory, getForecastRunning, deleteForecastProgress } from '@/api/prediction'
 import { getDataSourceList } from '@/api/data_source'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import * as echarts from 'echarts'
 
 export default {
   name: 'SalesForecast',
@@ -333,89 +207,10 @@ export default {
     const taskProgresses = ref([])
     const trainHistory = ref([])
     const forecastHistory = ref([])
-    const forecastData = ref([])
-    const total = ref(0)
     let _trainAndPredictLock = false
     let _pollingInterval = null
     let _pollingTaskId = null
-    const page = ref(1)
-    const pageSize = ref(50)
-    const chartRef = ref(null)
-    const selectedStores = ref([])
-    // 明细表筛选
-    const filterStoreCode = ref(null)
-    const filterDateRange = ref(null)
-    const matnrSearchInput = ref('')
-    const filterStoreActive = ref(null)
-    const filterDateActive = ref(null)
-    const filterValueRangeActive = ref({ predicted_value: null, lower_bound: null, upper_bound: null })
 
-    const filterStoreOptions = computed(() => {
-      const stores = [...new Set(forecastData.value.map(d => d.store_code))]
-      return stores.map(s => ({ text: s, value: s }))
-    })
-
-    function filterStore(value, row) {
-      filterStoreActive.value = value
-      return row.store_code === value
-    }
-
-    const dateFilterOptions = computed(() => {
-      const dates = [...new Set(forecastData.value.map(d => d.forecast_date))]
-      const months = [...new Set(dates.map(d => d.slice(0, 7)))]
-      return months.sort().reverse().map(m => ({ text: m, value: m }))
-    })
-
-    function filterDate(value, row) {
-      filterDateActive.value = value
-      return row.forecast_date && row.forecast_date.startsWith(value)
-    }
-
-    function onMatnrSearchInput() {}
-
-    const valueFilterOptions = [
-      { text: '0 ~ 1,000', value: '0-1000' },
-      { text: '1,000 ~ 10,000', value: '1000-10000' },
-      { text: '10,000 ~ 100,000', value: '10000-100000' },
-      { text: '> 100,000', value: '100000-' },
-    ]
-
-    function filterValue(value, row, col) {
-      const prop = col.property
-      const v = row[prop]
-      if (v == null) return false
-      const active = { ...filterValueRangeActive.value }
-      active[prop] = value
-      filterValueRangeActive.value = active
-
-      if (value === '0-1000') return v >= 0 && v <= 1000
-      if (value === '1000-10000') return v >= 1000 && v <= 10000
-      if (value === '10000-100000') return v >= 10000 && v <= 100000
-      if (value === '100000-') return v >= 100000
-      return true
-    }
-
-    // 商品编码搜索（独立于 el-table column filter）
-    const filteredForecastData = computed(() => {
-      let data = forecastData.value
-      if (matnrSearchInput.value) {
-        const kw = matnrSearchInput.value.toLowerCase()
-        data = data.filter(d => d.matnr.toLowerCase().includes(kw))
-      }
-      return data
-    })
-    let chartInstance = null
-
-    const storeOptions = computed(() => {
-      const stores = [...new Set(forecastData.value.map(d => d.store_code))]
-      return stores.map(s => ({ label: s, value: s }))
-    })
-
-    watch(storeOptions, (opts) => {
-      if (opts.length > 0 && selectedStores.value.length === 0) {
-        selectedStores.value = opts.map(o => o.value)
-      }
-    })
 
     async function loadDataSources() {
       try {
@@ -425,29 +220,7 @@ export default {
     }
 
     async function onDataSourceChange() {
-      await loadForecast()
       await loadForecastHistory()
-    }
-
-    async function loadForecast() {
-      loading.value = true
-      try {
-        const params = {
-          data_source_id: form.value.dataSourceId,
-          page: page.value,
-          page_size: pageSize.value,
-        }
-        if (filterStoreCode.value) params.store_code = filterStoreCode.value
-        if (filterDateRange.value && filterDateRange.value.length === 2) {
-          params.start_date = filterDateRange.value[0]
-          params.end_date = filterDateRange.value[1]
-        }
-        const res = await getForecast(params)
-        const data = res.data || res
-        forecastData.value = data.items || []
-        total.value = data.total || 0
-      } catch { /* silent */ }
-      finally { loading.value = false }
     }
 
     async function loadForecastHistory() {
@@ -456,47 +229,6 @@ export default {
         forecastHistory.value = Array.isArray(res) ? res : (res.data || [])
       } catch { /* silent */ }
     }
-
-    function renderChart() {
-      if (!chartRef.value || forecastData.value.length === 0) return
-      const filtered = forecastData.value.filter(d => selectedStores.value.includes(d.store_code))
-      if (filtered.length === 0) return
-      filtered.sort((a, b) => a.forecast_date.localeCompare(b.forecast_date))
-      const groups = {}
-      for (const d of filtered) {
-        const key = `${d.store_code}-${d.matnr}`
-        if (!groups[key]) groups[key] = []
-        groups[key].push(d)
-      }
-      const keys = Object.keys(groups).slice(0, 10)
-      const xData = [...new Set(filtered.map(d => d.forecast_date))].sort()
-      const series = keys.map(key => {
-        const items = groups[key]
-        return {
-          name: key,
-          type: 'line',
-          smooth: true,
-          data: xData.map(date => {
-            const found = items.find(i => i.forecast_date === date)
-            return found ? +found.predicted_value.toFixed(2) : null
-          }),
-        }
-      })
-      const option = {
-        tooltip: { trigger: 'axis' },
-        legend: { type: 'scroll', bottom: 0 },
-        grid: { left: 60, right: 20, bottom: 60, top: 20 },
-        xAxis: { type: 'category', data: xData, axisLabel: { rotate: 45 } },
-        yAxis: { type: 'value', name: '预测值' },
-        series,
-      }
-      if (!chartInstance) {
-        chartInstance = echarts.init(chartRef.value)
-      }
-      chartInstance.setOption(option, true)
-    }
-
-    watch(selectedStores, () => nextTick(renderChart), { deep: true })
 
     // 统一轮询
     function startPolling() {
@@ -524,8 +256,6 @@ export default {
               } else if (tp.taskType === 'train-and-predict') {
                 resultMsg.value = `训练+预测完成！model_id=${s.model_id || s.modelId || ''}`
                 addToHistory({ status: 'ready', task_id: tp.taskId, model_id: s.model_id || tp.modelId, created_at: tp.createdAt, data_source_name: tp.dataSourceName })
-                await loadForecast()
-                await nextTick(renderChart)
                 await loadForecastHistory()
               } else {
                 addToHistory({ status: 'ready', task_id: tp.taskId, model_id: s.model_id || tp.modelId, created_at: tp.createdAt, data_source_name: tp.dataSourceName })
@@ -637,19 +367,11 @@ export default {
       finally { trainAndPredictLoading.value = false; _trainAndPredictLock = false }
     }
 
-    function handleRefresh() {
-      filterStoreCode.value = null
-      filterDateRange.value = null
-      page.value = 1
-      loadForecast()
-      loadForecastHistory()
-    }
-
     onMounted(async () => {
       await loadDataSources()
       // 从 localStorage 恢复后，如果有已选数据源则加载预测数据
       if (form.value.dataSourceId) {
-        await loadForecast()
+        // 预测结果已在独立页面展示
       }
       await loadForecastHistory()
       checkRunningTasks()
@@ -695,11 +417,7 @@ export default {
     return {
       form, dataSources, trainAndPredictLoading, loading, resultMsg, taskProgress,
       taskProgresses, trainHistory, forecastHistory,
-      forecastData, total, page, pageSize, chartRef, selectedStores, storeOptions,
-      filterStoreCode, filterDateRange, filterStoreOptions, filterStore, filteredForecastData,
-      filterDate, filterDateActive, dateFilterOptions, valueFilterOptions, filterValue, filterValueRangeActive, filterStoreActive,
-      matnrSearchInput, onMatnrSearchInput,
-      handleTrainAndPredict, handleRefresh, loadForecast, handleStopTask,
+      handleTrainAndPredict, handleStopTask,
       handleDeleteProgress, handleDeleteHistory, onDataSourceChange,
     }
   }
