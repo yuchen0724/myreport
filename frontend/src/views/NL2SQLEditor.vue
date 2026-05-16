@@ -167,6 +167,27 @@
           <span>执行时间：{{ executionTimeMs }}ms</span>
         </div>
       </div>
+      <!-- 多轮对话历史 -->
+      <div v-if="conversationHistory.length > 0" class="conversation-history">
+        <el-divider />
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <el-button size="small" @click="showHistory = !showHistory">
+            {{ showHistory ? '收起' : '展开' }} 对话历史（{{ conversationHistory.length }} 轮）
+          </el-button>
+          <el-tag size="small" type="info">多轮对话已开启，新一轮查询将引用上一轮结果</el-tag>
+        </div>
+        <div v-if="showHistory" class="history-list">
+          <div v-for="(round, idx) in conversationHistory" :key="idx" class="history-item">
+            <div class="history-index">第 {{ idx + 1 }} 轮</div>
+            <div class="history-question">问: {{ round.question }}</div>
+            <div class="history-sql" @click="form.question = round.question">
+              <pre>{{ formatSQL(round.sql) }}</pre>
+            </div>
+            <div v-if="round.explanation" class="history-explanation">{{ round.explanation }}</div>
+            <div class="history-meta">结果: {{ round.total }} 条记录, {{ round.columns?.length || 0 }} 列</div>
+          </div>
+        </div>
+      </div>
     </el-card>
   </div></template>
 
@@ -184,6 +205,10 @@ const form = ref({
   question: '',
   group_id: null
 })
+
+// 多轮对话上下文
+const conversationHistory = ref([])  // [{question, sql, columns, rows, explanation}]
+const showHistory = ref(false)
 
 const dataSource = ref([])
 const dsLoadGroupMap = ref({})  // {dsId: true/false} — 记录每个数据源是否开启集团加载
@@ -474,7 +499,25 @@ const handleParse = async () => {
 
   loading.value = true
   try {
-    
+    // 构建多轮对话上下文：将上一轮结果摘要传给后端
+    const lastRound = conversationHistory.value[conversationHistory.value.length - 1]
+    if (lastRound) {
+      const colNames = (lastRound.columns || []).join(', ')
+      const rowCount = lastRound.rows ? (Array.isArray(lastRound.rows) ? lastRound.rows.length : lastRound.total || 0) : 0
+      const sampleRows = lastRound.rows && Array.isArray(lastRound.rows)
+        ? lastRound.rows.slice(0, 3).map(r => JSON.stringify(r)).join('\n')
+        : ''
+      form.value.context = [
+        `上一轮问题: ${lastRound.question}`,
+        `生成的 SQL: ${lastRound.sql}`,
+        `查询结果列: ${colNames}`,
+        `查询结果行数: ${rowCount}`,
+        sampleRows ? `样例数据(前3行):\n${sampleRows}` : ''
+      ].filter(Boolean).join('\n')
+    } else {
+      form.value.context = null
+    }
+
     const response = await parseQuestion(form.value)
     const endTime = performance.now()
     
@@ -482,6 +525,19 @@ const handleParse = async () => {
     queryResult.value = response.query_result
     executionTimeMs.value = response.execution_time_ms
     recommendedChart.value = response.recommended_chart  // 保存 LLM 推荐的图表配置
+
+    // 更新对话历史
+    conversationHistory.value.push({
+      question: form.value.question,
+      sql: response.selected_sql,
+      columns: response.query_result?.columns || [],
+      rows: response.query_result?.rows || [],
+      total: response.query_result?.total || 0,
+      explanation: response.suggestions?.[0]?.explanation || ''
+    })
+
+    // 完成后清除 context，避免表单污染
+    delete form.value.context
 
     // 优先使用 LLM 推荐的图表配置，否则使用智能分析
     if (recommendedChart.value && recommendedChart.value.chart_type) {
@@ -517,7 +573,9 @@ const handleClear = () => {
   chartData.value = []
   chartType.value = 'bar'
   fieldMapping.value = { xAxis: '', yAxis: '' }
-
+  // 清除对话历史，开启新一轮对话
+  conversationHistory.value = []
+  showHistory.value = false
 }
 
 // 根据数据特征自动选择图表类型
@@ -708,5 +766,68 @@ const handleChartTypeChange = (type) => {
   display: block;
   max-height: 120px;
   overflow-y: auto;
+}
+
+/* 对话历史样式 */
+.conversation-history {
+  margin-top: 16px;
+}
+
+.history-list {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.history-item {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.history-item:last-child {
+  margin-bottom: 0;
+}
+
+.history-index {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 4px;
+}
+
+.history-question {
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: #303133;
+}
+
+.history-sql pre {
+  margin: 4px 0;
+  padding: 6px 10px;
+  background: #f0f2f5;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-x: auto;
+  cursor: pointer;
+}
+
+.history-sql pre:hover {
+  background: #e8eaed;
+}
+
+.history-explanation {
+  font-size: 12px;
+  color: #606266;
+  margin-bottom: 2px;
+}
+
+.history-meta {
+  font-size: 12px;
+  color: #909399;
 }
 </style>

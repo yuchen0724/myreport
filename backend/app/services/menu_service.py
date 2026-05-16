@@ -103,7 +103,7 @@ class MenuService:
         menu = self.repo.get_by_id(menu_id)
         if not menu:
             return None
-        
+
         result = {
             "id": menu.id,
             "name": menu.name,
@@ -112,13 +112,18 @@ class MenuService:
             "template_id": menu.template_id,
             "is_enabled": menu.is_enabled,
         }
-        
-        if menu.template:
-            result["template"] = {
-                "id": menu.template.id,
-                "name": menu.template.name,
-                "description": menu.template.description,
-                "config": json.loads(menu.template.config) if isinstance(menu.template.config, str) else menu.template.config,
-            }
-        
+
+        if menu.template_id:
+            # 通过 TemplateRepository 查询关联模板（避免 template relationship 依赖）
+            from app.repositories.template_repository import TemplateRepository
+            template_repo = TemplateRepository(self.db)
+            tmpl = template_repo.get_by_id(menu.template_id)
+            if tmpl:
+                result["template"] = {
+                    "id": tmpl.id,
+                    "name": tmpl.name,
+                    "description": tmpl.description,
+                    "config": json.loads(tmpl.config) if isinstance(tmpl.config, str) else tmpl.config,
+                }
+
         return result

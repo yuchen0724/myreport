@@ -6,6 +6,7 @@ from app.models.proxy_server import ProxyServer
 from app.models.query_history import QueryHistory
 from app.models.export_task import ExportTask
 from app.models.associations import role_permissions
+from app.models.task_alert import TaskAlert
 from app.models.template_version import TemplateVersion
 from app.models.template_share import TemplateShare
 from app.models.template import Template

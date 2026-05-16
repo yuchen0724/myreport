@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from typing import Optional
 from app.core.database import get_db
 from app.models.data_source import DataSource
 from app.models.query_history import QueryHistory
@@ -52,3 +53,17 @@ async def reset_metrics():
     """重置性能指标"""
     metrics_collector.reset()
     return {"status": "reset"}
+
+
+@router.get("/slow-queries")
+async def get_slow_queries(limit: int = 50, threshold: Optional[int] = None):
+    """获取慢查询列表
+    - limit: 返回条数（默认50）
+    - threshold: 查询阈值（毫秒），不传则使用默认阈值
+    """
+    if threshold is not None:
+        metrics_collector.slow_query_threshold_ms = threshold
+    return {
+        "threshold_ms": metrics_collector.slow_query_threshold_ms,
+        "slow_queries": metrics_collector.get_slow_queries(limit),
+    }

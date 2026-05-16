@@ -3,7 +3,7 @@
 """
 import time
 import threading
-from typing import Dict, List
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -15,6 +15,18 @@ class RequestMetric:
     method: str
     status_code: int
     duration_ms: float
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class SlowQueryMetric:
+    """慢查询指标"""
+    sql: str
+    data_source_id: int
+    data_source_name: str
+    execution_time_ms: float
+    row_count: int
+    user_id: int
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -47,6 +59,11 @@ class MetricsCollector:
         self._request_count = 0
         self._error_count = 0
         self._total_duration = 0.0
+
+        # 慢查询配置
+        self.slow_query_threshold_ms = 5000  # 默认 5 秒
+        self._slow_queries: List[SlowQueryMetric] = []
+        self._max_slow_queries = 200  # 最多保留200条
     
     def record_request(self, method: str, path: str, status_code: int, duration_ms: float):
         """记录请求指标"""
@@ -67,6 +84,38 @@ class MetricsCollector:
             # 保持最大数量
             if len(self._metrics) > self._max_metrics:
                 self._metrics = self._metrics[-self._max_metrics:]
+
+    def record_slow_query(self, sql: str, data_source_id: int, data_source_name: str,
+                          execution_time_ms: float, row_count: int, user_id: int):
+        """记录慢查询"""
+        with self._lock:
+            metric = SlowQueryMetric(
+                sql=sql,
+                data_source_id=data_source_id,
+                data_source_name=data_source_name,
+                execution_time_ms=execution_time_ms,
+                row_count=row_count,
+                user_id=user_id,
+            )
+            self._slow_queries.append(metric)
+            if len(self._slow_queries) > self._max_slow_queries:
+                self._slow_queries = self._slow_queries[-self._max_slow_queries:]
+
+    def get_slow_queries(self, limit: int = 50) -> List[Dict]:
+        """获取最近的慢查询列表"""
+        with self._lock:
+            return [
+                {
+                    "sql": m.sql,
+                    "data_source_id": m.data_source_id,
+                    "data_source_name": m.data_source_name,
+                    "execution_time_ms": round(m.execution_time_ms, 2),
+                    "row_count": m.row_count,
+                    "user_id": m.user_id,
+                    "timestamp": m.timestamp.isoformat(),
+                }
+                for m in self._slow_queries[-limit:]
+            ]
     
     def get_summary(self) -> Dict:
         """获取指标摘要"""
@@ -138,6 +187,7 @@ class MetricsCollector:
         """重置指标"""
         with self._lock:
             self._metrics.clear()
+            self._slow_queries.clear()
             self._request_count = 0
             self._error_count = 0
             self._total_duration = 0.0

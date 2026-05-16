@@ -415,33 +415,47 @@ const handleExport = async (format) => {
     const config = templateInfo.value.config
     const sql = buildSqlWithParams()
 
-    // 使用异步导出 API
-    const exportFn = format === 'pdf' ? exportPDF : exportExcel
-    const res = await exportFn({
+    const requestData = {
       data_source_id: config.data_source_id,
       sql: sql
-    })
+    }
 
-    // 轮询任务状态
+    if (format === 'pdf') {
+      // PDF: 同步导出，直接下载 blob
+      const blob = await exportPDF(requestData)
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${menuInfo.value.name || 'report'}.pdf`
+      a.click()
+      window.URL.revokeObjectURL(url)
+      ElMessage.success('导出成功')
+      return
+    }
+
+    // Excel: 异步导出
+    const asyncFn = (await import('@/api/report')).exportExcelAsync
+    const res = await asyncFn(requestData)
+
     const taskId = res?.task_id
     if (!taskId) {
       ElMessage.error('导出任务创建失败')
       return
     }
 
-    // 轮询等待导出完成
+    // 轮询任务状态
     let taskStatus = 'pending'
     let maxAttempts = 60 // 最多等待 60 秒
-    
+
     while (taskStatus === 'pending' || taskStatus === 'processing') {
       await new Promise(resolve => setTimeout(resolve, 2000))
-      
+
       const statusRes = await import('@/api/report').then(m => m.getExportTask(taskId))
       taskStatus = statusRes?.status
-      
+
       maxAttempts--
       if (maxAttempts <= 0) {
-        ElMessage.warning('导出超时，请稍后���看任务状态')
+        ElMessage.warning('导出超时，请稍后查看任务状态')
         break
       }
     }
@@ -450,12 +464,12 @@ const handleExport = async (format) => {
       // 下载文件
       const fileRes = await import('@/api/report').then(m => m.downloadExportFile(taskId))
       const blob = new Blob([fileRes], { 
-        type: format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${menuInfo.value.name || 'report'}.${format === 'pdf' ? 'pdf' : 'xlsx'}`
+      a.download = `${menuInfo.value.name || 'report'}.xlsx`
       a.click()
       window.URL.revokeObjectURL(url)
       ElMessage.success('导出成功')

@@ -1,8 +1,10 @@
+import warnings
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from app.config import get_settings
-from app.api import auth, data_sources, query, report, nl2sql, charts, templates, stats, async_export, users, cache, audit_logs, dashboard, menus, proxy_servers, config
+from app.api import auth, data_sources, query, report, nl2sql, charts, templates, stats, async_export, users, cache, audit_logs, dashboard, menus, proxy_servers, config, alerts
 from app.api import prediction as prediction_api
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.audit_log import AuditLogMiddleware
@@ -10,6 +12,31 @@ from app.middleware.error_handler import register_exception_handlers
 from app.middleware.request_logging import RequestLoggingMiddleware
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+# --- 启动安全检查 ---
+if not settings.debug:
+    # 生产环境强制检查
+    if settings.secret_key == "change-me-in-production-please":
+        raise RuntimeError(
+            "FATAL: SECRET_KEY is still the default placeholder. "
+            "Set SECRET_KEY via environment variable or .env file. "
+            "Generate a secure key: openssl rand -hex 32"
+        )
+    if not settings.password_encryption_key:
+        raise RuntimeError(
+            "FATAL: PASSWORD_ENCRYPTION_KEY is empty. "
+            "Set PASSWORD_ENCRYPTION_KEY via environment variable or .env file. "
+            "Generate a secure key: openssl rand -hex 32"
+        )
+else:
+    # 开发环境仅警告
+    if settings.secret_key == "change-me-in-production-please":
+        warnings.warn("⚠️  SECRET_KEY 仍使用默认值！生产部署前务必修改。")
+    if not settings.password_encryption_key:
+        warnings.warn("⚠️  PASSWORD_ENCRYPTION_KEY 为空！生产部署前务必设置。")
+    if settings.cors_origins == ["http://localhost:5173"]:
+        warnings.warn("⚠️  CORS origins 为默认本地配置，请根据实际部署地址修改。")
 
 app = FastAPI(
     title=settings.app_name,
@@ -95,7 +122,12 @@ app.include_router(audit_logs.router)
 app.include_router(dashboard.router)
 app.include_router(menus.router)
 app.include_router(config.router)
-app.include_router(prediction_api.router)
+app.include_router(alerts.router)
+# 预测路由受 prediction_enabled 控制
+if settings.prediction_enabled:
+    app.include_router(prediction_api.router)
+else:
+    logger.info("预测功能已禁用（prediction_enabled=False），预测 API 未注册")
 
 
 # 启动时预加载集团缓存已移除（需手工调用 POST /api/nl2sql/groups/refresh）

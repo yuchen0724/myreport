@@ -484,10 +484,30 @@ def train_prediction_model_async(
             "detail": f"即将重试({self.request.retries + 1}/3)",
         })
         r.expire(key, _PROGRESS_TTL)
+        if self.request.retries >= self.max_retries:
+            # 最终失败，记录告警
+            try:
+                from app.core.database import SessionLocal as AlertSL
+                from app.services.notification_service import NotificationService
+                alert_db = AlertSL()
+                try:
+                    notif = NotificationService(alert_db)
+                    notif.create_alert(
+                        task_id=task_id,
+                        task_type="train_only",
+                        error_message=str(e),
+                        alert_message=f"训练任务最终失败（重试用尽）: {str(e)[:200]}",
+                        user_id=user_id,
+                    )
+                    alert_db.commit()
+                finally:
+                    alert_db.close()
+            except Exception:
+                pass
         raise self.retry(exc=e, countdown=300)
 
 
-@celery_app.task(bind=True, max_retries=2, soft_time_limit=600)
+@celery_app.task(bind=True, max_retries=1, soft_time_limit=300, time_limit=600)
 def train_and_predict_prediction_async(
     self,
     data_source_id: int,
@@ -532,12 +552,13 @@ def train_and_predict_prediction_async(
     except Exception as e:
         is_last_retry = self.request.retries >= self.max_retries
         if is_last_retry:
-            # 所有重试用尽，标记模型为失败并写入失败预测历史
+            # 所有重试用尽，标记模型为失败并写入失败预测历史，记录告警
             try:
-                from app.core.database import SessionLocal
+                from app.core.database import SessionLocal as AlertSessionLocal
                 from app.models.prediction import PredictionModel, ForecastHistory
                 from app.repositories.prediction_repository import ForecastHistoryRepository
-                fh_db = SessionLocal()
+                from app.services.notification_service import NotificationService
+                fh_db = AlertSessionLocal()
                 try:
                     fh_db.query(PredictionModel).filter(
                         PredictionModel.task_id == task_id
@@ -553,6 +574,18 @@ def train_and_predict_prediction_async(
                         error_message=str(e),
                         created_by=user_id,
                     )
+                    # 记录告警
+                    try:
+                        notif = NotificationService(fh_db)
+                        notif.create_alert(
+                            task_id=task_id,
+                            task_type="train_predict",
+                            error_message=str(e),
+                            alert_message=f"训练+预测任务最终失败（重试用尽）: {str(e)[:200]}",
+                            user_id=user_id,
+                        )
+                    except Exception:
+                        pass
                     fh_db.commit()
                 finally:
                     fh_db.close()
@@ -704,6 +737,27 @@ def predict_prediction_model_async(
         )
         return {"count": count, "status": "success"}
     except Exception as e:
+        logger.warning(f"[Celery] 预测失败，即将重试: task_id={task_id}, retry={self.request.retries+1}")
+        if self.request.retries >= self.max_retries:
+            # 最终失败，记录告警
+            try:
+                from app.core.database import SessionLocal as AlertSL
+                from app.services.notification_service import NotificationService
+                alert_db = AlertSL()
+                try:
+                    notif = NotificationService(alert_db)
+                    notif.create_alert(
+                        task_id=task_id,
+                        task_type="predict_only",
+                        error_message=str(e),
+                        alert_message=f"预测任务最终失败（重试用尽）: {str(e)[:200]}",
+                        user_id=None,
+                    )
+                    alert_db.commit()
+                finally:
+                    alert_db.close()
+            except Exception:
+                pass
         raise self.retry(exc=e, countdown=300)
 
 

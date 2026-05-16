@@ -69,7 +69,7 @@ class NL2SQLService:
             logger.info(f"[NL2SQL] ├─ LLM 客户端初始化完成, timeout={llm_client.timeout}")
             
             sql, confidence, explanation, chart_config = self._generate_sql_with_llm(
-                llm_client, request.question, request.data_source_id, group_id=request.group_id
+                llm_client, request.question, request.data_source_id, group_id=request.group_id, context=request.context
             )
             used_llm = True
             logger.info(f"[NL2SQL] ✅ LLM 生成 SQL 成功:")
@@ -189,7 +189,8 @@ class NL2SQLService:
 
     def _generate_sql_with_llm(
         self, llm_client: LLMClient, question: str, data_source_id: int,
-        group_id: Optional[int] = None
+        group_id: Optional[int] = None,
+        context: Optional[str] = None
     ) -> Tuple[str, float, str, Optional[Dict[str, Any]]]:
         """
         使用 LLM 生成 SQL
@@ -199,6 +200,7 @@ class NL2SQLService:
             question: 自然语言问题
             data_source_id: 数据源 ID
             group_id: 用户所属集团ID（用于分表选择和WHERE条件）
+            context: 上下文信息（前一轮查询的结果摘要，用于多轮修正）
 
         Returns:
             (sql, confidence, explanation): 生成的 SQL、置信度和解释
@@ -290,11 +292,17 @@ class NL2SQLService:
         print(f"[NL2SQL] │   ├─ Question: {question}", flush=True)
         print(f"[NL2SQL] │   ├─ DataSourceID: {data_source_id}", flush=True)
         print(f"[NL2SQL] │   ├─ LLM Client Timeout: {llm_client.timeout}s", flush=True)
+        if context:
+            print(f"[NL2SQL] │   ├─ Context provided: {context[:200]}...", flush=True)
         
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"问题: {question}"}
         ]
+        
+        if context:
+            messages.append({"role": "system", "content": "## 多轮对话上下文\n以下是上一轮查询的结果摘要，请基于此修正或扩展你的回答：\n" + context})
+        
+        messages.append({"role": "user", "content": f"问题: {question}"})
         
         print(f"[NL2SQL] │   ├─ Messages prepared", flush=True)
         

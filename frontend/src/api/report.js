@@ -19,14 +19,14 @@ export function exportExcelAsync(data) {
 
 export function getExportTask(taskId) {
   return request({
-    url: `/report/task/${taskId}`,
+    url: `/async-export/task/${taskId}`,
     method: "get"
   })
 }
 
 export function downloadExportFile(taskId) {
   return request({
-    url: `/report/download/${taskId}`,
+    url: `/async-export/download/${taskId}`,
     method: "get",
     responseType: "blob"
   })

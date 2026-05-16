@@ -26,6 +26,7 @@ class SQLQueryResponse(BaseModel):
     # 游标分页
     cursor: Optional[str] = Field(None, description="当前页游标（最后一行排序列的值）")
     next_cursor: Optional[str] = Field(None, description="下一页游标")
+    cache_hit: bool = Field(False, description="是否命中缓存")
 
 
 class QueryHistoryResponse(BaseModel):

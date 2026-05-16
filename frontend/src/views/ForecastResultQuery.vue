@@ -117,6 +117,20 @@
       </el-form>
     </el-card>
 
+    <!-- 预测趋势图 -->
+    <el-card class="chart-card" v-if="hasData && isChartMode" style="margin-top: 16px">
+      <template #header>
+        <div class="card-header">
+          <span>预测趋势图</span>
+          <el-radio-group v-model="chartMode" size="small">
+            <el-radio-button value="line">折线图</el-radio-button>
+            <el-radio-button value="area">面积图</el-radio-button>
+          </el-radio-group>
+        </div>
+      </template>
+      <div ref="chartRef" class="forecast-chart" />
+    </el-card>
+
     <el-card style="margin-top: 16px">
       <div class="result-header">
         <span v-if="total > 0">共 {{ total }} 条记录</span>
@@ -169,10 +183,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getDataSourceList } from '@/api/data_source'
 import { getForecast, getMyTrainTasks, exportForecastExcel } from '@/api/prediction'
+import * as echarts from 'echarts'
 
 const dataSources = ref([])
 const models = ref([])
@@ -194,6 +209,13 @@ const filters = reactive({
 })
 
 const hasData = computed(() => forecastData.value.length > 0)
+
+// 图表相关
+const chartRef = ref(null)
+const chartMode = ref('line')
+const isChartMode = computed(() => chartRef.value !== null && forecastData.value.length > 0)
+let chartInstance = null
+let resizeHandler = null
 
 function formatDate(iso) {
   if (!iso) return ''
@@ -218,7 +240,6 @@ async function loadModels() {
     const res = await getMyTrainTasks(false)
     const list = Array.isArray(res) ? res : (res.data || [])
     models.value = list.filter(m => m.status === 'ready' && m.data_source_id === filters.dataSourceId)
-    // 如果当前选中的模型不在新列表中，清空
     if (filters.modelId && !models.value.some(m => m.model_id === filters.modelId)) {
       filters.modelId = null
     }
@@ -272,7 +293,9 @@ async function loadForecast() {
 
 function handleSearch() {
   page.value = 1
-  loadForecast()
+  loadForecast().then(() => {
+    nextTick(() => renderChart())
+  })
 }
 
 function handleReset() {
@@ -288,11 +311,14 @@ function handleReset() {
   forecastData.value = []
   total.value = 0
   models.value = []
+  destroyChart()
 }
 
 function onSizeChange() {
   page.value = 1
-  loadForecast()
+  loadForecast().then(() => {
+    nextTick(() => renderChart())
+  })
 }
 
 function handleSortChange({ prop, order }) {
@@ -300,6 +326,257 @@ function handleSortChange({ prop, order }) {
     filters.sortBy = prop
     filters.sortOrder = order === 'descending' ? 'desc' : 'asc'
     handleSearch()
+  }
+}
+
+// ---- 图表渲染 ----
+function getSeriesKey(row) {
+  return `${row.store_code}@${row.matnr}`
+}
+
+function renderChart() {
+  const data = forecastData.value
+  if (!data.length || !chartRef.value) return
+
+  // 按 store_code@matnr 分组
+  const groups = {}
+  for (const row of data) {
+    const key = getSeriesKey(row)
+    if (!groups[key]) groups[key] = []
+    groups[key].push(row)
+  }
+
+  const keys = Object.keys(groups)
+  const isSingle = keys.length === 1
+
+  // 颜色池
+  const colorPalette = [
+    '#5470c6', '#91cc75', '#fac858', '#ee6666',
+    '#73c0de', '#3ba272', '#fc8452', '#9a60b4',
+    '#ea7ccc', '#4a90d9',
+  ]
+
+  const series = []
+  const legendData = []
+
+  keys.forEach((key, idx) => {
+    const items = groups[key]
+    const color = colorPalette[idx % colorPalette.length]
+    const sorted = [...items].sort(
+      (a, b) => a.forecast_date.localeCompare(b.forecast_date)
+    )
+    const dates = sorted.map(r => r.forecast_date)
+    const values = sorted.map(r => r.predicted_value)
+
+    const label = isSingle ? '预测值' : key
+
+    if (isSingle) {
+      // 单门店+单商品：折线 + 置信区间
+      const lower = sorted.map(r =>
+        r.lower_bound != null ? r.lower_bound : null
+      )
+      const upper = sorted.map(r =>
+        r.upper_bound != null ? r.upper_bound : null
+      )
+      const hasConfidence = lower.some(v => v != null)
+
+      if (hasConfidence) {
+        // 置信区间面积图
+        const confidenceArea = []
+        for (let i = 0; i < sorted.length; i++) {
+          confidenceArea.push([
+            dates[i],
+            upper[i] != null ? upper[i] : values[i],
+            lower[i] != null ? lower[i] : values[i],
+          ])
+        }
+
+        series.push({
+          name: '置信区间',
+          type: 'line',
+          data: values,
+          smooth: true,
+          symbol: 'none',
+          lineStyle: { opacity: 0 },
+          z: 1,
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: `${color}40` },
+              { offset: 1, color: `${color}10` },
+            ]),
+          },
+          tooltip: {
+            formatter: function (params) {
+              const idx = params.dataIndex
+              const item = sorted[idx]
+              return [
+                `<div style="font-size:12px;color:#999">${item.forecast_date}</div>`,
+                `<div>预测值: <b>${item.predicted_value.toFixed(2)}</b></div>`,
+                `<div>下限: ${item.lower_bound != null ? item.lower_bound.toFixed(2) : '-'}</div>`,
+                `<div>上限: ${item.upper_bound != null ? item.upper_bound.toFixed(2) : '-'}</div>`,
+              ].join('')
+            },
+          },
+        })
+
+        // 上界轮廓线
+        series.push({
+          name: '上界',
+          type: 'line',
+          data: sorted.map(r => r.upper_bound ?? r.predicted_value),
+          smooth: true,
+          symbol: 'none',
+          lineStyle: { color, width: 0 },
+          z: 0,
+        })
+
+        // 下界轮廓线
+        series.push({
+          name: '下界',
+          type: 'line',
+          data: sorted.map(r => r.lower_bound ?? r.predicted_value),
+          smooth: true,
+          symbol: 'none',
+          lineStyle: { color, width: 0 },
+          z: 0,
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: `${color}40` },
+              { offset: 1, color: `${color}10` },
+            ]),
+          },
+        })
+
+        // 预测值主线（覆盖在面积上）
+        series.push({
+          name: label,
+          type: 'line',
+          data: values,
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 6,
+          lineStyle: { color, width: 2 },
+          itemStyle: { color },
+          z: 2,
+          tooltip: {
+            formatter: function (params) {
+              const idx = params.dataIndex
+              const item = sorted[idx]
+              return [
+                `<div style="font-size:12px;color:#999">${item.forecast_date}</div>`,
+                `<div>${label}: <b>${item.predicted_value.toFixed(2)}</b></div>`,
+                `<div>下限: ${item.lower_bound != null ? item.lower_bound.toFixed(2) : '-'}</div>`,
+                `<div>上限: ${item.upper_bound != null ? item.upper_bound.toFixed(2) : '-'}</div>`,
+              ].join('')
+            },
+          },
+        })
+
+        legendData.push(label)
+      } else {
+        series.push({
+          name: label,
+          type: chartMode.value === 'area' ? 'line' : 'line',
+          data: values,
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 6,
+          lineStyle: { color, width: 2 },
+          itemStyle: { color },
+          areaStyle: chartMode.value === 'area' ? {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: `${color}40` },
+              { offset: 1, color: `${color}10` },
+            ]),
+          } : undefined,
+        })
+        legendData.push(label)
+      }
+    } else {
+      // 多组合：多条折线
+      series.push({
+        name: label,
+        type: 'line',
+        data: values,
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 5,
+        lineStyle: { color, width: 2 },
+        itemStyle: { color },
+        areaStyle: chartMode.value === 'area' ? {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: `${color}30` },
+            { offset: 1, color: `${color}05` },
+          ]),
+        } : undefined,
+      })
+      legendData.push(label)
+    }
+  })
+
+  const option = {
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(255,255,255,0.95)',
+      borderColor: '#ddd',
+      borderWidth: 1,
+      textStyle: { color: '#333', fontSize: 13 },
+    },
+    legend: {
+      data: legendData,
+      bottom: 0,
+      textStyle: { fontSize: 12 },
+    },
+    grid: {
+      left: 50,
+      right: 30,
+      top: 20,
+      bottom: 40,
+    },
+    xAxis: {
+      type: 'category',
+      data: keys.length === 1 ? groups[keys[0]].map(r => r.forecast_date) : [],
+      axisLabel: {
+        rotate: 45,
+        fontSize: 11,
+      },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      name: '预测值',
+      nameTextStyle: { fontSize: 12 },
+      axisLabel: {
+        fontSize: 11,
+        formatter: (v) => v >= 10000 ? (v / 10000).toFixed(1) + 'w' : v.toFixed(0),
+      },
+      splitLine: { lineStyle: { type: 'dashed', color: '#eee' } },
+    },
+    dataZoom: keys.length > 20 ? [{
+      type: 'inside',
+      start: 0,
+      end: 100,
+    }, {
+      type: 'slider',
+      start: 0,
+      end: 100,
+      height: 24,
+      bottom: 50,
+    }] : undefined,
+    series,
+  }
+
+  if (!chartInstance) {
+    chartInstance = echarts.init(chartRef.value)
+  }
+  chartInstance.setOption(option, true)
+  chartInstance.resize()
+}
+
+function destroyChart() {
+  if (chartInstance) {
+    chartInstance.dispose()
+    chartInstance = null
   }
 }
 
@@ -340,14 +617,45 @@ async function handleExport() {
   }
 }
 
+// 图表模式切换时重新渲染
+watch(chartMode, () => {
+  if (forecastData.value.length > 0) {
+    nextTick(() => renderChart())
+  }
+})
+
 onMounted(() => {
   loadDataSources()
+  resizeHandler = () => {
+    if (chartInstance) chartInstance.resize()
+  }
+  window.addEventListener('resize', resizeHandler)
+})
+
+onBeforeUnmount(() => {
+  if (resizeHandler) window.removeEventListener('resize', resizeHandler)
+  destroyChart()
 })
 </script>
 
 <style scoped>
 .forecast-result-query {
   padding: 20px;
+}
+
+.chart-card {
+  margin-top: 16px;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.forecast-chart {
+  width: 100%;
+  height: 400px;
 }
 
 .result-header {

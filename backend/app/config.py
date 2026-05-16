@@ -90,6 +90,14 @@ class Settings(BaseSettings):
             raise ValueError(f"Config value is a placeholder: {v}")
         return v
 
+    @field_validator("password_encryption_key")
+    @classmethod
+    def validate_encryption_key(cls, v: str, info) -> str:
+        """Validate password encryption key is not empty in production."""
+        if not v and not info.data.get("debug", True):
+            raise ValueError("password_encryption_key must be set in production. Generate via: openssl rand -hex 32")
+        return v
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, v) -> List[str]:

@@ -1,10 +1,14 @@
 import os
 os.environ["SECRET_KEY"] = "test-secret-key-for-testing-only"
+os.environ["LLM_API_KEY"] = "test-key"  # 避免 LLM 客户端初始化挂起
+os.environ["LLM_PROVIDER"] = "openai"
 
 import pytest
 import asyncio
+from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 from app.main import app
 from app.core.database import Base, get_db
@@ -14,8 +18,8 @@ from app.models.template import Template
 from app.middleware.rate_limit import RateLimitMiddleware
 
 # 测试数据库
-TEST_DATABASE_URL = "sqlite:///./test.db"
-engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+TEST_DATABASE_URL = "sqlite:///:memory:"  # 使用 :memory: 确保每个测试完全隔离
+engine = create_engine(TEST_DATABASE_URL, poolclass=StaticPool, connect_args={"check_same_thread": False})
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 @pytest.fixture(scope="function")

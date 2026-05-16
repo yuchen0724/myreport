@@ -78,10 +78,10 @@ def execute_query(ds, sql: str) -> tuple:
     else:
         raise ValueError(f"不支持的数据源类型: {ds.type}")
 
-    connect_args = {"connect_timeout": 30, "read_timeout": 600}
+    connect_args = {"connect_timeout": 30, "read_timeout": 300}
 
     # SOCKS5 代理（设置 5 分钟超时，避免无限挂死）
-    original_socket, use_socks = setup_proxy_for_ds(ds, timeout=600)
+    original_socket, use_socks = setup_proxy_for_ds(ds, timeout=300)
     if use_socks:
         logger.info(f"[查询] 使用 SOCKS5 代理")
 

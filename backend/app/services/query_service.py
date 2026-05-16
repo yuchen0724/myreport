@@ -11,6 +11,7 @@ from app.schemas.query import SQLQueryRequest, SQLQueryResponse
 from app.utils.sql_validator import SQLValidator
 from app.core.security import decrypt_password
 from app.services.cache_service import cache_service, full_cache_service
+from app.utils.metrics import metrics_collector
 from app.utils.query_optimizer import QueryOptimizer
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,19 @@ class QueryService:
         self.ds_repo = DataSourceRepository(db)
         self.history_repo = QueryHistoryRepository(db)
 
+    def _make_cache_key(self, sql: str, params: Optional[dict], page: int, page_size: int, cursor: Optional[str], skip_deep_pagination_check: bool) -> str:
+        """生成带分页参数的缓存键"""
+        cache_data = {
+            "sql": sql,
+            "params": params or {},
+            "page": page,
+            "page_size": page_size,
+            "cursor": cursor,
+            "skip_deep_pagination_check": skip_deep_pagination_check,
+        }
+        cache_str = json.dumps(cache_data, sort_keys=True)
+        return f"query_result:{hashlib.md5(cache_str.encode()).hexdigest()}"
+
     def execute_sql(self, request: SQLQueryRequest, user_id: int) -> SQLQueryResponse:
         """执行 SQL 查询"""
         # 验证 SQL 安全（SQLValidator.validate 是唯一校验入口）
@@ -29,7 +43,7 @@ class QueryService:
         if not is_valid:
             raise ValueError(message)
 
-        # 优化查询
+        # 优化查��
         optimized_sql = QueryOptimizer.optimize_query(request.sql)
 
         # 估算查询成本
@@ -43,6 +57,24 @@ class QueryService:
 
         # 调试日志
         logger.info(f"查询请求: page={request.page}, page_size={request.page_size}, sql={optimized_sql[:100]}")
+
+        # 从数据源类型推断缓存 TTL
+        ds_type = ds.type.upper() if ds.type else ""
+        ttl = cache_service.DEFAULT_TTL_BY_SOURCE.get(ds_type, 300)
+
+        cursor_val = getattr(request, 'cursor', None)
+        skip_val = getattr(request, 'skip_deep_pagination_check', False)
+
+        # 检查缓存
+        cache_key = self._make_cache_key(optimized_sql, request.params, request.page, request.page_size, cursor_val, skip_val)
+        cached = cache_service.redis_client.get(cache_key) if cache_service.redis_client else None
+        if cached:
+            cached_data = json.loads(cached)
+            logger.info(f"缓存命中: key={cache_key[:40]}...")
+            # 从缓存数据重建 SQLQueryResponse，标记 cache_hit=True
+            resp_data = cached_data["response"]
+            resp_data["cache_hit"] = True
+            return SQLQueryResponse(**resp_data)
 
         # 简化处理：不再使用全量缓存策略，每次查询都获取当前页数据 + COUNT 总数
         # 这样可以避免缓存不一致问题，同时保证分页正确
@@ -104,6 +136,29 @@ class QueryService:
                 cursor=cursor,
                 next_cursor=next_cursor,
             )
+
+            # 写入缓存
+            if cache_service.redis_client:
+                try:
+                    cache_service.redis_client.setex(
+                        cache_key,
+                        ttl,
+                        json.dumps({"response": response.model_dump()}, default=str)
+                    )
+                    logger.info(f"缓存写入: key={cache_key[:40]}..., ttl={ttl}s")
+                except Exception as e:
+                    logger.warning(f"缓存写入失败: {e}")
+
+            # 慢查询记录
+            if execution_time_ms >= metrics_collector.slow_query_threshold_ms:
+                metrics_collector.record_slow_query(
+                    sql=optimized_sql,
+                    data_source_id=request.data_source_id,
+                    data_source_name=ds.name or ds.type or str(ds.id),
+                    execution_time_ms=execution_time_ms,
+                    row_count=total,
+                    user_id=user_id,
+                )
 
             return response
         except Exception as e:

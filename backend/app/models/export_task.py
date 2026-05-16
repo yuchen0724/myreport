@@ -13,6 +13,7 @@ class ExportTask(Base):
     status = Column(String(20), nullable=False)
     file_path = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
+    retry_count = Column(Integer, nullable=False, default=0)  # 当前重试次数
     row_count = Column(Integer, nullable=True)
     sql = Column(Text, nullable=True)  # 添加SQL字段
     created_at = Column(DateTime(timezone=True), server_default=func.now())
