@@ -94,27 +94,30 @@
       @close="resultMsg = ''"
     />
 
-    <!-- 训练历史 -->
-    <el-card v-if="trainHistory.length > 0" class="history-card" shadow="never">
+    <!-- 任务历史 -->
+    <el-card v-if="taskHistory.length > 0" class="history-card" shadow="never">
       <template #header>
-        <div class="card-header"><span>训练历史</span></div>
+        <div class="card-header"><span>任务历史</span></div>
       </template>
-      <el-table :data="trainHistory" border stripe style="width: 100%">
+      <el-table :data="taskHistory" border stripe style="width: 100%">
         <el-table-column prop="data_source_name" label="数据源" width="140" />
         <el-table-column label="模型ID" width="80">
-          <template #default="{ row }"><el-tag size="small">{{ row.model_id }}</el-tag></template>
+          <template #default="{ row }"><el-tag size="small">{{ row.model_id ?? '-' }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="90">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'ready' ? 'success' : row.status === 'failed' ? 'danger' : 'warning'" size="small">
-              {{ row.status === 'ready' ? '成功' : row.status === 'failed' ? '失败' : row.status }}
+            <el-tag :type="row.status === 'ready' || row.status === 'success' ? 'success' : 'danger'" size="small">
+              {{ row.status === 'ready' || row.status === 'success' ? '成功' : '失败' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="指标" width="180">
+        <el-table-column label="指标" width="160">
           <template #default="{ row }">
             <span v-if="row.metrics" style="font-size: 12px">
-              MAE={{ row.metrics.mae?.toFixed(2) }} RMSE={{ row.metrics.rmse?.toFixed(2) }}
+              MAE={{ row.metrics.mae?.toFixed(2) }}
+            </span>
+            <span v-else-if="row.result_count" style="font-size: 12px">
+              预测{{ row.result_count }}条
             </span>
             <span v-else>-</span>
           </template>
@@ -124,38 +127,13 @@
             <code style="font-size: 12px">{{ row.task_id ? row.task_id.slice(0, 16) + '...' : '-' }}</code>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="提交时间" width="165" />
-        <el-table-column prop="trained_at" label="完成时间" width="165" />
+        <el-table-column prop="created_at" label="时间" width="165" />
         <el-table-column prop="error_message" label="错误" min-width="140" show-overflow-tooltip />
         <el-table-column label="操作" width="80" fixed="right">
           <template #default="{ row }">
             <el-button size="small" type="danger" link @click="handleDeleteHistory(row)">删除</el-button>
           </template>
         </el-table-column>
-      </el-table>
-    </el-card>
-
-    <!-- 预测历史 -->
-    <el-card v-if="forecastHistory.length > 0" class="history-card" shadow="never">
-      <template #header>
-        <div class="card-header"><span>预测历史</span></div>
-      </template>
-      <el-table :data="forecastHistory" border stripe style="width: 100%">
-        <el-table-column prop="data_source_name" label="数据源" width="140" />
-        <el-table-column label="模型ID" width="80">
-          <template #default="{ row }"><el-tag size="small">{{ row.model_id ?? '-' }}</el-tag></template>
-        </el-table-column>
-        <el-table-column prop="forecast_days" label="预测天数" width="80" />
-        <el-table-column prop="result_count" label="结果条数" width="80" />
-        <el-table-column prop="status" label="状态" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">
-              {{ row.status === 'success' ? '成功' : '失败' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="提交时间" width="165" />
-        <el-table-column prop="error_message" label="错误信息" min-width="140" show-overflow-tooltip />
       </el-table>
     </el-card>
 
@@ -207,6 +185,7 @@ export default {
     const taskProgresses = ref([])
     const trainHistory = ref([])
     const forecastHistory = ref([])
+    const taskHistory = ref([])
     let _trainAndPredictLock = false
     let _pollingInterval = null
     let _pollingTaskId = null
@@ -226,8 +205,24 @@ export default {
     async function loadForecastHistory() {
       try {
         const res = await getForecastHistory({ _t: Date.now() })
-        forecastHistory.value = Array.isArray(res) ? res : (res.data || [])
+        const items = Array.isArray(res) ? res : (res.data || [])
+        forecastHistory.value = items
+        mergeHistory()
       } catch { /* silent */ }
+    }
+
+    function mergeHistory() {
+      const combined = [...trainHistory.value, ...forecastHistory.value]
+      const seen = new Set()
+      taskHistory.value = combined
+        .filter(item => {
+          const key = item.task_id || `${item.model_id}_${item.created_at}`
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+        .slice(0, 20)
     }
 
     // 统一轮询
@@ -257,9 +252,11 @@ export default {
                 resultMsg.value = `训练+预测完成！model_id=${s.model_id || s.modelId || ''}`
                 addToHistory({ status: 'ready', task_id: tp.taskId, model_id: s.model_id || tp.modelId, created_at: tp.createdAt, data_source_name: tp.dataSourceName })
                 await loadForecastHistory()
+                mergeHistory()
               } else {
                 addToHistory({ status: 'ready', task_id: tp.taskId, model_id: s.model_id || tp.modelId, created_at: tp.createdAt, data_source_name: tp.dataSourceName })
                 resultMsg.value = `模型训练成功！model_id=${s.model_id}`
+                mergeHistory()
               }
               loadModelOptions()
             } else if (s.status === 'failed') {
@@ -270,9 +267,11 @@ export default {
               } else if (tp.taskType === 'train-and-predict') {
                 addToHistory({ status: 'failed', task_id: tp.taskId, model_id: s.model_id || tp.modelId, created_at: tp.createdAt, error_message: s.error || '未知错误', data_source_name: tp.dataSourceName })
                 resultMsg.value = `训练+预测失败: ${s.error || '未知错误'}`
+                mergeHistory()
               } else {
                 addToHistory({ status: 'failed', task_id: tp.taskId, model_id: s.model_id || tp.modelId, created_at: tp.createdAt, error_message: s.error || '未知错误', data_source_name: tp.dataSourceName })
                 resultMsg.value = `训练失败: ${s.error || '未知错误'}`
+                mergeHistory()
               }
             }
           } catch { /* retry */ }
@@ -294,11 +293,8 @@ export default {
     }
 
     function addToHistory(item) {
-      const exists = trainHistory.value.find(h => h.task_id === item.task_id)
-      if (!exists) {
-        trainHistory.value.unshift(item)
-        if (trainHistory.value.length > 10) trainHistory.value = trainHistory.value.slice(0, 10)
-      }
+      taskHistory.value.unshift(item)
+      if (taskHistory.value.length > 20) taskHistory.value = taskHistory.value.slice(0, 20)
     }
 
     async function handleStopTask(tp) {
@@ -314,6 +310,7 @@ export default {
         const modelId = (stopRes && stopRes.model_id) || tp.modelId
         removeFromActive(taskId)
         addToHistory({ status: 'failed', task_id: taskId, model_id: modelId, created_at: tp.createdAt, error_message: '用户手动停止', data_source_name: tp.dataSourceName })
+        mergeHistory()
         resultMsg.value = '任务已停止'
       } catch (e) { ElMessage.error(`停止任务失败: ${e.message || e}`) }
     }
@@ -416,7 +413,7 @@ export default {
 
     return {
       form, dataSources, trainAndPredictLoading, loading, resultMsg, taskProgress,
-      taskProgresses, trainHistory, forecastHistory,
+      taskProgresses, taskHistory,
       handleTrainAndPredict, handleStopTask,
       handleDeleteProgress, handleDeleteHistory, onDataSourceChange,
     }
