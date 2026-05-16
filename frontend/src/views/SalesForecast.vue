@@ -391,7 +391,7 @@ export default {
               taskProgresses.value.push({ taskId: t.task_id, modelId: t.model_id, percent: progress.percent || 0, phase: progress.phase || '正在恢复', detail: progress.detail || '查询任务状态...', status: 'running', taskType: 'train', createdAt: t.created_at ? new Date(t.created_at).toLocaleString() : '', dataSourceName: t.data_source_name || '' })
             }
           } else if (t.status === 'ready' || t.status === 'failed') {
-            addToHistory(t)
+            // loadHistory 已处理
           }
         }
         // 查询执行中的预测任务
