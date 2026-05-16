@@ -292,11 +292,18 @@ def delete_train_history(
     if model.status in ("training",):
         raise HTTPException(status_code=400, detail="正在训练中的任务不能删除，请先停止")
     _soft_delete_model(model, db)
-    # 同时清理关联的预测历史记录
+    # 同时清理关联的预测历史记录（按 model_id 和 task_id 双维度确保清理干净）
     try:
         db.query(ForecastHistory).filter(
             ForecastHistory.model_id == model_id
         ).delete()
+    except Exception:
+        pass
+    try:
+        if model.task_id:
+            db.query(ForecastHistory).filter(
+                ForecastHistory.task_id == model.task_id
+            ).delete()
         db.commit()
     except Exception:
         pass
