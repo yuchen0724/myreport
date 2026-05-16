@@ -186,8 +186,6 @@ export default {
     const resultMsg = ref('')
     const taskProgress = ref(null)
     const taskProgresses = ref([])
-    const trainHistory = ref([])
-    const forecastHistory = ref([])
     const taskHistory = ref([])
     let _trainAndPredictLock = false
     let _pollingInterval = null
@@ -202,35 +200,34 @@ export default {
     }
 
     async function onDataSourceChange() {
-      await loadForecastHistory()
+      await loadHistory()
     }
 
-    async function loadForecastHistory() {
+    async function loadHistory() {
+      // 同时加载训练记录和预测记录，按 model_id 去重
+      let all = []
       try {
-        const res = await getForecastHistory({ _t: Date.now() })
-        const items = Array.isArray(res) ? res : (res.data || [])
-        forecastHistory.value = items
-        mergeHistory()
+        const [tasksRes, forecastRes] = await Promise.all([
+          getMyTrainTasks(false),
+          getForecastHistory({ _t: Date.now() })
+        ])
+        const tasks = Array.isArray(tasksRes) ? tasksRes : (tasksRes.data || [])
+        const forecasts = Array.isArray(forecastRes) ? forecastRes : (forecastRes.data || [])
+        all = [...tasks, ...forecasts]
       } catch { /* silent */ }
-    }
 
-    function mergeHistory() {
+      // 按 created_at 倒序排序
+      all.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+
+      // 按 model_id 去重（每个 model_id 只保留第一次出现的记录）
       const seen = new Set()
-      taskHistory.value = [...trainHistory.value, ...forecastHistory.value]
-        .sort((a, b) => {
-          // 有指标（MAE）的排在前面，优先保留
-          if (a.metrics && !b.metrics) return -1
-          if (!a.metrics && b.metrics) return 1
-          return (b.created_at || '').localeCompare(a.created_at || '')
-        })
-        .filter(item => {
-          const key = item.model_id || item.task_id
-          if (!key) return true
-          if (seen.has(key)) return false
-          seen.add(key)
-          return true
-        })
-        .slice(0, 20)
+      taskHistory.value = all.filter(item => {
+        const key = item.model_id || item.task_id
+        if (!key) return true
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      }).slice(0, 20)
     }
 
     // 统一轮询
@@ -253,18 +250,15 @@ export default {
               removeFromActive(tp.taskId)
               if (tp.taskType === 'predict') {
                 resultMsg.value = '预测完成！'
-                await loadForecast()
-                await nextTick(renderChart)
-                await loadForecastHistory()
+                await loadHistory()
               } else if (tp.taskType === 'train-and-predict') {
                 resultMsg.value = `训练+预测完成！model_id=${s.model_id || s.modelId || ''}`
                 addToHistory({ status: 'ready', task_id: tp.taskId, model_id: s.model_id || tp.modelId, created_at: tp.createdAt, data_source_name: tp.dataSourceName })
-                await loadForecastHistory()
-                mergeHistory()
+                await loadHistory()
               } else {
                 addToHistory({ status: 'ready', task_id: tp.taskId, model_id: s.model_id || tp.modelId, created_at: tp.createdAt, data_source_name: tp.dataSourceName })
                 resultMsg.value = `模型训练成功！model_id=${s.model_id}`
-                mergeHistory()
+                loadHistory()
               }
               loadModelOptions()
             } else if (s.status === 'failed') {
@@ -275,11 +269,11 @@ export default {
               } else if (tp.taskType === 'train-and-predict') {
                 addToHistory({ status: 'failed', task_id: tp.taskId, model_id: s.model_id || tp.modelId, created_at: tp.createdAt, error_message: s.error || '未知错误', data_source_name: tp.dataSourceName })
                 resultMsg.value = `训练+预测失败: ${s.error || '未知错误'}`
-                mergeHistory()
+                loadHistory()
               } else {
                 addToHistory({ status: 'failed', task_id: tp.taskId, model_id: s.model_id || tp.modelId, created_at: tp.createdAt, error_message: s.error || '未知错误', data_source_name: tp.dataSourceName })
                 resultMsg.value = `训练失败: ${s.error || '未知错误'}`
-                mergeHistory()
+                loadHistory()
               }
             }
           } catch { /* retry */ }
@@ -301,8 +295,8 @@ export default {
     }
 
     function addToHistory(item) {
-      trainHistory.value.unshift(item)
-      if (trainHistory.value.length > 20) trainHistory.value = trainHistory.value.slice(0, 20)
+      taskHistory.value.unshift(item)
+      if (taskHistory.value.length > 20) taskHistory.value = taskHistory.value.slice(0, 20)
     }
 
     async function handleStopTask(tp) {
@@ -318,7 +312,6 @@ export default {
         const modelId = (stopRes && stopRes.model_id) || tp.modelId
         removeFromActive(taskId)
         addToHistory({ status: 'failed', task_id: taskId, model_id: modelId, created_at: tp.createdAt, error_message: '用户手动停止', data_source_name: tp.dataSourceName })
-        mergeHistory()
         resultMsg.value = '任务已停止'
       } catch (e) { ElMessage.error(`停止任务失败: ${e.message || e}`) }
     }
@@ -347,8 +340,8 @@ export default {
       try {
         if (modelId) await deleteTrainHistory(modelId)
         else await deleteTrainHistoryByTask(taskId)
-        const idx = trainHistory.value.findIndex(h => (modelId && h.model_id === modelId) || (taskId && h.task_id === taskId))
-        if (idx !== -1) trainHistory.value.splice(idx, 1)
+        const idx = taskHistory.value.findIndex(h => (modelId && h.model_id === modelId) || (taskId && h.task_id === taskId))
+        if (idx !== -1) taskHistory.value.splice(idx, 1)
         ElMessage.success('删除成功')
       } catch (e) { ElMessage.error(`删除失败: ${e.message || e}`) }
     }
@@ -378,7 +371,7 @@ export default {
       if (form.value.dataSourceId) {
         // 预测结果已在独立页面展示
       }
-      await loadForecastHistory()
+      await loadHistory()
       checkRunningTasks()
     })
 
@@ -401,7 +394,6 @@ export default {
             addToHistory(t)
           }
         }
-        mergeHistory()
         // 查询执行中的预测任务
         try {
           const forecastRunningRes = await getForecastRunning()
