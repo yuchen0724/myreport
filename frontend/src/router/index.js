@@ -1,25 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router"
 import { useUserStore } from "@/store"
 
-// 路由守卫：检查登录和权限
-function requireAuth(to, from, next) {
-  const userStore = useUserStore()
-  
-  if (!userStore.token) {
-    next("/login")
-    return
-  }
-  
-  // 检查角色权限
-  if (to.meta.roles && !userStore.hasRole(to.meta.roles)) {
-    // 无权限，跳转到首页
-    next("/")
-    return
-  }
-  
-  next()
-}
-
 const routes = [
   {
     path: "/login",
@@ -145,6 +126,12 @@ const routes = [
     name: "ReportView",
     component: () => import("@/views/ReportView.vue"),
     meta: { requiresAuth: true }
+  },
+  {
+    path: "/sales-forecast",
+    name: "SalesForecast",
+    component: () => import("@/views/SalesForecast.vue"),
+    meta: { requiresAuth: true, roles: ["admin", "editor"] }
   }
 ]
 

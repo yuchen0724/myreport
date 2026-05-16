@@ -214,13 +214,10 @@ const restoreFromConfig = (config) => {
 
 // 从表单构建 config
 const buildConfig = () => {
-  console.log('[buildConfig] form.value:', JSON.stringify(form.value))
   
   const dsId = form.value.data_source_id
   const sql = form.value.sql
   
-  console.log('[buildConfig] dsId:', dsId, 'typeof:', typeof dsId, 'Boolean:', Boolean(dsId))
-  console.log('[buildConfig] sql:', sql, 'Boolean:', Boolean(sql))
   
   const upperSql = (form.sql || '').toUpperCase().trim()
   if (/\b(DROP\s+TABLE|DROP\s+DATABASE|TRUNCATE\s+TABLE|ALTER\s+TABLE)\b/i.test(upperSql)) {
@@ -307,7 +304,6 @@ const loadTemplate = async () => {
       optionsStr: Array.isArray(p.options) ? p.options.join(',') : ''
     }))
     
-    console.log('[TemplateForm] 模板加载成功, data_source_id:', form.value.data_source_id, 'sql:', form.value.sql?.substring(0, 30))
   } catch (error) {
     console.error('[TemplateForm] 加载模板失败:', error)
     ElMessage.error('加载模板失败')
@@ -319,7 +315,6 @@ const loadDataSources = async () => {
     const res = await getDataSourceList({ page: 1, page_size: 100 })
     // 后端直接返回数组，无需 res.items
     dataSources.value = Array.isArray(res) ? res : (res.items || [])
-    console.log('[TemplateForm] 数据源加载成功:', dataSources.value.length, '条')
   } catch (error) {
     console.error('[TemplateForm] 数据源加载失败:', error)
     ElMessage.error('加载数据源失败，请刷新页面重试')
@@ -389,9 +384,7 @@ const doPreview = async () => {
 
 const handleSubmit = async () => {
   try {
-    console.log('[handleSubmit] 开始提交, form:', form.value)
     await formRef.value.validate()
-    console.log('[handleSubmit] 表单验证通过')
 
     const config = buildConfig()
     if (!config) {
@@ -399,7 +392,6 @@ const handleSubmit = async () => {
       ElMessage.error('请检查表单：数据源和SQL不能为空')
       return
     }
-    console.log('[TemplateForm] 构建的 config:', config)
 
     // 构建后端期望的 payload 结构
     const payload = {
@@ -408,12 +400,10 @@ const handleSubmit = async () => {
       config: config,
       is_public: form.value.is_public
     }
-    console.log('[TemplateForm] 提交的 payload:', payload)
 
     loading.value = true
 
     if (isEdit.value) {
-      console.log('[TemplateForm] 调用 updateTemplate, id:', route.params.id, 'payload.config.sql:', payload.config.sql?.substring(0, 30))
       await updateTemplate(route.params.id, payload)
       ElMessage.success('更新成功')
     } else {

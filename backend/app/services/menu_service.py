@@ -5,6 +5,7 @@ import json
 from typing import List, Optional, Dict
 from sqlalchemy.orm import Session
 from app.repositories.menu_repository import MenuRepository
+from app.repositories.template_repository import TemplateRepository
 from app.schemas.menu import MenuCreate, MenuUpdate, MenuResponse, MenuTreeResponse
 from app.models.menu import Menu
 
@@ -36,11 +37,19 @@ class MenuService:
     def get_tree(self) -> List[Dict]:
         """获取菜单树（含模板名称）"""
         all_menus = self.repo.get_enabled_menus()
-        
+
+        # 批量加载模板名称（避免 N+1 查询）
+        template_ids = [m.template_id for m in all_menus if m.template_id]
+        template_names = {}
+        if template_ids:
+            template_repo = TemplateRepository(self.db)
+            templates = template_repo.get_by_ids(template_ids)
+            template_names = {t.id: t.name for t in templates}
+
         # 构建所有菜单的字典（含模板名称）
         menu_dict = {}
         for menu in all_menus:
-            template_name = menu.template.name if menu.template else None
+            template_name = template_names.get(menu.template_id) if menu.template_id else None
             menu_dict[menu.id] = {
                 "id": menu.id,
                 "name": menu.name,

@@ -9,6 +9,9 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from typing import List, Any
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class PDFGenerator:
     """PDF 生成器"""
@@ -26,8 +29,8 @@ class PDFGenerator:
                 pdfmetrics.registerFont(TTFont('DejaVu', font_path))
                 self.styles['Normal'].fontName = 'DejaVu'
                 self.styles['Heading1'].fontName = 'DejaVu'
-        except:
-            pass
+        except Exception:
+            logger.warning("中文字体注册失败，使用默认字体")
 
     def generate_pdf(
         self,

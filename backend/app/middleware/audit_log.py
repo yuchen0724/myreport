@@ -57,7 +57,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
                     request.headers.get("authorization", "").replace("Bearer ", ""),
                     db
                 )
-            except:
+            except Exception:
                 # 未认证用户
                 pass
             

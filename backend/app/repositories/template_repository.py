@@ -20,6 +20,10 @@ class TemplateRepository:
         """根据 ID 获取模板"""
         return self.db.query(Template).filter(Template.id == template_id).first()
 
+    def get_by_ids(self, ids: List[int]) -> List[Template]:
+        """批量获取模板"""
+        return self.db.query(Template).filter(Template.id.in_(ids)).all()
+
     def get_all(self, user_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[Template]:
         """获取所有模板（支持分页）"""
         query = self.db.query(Template)

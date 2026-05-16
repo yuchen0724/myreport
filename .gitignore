@@ -55,3 +55,6 @@ Thumbs.db
 # DeepSeek agent cache
 .deepseek/
 frontend/vite.config.js.timestamp-*
+.venv/
+.hermes/
+backend/models/

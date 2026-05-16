@@ -603,11 +603,17 @@ class NL2SQLService:
         
         # 构建连接参数
         connect_args = {}
+        env_proxy_set = False
+        old_http_proxy = None
+        old_https_proxy = None
         if proxy_url:
             if ds_type == "MYSQL" or ds_type == "DORIS":
                 connect_args = {"proxy": proxy_url}
             elif ds_type == "POSTGRESQL":
+                env_proxy_set = True
                 import os
+                old_http_proxy = os.environ.get('HTTP_PROXY')
+                old_https_proxy = os.environ.get('HTTPS_PROXY')
                 os.environ['HTTP_PROXY'] = proxy_url
                 os.environ['HTTPS_PROXY'] = proxy_url
         
@@ -626,80 +632,90 @@ class NL2SQLService:
         tables_info = {}
 
         try:
-            with engine.connect() as conn:
-                # 获取表列表（含库名）
-                if ds.type in ["MYSQL", "DORIS"]:
-                    # 从 information_schema 获取表及其所属库
-                    tables_result = conn.execute(text("""
-                        SELECT TABLE_SCHEMA, TABLE_NAME 
-                        FROM information_schema.TABLES 
-                        WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
-                        ORDER BY TABLE_SCHEMA, TABLE_NAME
-                    """))
-                    tables_with_schema = [(row[0], row[1]) for row in tables_result.fetchall()][:50]
+            try:
+                with engine.connect() as conn:
+                    # 获取表列表（含库名）
+                    if ds.type in ["MYSQL", "DORIS"]:
+                        # 从 information_schema 获取表及其所属库
+                        tables_result = conn.execute(text("""
+                            SELECT TABLE_SCHEMA, TABLE_NAME
+                            FROM information_schema.TABLES
+                            WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+                            ORDER BY TABLE_SCHEMA, TABLE_NAME
+                        """))
+                        tables_with_schema = [(row[0], row[1]) for row in tables_result.fetchall()][:50]
 
-                    # 获取每个表的列信息
-                    for db_name, table_name in tables_with_schema:
-                        try:
-                            desc_result = conn.execute(text(f"DESCRIBE `{db_name}`.`{table_name}`"))
-                            columns = []
-                            for row in desc_result.fetchall():
-                                columns.append({
-                                    "name": row[0],
-                                    "type": row[1],
-                                    "nullable": row[2],
-                                    "key": row[3] if len(row) > 3 else "",
-                                    "default": str(row[4]) if len(row) > 4 and row[4] is not None else "",
-                                    "comment": row[5] if len(row) > 5 else ""
-                                })
-                            # 键名使用 "库名.表名" 格式
-                            tables_info[f"{db_name}.{table_name}"] = columns
-                        except Exception as e:
-                            logger.warning(f"获取表 {db_name}.{table_name} 结构失败: {e}")
-                            continue
+                        # 获取每个表的列信息
+                        for db_name, table_name in tables_with_schema:
+                            try:
+                                desc_result = conn.execute(text(f"DESCRIBE `{db_name}`.`{table_name}`"))
+                                columns = []
+                                for row in desc_result.fetchall():
+                                    columns.append({
+                                        "name": row[0],
+                                        "type": row[1],
+                                        "nullable": row[2],
+                                        "key": row[3] if len(row) > 3 else "",
+                                        "default": str(row[4]) if len(row) > 4 and row[4] is not None else "",
+                                        "comment": row[5] if len(row) > 5 else ""
+                                    })
+                                # 键名使用 "库名.表名" 格式
+                                tables_info[f"{db_name}.{table_name}"] = columns
+                            except Exception as e:
+                                logger.warning(f"获取表 {db_name}.{table_name} 结构失败: {e}")
+                                continue
 
-                elif ds_type == "POSTGRESQL":
-                    # PostgreSQL 使用 information_schema，获取 schema（相当于库）
-                    tables_result = conn.execute(text(f"""
-                    SELECT table_schema, table_name
-                        FROM information_schema.tables 
-                        WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
-                        ORDER BY table_schema, table_name
-                    """))
-                    tables_with_schema = [(row[0], row[1]) for row in tables_result.fetchall()][:50]
+                    elif ds_type == "POSTGRESQL":
+                        # PostgreSQL 使用 information_schema，获取 schema（相当于库）
+                        tables_result = conn.execute(text(f"""
+                        SELECT table_schema, table_name
+                            FROM information_schema.tables
+                            WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
+                            ORDER BY table_schema, table_name
+                        """))
+                        tables_with_schema = [(row[0], row[1]) for row in tables_result.fetchall()][:50]
 
-                    for db_name, table_name in tables_with_schema:
-                        try:
-                            desc_result = conn.execute(text(f"""
-                                SELECT 
-                                    column_name,
-                                    data_type,
-                                    is_nullable,
-                                    column_default
-                                FROM information_schema.columns
-                                WHERE table_schema = :schema_name AND table_name = :table_name
-                                ORDER BY ordinal_position
-                            """), {"schema_name": db_name, "table_name": table_name})
+                        for db_name, table_name in tables_with_schema:
+                            try:
+                                desc_result = conn.execute(text(f"""
+                                    SELECT
+                                        column_name,
+                                        data_type,
+                                        is_nullable,
+                                        column_default
+                                    FROM information_schema.columns
+                                    WHERE table_schema = :schema_name AND table_name = :table_name
+                                    ORDER BY ordinal_position
+                                """), {"schema_name": db_name, "table_name": table_name})
 
-                            columns = []
-                            for row in desc_result.fetchall():
-                                columns.append({
-                                    "name": row[0],
-                                    "type": row[1],
-                                    "nullable": row[2],
-                                    "key": "",
-                                    "default": str(row[3]) if row[3] else "",
-                                    "comment": ""
-                                })
-                            tables_info[f"{db_name}.{table_name}"] = columns
-                        except Exception as e:
-                            logger.warning(f"获取表 {db_name}.{table_name} 结构失败: {e}")
-                            continue
-
+                                columns = []
+                                for row in desc_result.fetchall():
+                                    columns.append({
+                                        "name": row[0],
+                                        "type": row[1],
+                                        "nullable": row[2],
+                                        "key": "",
+                                        "default": str(row[3]) if row[3] else "",
+                                        "comment": ""
+                                    })
+                                tables_info[f"{db_name}.{table_name}"] = columns
+                            except Exception as e:
+                                logger.warning(f"获取表 {db_name}.{table_name} 结构失败: {e}")
+                                continue
+            finally:
+                engine.dispose()
+            return tables_info
         finally:
-            engine.dispose()
-
-        return tables_info
+            if env_proxy_set:
+                import os
+                if old_http_proxy is None:
+                    os.environ.pop('HTTP_PROXY', None)
+                else:
+                    os.environ['HTTP_PROXY'] = old_http_proxy
+                if old_https_proxy is None:
+                    os.environ.pop('HTTPS_PROXY', None)
+                else:
+                    os.environ['HTTPS_PROXY'] = old_https_proxy
 
     def validate_sql(self, sql: str) -> bool:
         """

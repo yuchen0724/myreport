@@ -5,7 +5,7 @@
 import logging
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional
 from contextvars import ContextVar
 import uuid
@@ -41,7 +41,7 @@ class StructuredLogger:
         """记录日志"""
         extra = {
             "request_id": request_id_var.get() or str(uuid.uuid4())[:8],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(timezone(timedelta(hours=8))).isoformat(),
             **kwargs
         }
         getattr(self.logger, level.lower())(message, extra=extra)
@@ -67,7 +67,7 @@ class JsonFormatter(logging.Formatter):
     
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone(timedelta(hours=8))).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),

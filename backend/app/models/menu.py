@@ -30,7 +30,9 @@ class Menu(Base):
     
     # 关系
     parent = relationship("Menu", remote_side=[id], backref="children")
-    template = relationship("Template", backref="menus", lazy="joined")
+    # 注意：不能定义 template relationship，因为 Template 模型加载时序不可控
+    # 需要获取关联模板时，请通过 TemplateRepository 查询
+    # template_id 字段仅用于存储外键
     
     def __repr__(self):
         return f"<Menu {self.name}>"

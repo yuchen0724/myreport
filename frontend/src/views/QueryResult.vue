@@ -21,7 +21,7 @@
             :page-size="pageSize"
             :page-sizes="[20, 50, 100, 200]"
             :current-page="currentPage"
-            @current-change="(page) => { currentPage = page; /* TODO: 重新查询 */ }"
+            @current-change="handlePageChange"
             @update:page-size="(val) => { pageSize = val; currentPage = 1 }"
           />
         </div>
@@ -36,12 +36,21 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { exportExcel, exportPDF } from '@/api/report'
-import { executeSQL } from '@/api/query'
 
 export default {
   name: 'QueryResult',
-  components: { },
-  setup() {
+  props: {
+    dataSourceId: {
+      type: Number,
+      default: null
+    },
+    querySql: {
+      type: String,
+      default: ''
+    }
+  },
+  emits: ['re-query'],
+  setup(props, { emit }) {
     const loading = ref(false)
     const exportingExcel = ref(false)
     const exportingPDF = ref(false)
@@ -56,6 +65,11 @@ export default {
       execution_time_ms: 0
     })
 
+    const handlePageChange = (page) => {
+      currentPage.value = page
+      emit('re-query', { page, page_size: pageSize.value })
+    }
+
     const handleExportExcel = async () => {
       if (!result.value.rows || result.value.rows.length === 0) {
         ElMessage.warning('没有查询结果可导出')
@@ -65,8 +79,8 @@ export default {
       exportingExcel.value = true
       try {
         const response = await exportExcel({
-          data_source_id: 1, // TODO: 从路由参数获取
-          sql: 'SELECT * FROM users LIMIT 10', // TODO: 从路由参数获取
+          data_source_id: props.dataSourceId,
+          sql: props.querySql,
           filename: `report_${Date.now()}.xlsx`
         })
 
@@ -96,8 +110,8 @@ export default {
       exportingPDF.value = true
       try {
         const response = await exportPDF({
-          data_source_id: 1, // TODO: 从路由参数获取
-          sql: 'SELECT * FROM users LIMIT 10', // TODO: 从路由参数获取
+          data_source_id: props.dataSourceId,
+          sql: props.querySql,
           filename: `report_${Date.now()}.pdf`
         })
 
@@ -123,6 +137,9 @@ export default {
       exportingExcel,
       exportingPDF,
       result,
+      currentPage,
+      pageSize,
+      handlePageChange,
       handleExportExcel,
       handleExportPDF
     }
