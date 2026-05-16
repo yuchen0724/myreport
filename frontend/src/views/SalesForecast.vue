@@ -341,13 +341,12 @@ export default {
       if (!modelId && !taskId) { ElMessage.warning('该记录缺少标识信息，无法删除'); return }
       try {
         const label = modelId ? `模型 #${modelId}` : `任务 ${(taskId || '').slice(0, 12)}...`
-        await ElMessageBox.confirm(`确认删除 ${label} 及相关预测记录吗？`, '确认删除',
+        await ElMessageBox.confirm(`确认删除 ${label} 吗？`, '确认删除',
           { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' })
       } catch { return }
       try {
-        // 同时删除训练模型和预测历史，确保重新加载后不会残留
         if (modelId) await deleteTrainHistory(modelId)
-        if (taskId) await deleteForecastProgress(taskId)
+        else if (taskId) await deleteTrainHistoryByTask(taskId)
         ElMessage.success('删除成功')
       } catch (e) {
         ElMessage.error(`删除失败: ${e.message || e}`)
