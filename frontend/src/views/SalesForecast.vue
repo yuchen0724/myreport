@@ -216,22 +216,24 @@ export default {
         all = [...tasks, ...forecasts]
       } catch { /* silent */ }
 
-      // 按 created_at 倒序排序（有指标的优先保留，确保训练记录不被预测记录覆盖）
-      all.sort((a, b) => {
-        if (a.metrics && !b.metrics) return -1
-        if (!a.metrics && b.metrics) return 1
-        return (b.created_at || '').localeCompare(a.created_at || '')
-      })
-
-      // 按 model_id 去重（每个 model_id 只保留第一次出现的记录）
-      const seen = new Set()
-      taskHistory.value = all.filter(item => {
+      // 按 model_id 合并：同时有训练（metrics）和预测（result_count）记录时合并为一条
+      const merged = new Map()
+      for (const item of all) {
         const key = item.model_id || item.task_id
-        if (!key) return true
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
-      }).slice(0, 20)
+        if (!key) { merged.set(`_${Math.random()}`, item); continue }
+        if (merged.has(key)) {
+          const existing = merged.get(key)
+          if (item.metrics) existing.metrics = item.metrics
+          if (item.result_count) existing.result_count = item.result_count
+          if (!existing.data_source_name) existing.data_source_name = item.data_source_name
+        } else {
+          merged.set(key, { ...item })
+        }
+      }
+
+      taskHistory.value = [...merged.values()]
+        .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+        .slice(0, 20)
     }
 
     // 统一轮询
