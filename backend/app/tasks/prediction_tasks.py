@@ -299,11 +299,11 @@ def _train_and_predict_with_progress(
             task_id=task_id,
             created_by=user_id,
         )
-        _update_progress(task_id, _PHASE_INIT, f"任务已提交，数据源={data_source_id}", model_record.id, percent=2)
+        _update_progress(task_id, "准备数据", f"查询活跃分组，数据源={data_source_id}", model_record.id, percent=3)
 
         result_count = 0
 
-        # 定义批次完成回调：分批处理（拉取+训练+预测一体化），进度 2%~85%
+        # 定义批次完成回调：分批处理（拉取+训练+预测一体化），进度 5%~85%
         def _batch_complete_callback(chunk_df, batch_no, total_batches):
             nonlocal result_count
             try:
@@ -317,11 +317,11 @@ def _train_and_predict_with_progress(
                 if batch_results:
                     service.result_repo.bulk_save(batch_results)
                     result_count += len(batch_results)
-                pct = int(batch_no / total_batches * 83) + 2
+                pct = int(batch_no / total_batches * 80) + 5
                 if pct > 85:
                     pct = 85
                 _update_progress(
-                    task_id, _PHASE_PREDICT,
+                    task_id, "分批处理",
                     f"处理中 {batch_no}/{total_batches} 批, 预测 {len(batch_results)} 条",
                     model_record.id, percent=pct
                 )
