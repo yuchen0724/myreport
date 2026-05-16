@@ -16,7 +16,7 @@ except ImportError:
     _HAS_SOCKS = False
 
 
-def setup_proxy_for_ds(ds) -> tuple:
+def setup_proxy_for_ds(ds, timeout: int = 60) -> tuple:
     """
     根据数据源配置设置 SOCKS5 代理，返回 (original_socket, use_socks)
     调用方必须在 finally 中调用 restore_socket(original_socket) 恢复。
@@ -34,7 +34,7 @@ def setup_proxy_for_ds(ds) -> tuple:
         proxy_db.close()
         if proxy and proxy.proxy_type.lower() == "socks5":
             original_socket = _socket.socket
-            _apply_socks_proxy(proxy.host, proxy.port)
+            _apply_socks_proxy(proxy.host, proxy.port, timeout)
             return original_socket, True
     except Exception as e:
         import traceback
@@ -43,12 +43,13 @@ def setup_proxy_for_ds(ds) -> tuple:
     return None, False
 
 
-def _apply_socks_proxy(proxy_host: str, proxy_port: int):
-    """全局替换 socket 为 SOCKS5 代理 socket"""
+def _apply_socks_proxy(proxy_host: str, proxy_port: int, timeout: int = 60):
+    """全局替换 socket 为 SOCKS5 代理 socket，设置超时避免无限挂死"""
     if not _HAS_SOCKS:
         raise RuntimeError("SOCKS5 代理需要 PySocks 库: pip install PySocks")
     _socks.set_default_proxy(_socks.SOCKS5, proxy_host, proxy_port)
     _socket.socket = _socks.socksocket
+    _socket.setdefaulttimeout(timeout)
 
 
 def restore_socket(original_socket):
@@ -79,8 +80,8 @@ def execute_query(ds, sql: str) -> tuple:
 
     connect_args = {"connect_timeout": 30, "read_timeout": 600}
 
-    # SOCKS5 代理
-    original_socket, use_socks = setup_proxy_for_ds(ds)
+    # SOCKS5 代理（设置 5 分钟超时，避免无限挂死）
+    original_socket, use_socks = setup_proxy_for_ds(ds, timeout=300)
     if use_socks:
         logger.info(f"[查询] 使用 SOCKS5 代理")
 

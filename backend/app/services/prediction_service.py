@@ -152,8 +152,9 @@ class PredictionService:
 
         logger.info(f"[训练] 活跃分组数={len(all_groups)}")
 
-        # 每个分组独立作为一个批次，避免单次查询数据量过大导致 SOCKS 代理挂死
-        batches = [[(gid, scode, mnr)] for gid, scode, mnr in all_groups]
+        # 每 N 个分组合并为一个批次，减少 DB 写入次数和模型 fit 调用
+        BATCH_GROUP_SIZE = 5
+        batches = [all_groups[i:i+BATCH_GROUP_SIZE] for i in range(0, len(all_groups), BATCH_GROUP_SIZE)]
         total_batches = len(batches)
 
         batch_no = 0
