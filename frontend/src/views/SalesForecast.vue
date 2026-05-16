@@ -340,16 +340,19 @@ export default {
       const taskId = row.task_id
       if (!modelId && !taskId) { ElMessage.warning('该记录缺少标识信息，无法删除'); return }
       try {
-        await ElMessageBox.confirm('确认删除该训练历史记录吗？', '确认删除',
+        const label = modelId ? `模型 #${modelId}` : `任务 ${(taskId || '').slice(0, 12)}...`
+        await ElMessageBox.confirm(`确认删除 ${label} 及相关预测记录吗？`, '确认删除',
           { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' })
       } catch { return }
       try {
+        // 同时删除训练模型和预测历史，确保重新加载后不会残留
         if (modelId) await deleteTrainHistory(modelId)
-        else await deleteTrainHistoryByTask(taskId)
-        const idx = taskHistory.value.findIndex(h => (modelId && h.model_id === modelId) || (taskId && h.task_id === taskId))
-        if (idx !== -1) taskHistory.value.splice(idx, 1)
+        if (taskId) await deleteForecastProgress(taskId)
         ElMessage.success('删除成功')
-      } catch (e) { ElMessage.error(`删除失败: ${e.message || e}`) }
+      } catch (e) {
+        ElMessage.error(`删除失败: ${e.message || e}`)
+      }
+      await loadHistory()
     }
 
     async function handleTrainAndPredict() {
