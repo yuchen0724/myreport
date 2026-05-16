@@ -96,11 +96,19 @@
         </el-menu-item>
       </el-sub-menu>
 
-      <!-- 智能分析 -->
-      <el-menu-item index="/sales-forecast">
-        <el-icon><TrendCharts /></el-icon>
-        <span>销售预测</span>
-      </el-menu-item>
+      <!-- 销售预测 -->
+      <el-sub-menu index="sales-prediction">
+        <template #title>
+          <el-icon><TrendCharts /></el-icon>
+          <span>销售预测</span>
+        </template>
+        <el-menu-item index="/sales-forecast">
+          <span>训练预测</span>
+        </el-menu-item>
+        <el-menu-item index="/forecast-results">
+          <span>预测结果查询</span>
+        </el-menu-item>
+      </el-sub-menu>
     </el-menu>
   </div>
 </template>

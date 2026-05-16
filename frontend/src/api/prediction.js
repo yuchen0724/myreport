@@ -67,6 +67,10 @@ export function deleteForecastProgress(taskId) {
   return request.delete(`/prediction/forecast/progress/${taskId}`)
 }
 
+export function exportForecastExcel(params) {
+  return request.get('/prediction/forecast/export', { params, responseType: 'blob' })
+}
+
 export function trainAndPredict(dataSourceId, trainDays, forecastDays, tableName) {
   return request.post('/prediction/train-and-predict', {
     data_source_id: dataSourceId,

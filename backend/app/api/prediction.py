@@ -8,7 +8,7 @@ from app.services.prediction_service import PredictionService
 from app.schemas.prediction import (
     TrainRequest, TrainResponse,
     PredictRequest, PredictResponse,
-    ForecastQuery, ForecastListResponse, ForecastItem,
+    ForecastQuery, ForecastExportQuery, ForecastListResponse, ForecastItem,
     TaskStatusResponse,
     TrainAndPredictRequest,
 )
@@ -358,9 +358,14 @@ def get_forecast(
 ):
     """查询预测结果"""
     repo = PredictionResultRepository(db)
-    results = repo.get_forecast(
-        req.data_source_id, req.model_id, req.store_code,
+    total = repo.count_forecast(
+        req.data_source_id, req.model_id, req.store_code, req.matnr,
         req.start_date, req.end_date,
+    )
+    results = repo.get_forecast(
+        req.data_source_id, req.model_id, req.store_code, req.matnr,
+        req.start_date, req.end_date,
+        req.sort_by or "forecast_date", req.sort_order or "asc",
         req.page_size, (req.page - 1) * req.page_size,
     )
     items = [ForecastItem(
@@ -368,7 +373,51 @@ def get_forecast(
         forecast_date=r.forecast_date, predicted_value=r.predicted_value,
         lower_bound=r.lower_bound, upper_bound=r.upper_bound,
     ) for r in results]
-    return ForecastListResponse(items=items, total=len(items))
+    return ForecastListResponse(items=items, total=total)
+
+
+@router.get("/forecast/export")
+def export_forecast(
+    req: ForecastExportQuery = Depends(),
+    db: Session = Depends(get_db),
+):
+    """导出预测结果为 Excel（同步，适用于万级数据量）"""
+    from fastapi.responses import StreamingResponse
+    import pandas as pd
+    from io import BytesIO
+
+    repo = PredictionResultRepository(db)
+    results = repo.get_forecast(
+        req.data_source_id, req.model_id, req.store_code, req.matnr,
+        req.start_date, req.end_date,
+        req.sort_by or "forecast_date", req.sort_order or "asc",
+        limit=100000, offset=0,
+    )
+
+    data = [{
+        "门店编码": r.store_code,
+        "商品编码": r.matnr,
+        "预测日期": r.forecast_date.isoformat(),
+        "预测值": r.predicted_value,
+        "下限": r.lower_bound if r.lower_bound is not None else "",
+        "上限": r.upper_bound if r.upper_bound is not None else "",
+    } for r in results]
+
+    if not data:
+        data = [{"门店编码": "", "商品编码": "", "预测日期": "", "预测值": "", "下限": "", "上限": ""}]
+
+    df = pd.DataFrame(data)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name="预测结果")
+    output.seek(0)
+
+    filename = f"预测结果_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.get("/forecast/running")

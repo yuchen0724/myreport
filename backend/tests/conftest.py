@@ -1,3 +1,6 @@
+import os
+os.environ["SECRET_KEY"] = "test-secret-key-for-testing-only"
+
 import pytest
 import asyncio
 from fastapi.testclient import TestClient

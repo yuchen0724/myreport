@@ -483,11 +483,6 @@ const handleParse = async () => {
     executionTimeMs.value = response.execution_time_ms
     recommendedChart.value = response.recommended_chart  // 保存 LLM 推荐的图表配置
 
-      columns: queryResult.value.columns,
-      rowCount: queryResult.value.rows?.length,
-      total: queryResult.value.total
-    } : 'null')
-
     // 优先使用 LLM 推荐的图表配置，否则使用智能分析
     if (recommendedChart.value && recommendedChart.value.chart_type) {
       chartType.value = recommendedChart.value.chart_type
@@ -515,12 +510,6 @@ const handleParse = async () => {
 }
 
 const handleClear = () => {
-    question: form.value.question,
-    suggestions: suggestions.value.length,
-    queryResult: queryResult.value ? '有数据' : 'null',
-    chartData: chartData.value.length
-  })
-  
   form.value.question = ''
   suggestions.value = []
   queryResult.value = null
@@ -560,15 +549,6 @@ const autoSelectChartType = () => {
   // 检查数据是否差距悬殊（适合用对数刻度或饼图突出占比）
   const maxMinRatio = maxVal / (minVal || 1)
   const hasLargeGap = maxMinRatio > 100
-
-    total: total.toFixed(2),
-    max: maxVal.toFixed(2),
-    min: minVal.toFixed(2),
-    avg: avgVal.toFixed(2),
-    hasNegative,
-    isTimeSeries,
-    maxMinRatio: maxMinRatio.toFixed(2)
-  })
   
   // 🎯 智能选择图表类型
   let recommendedType = 'bar'

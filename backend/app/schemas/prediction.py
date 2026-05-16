@@ -43,11 +43,26 @@ class PredictResponse(BaseModel):
 class ForecastQuery(BaseModel):
     data_source_id: int
     model_id: Optional[int] = Field(None, description="模型ID，筛选该模型生成的预测结果")
-    store_code: Optional[str] = None
+    store_code: Optional[str] = Field(None, description="门店编码")
+    matnr: Optional[str] = Field(None, description="商品编码")
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    sort_by: Optional[str] = Field("forecast_date", description="排序字段: forecast_date/predicted_value/store_code/matnr")
+    sort_order: Optional[str] = Field("asc", description="排序方向: asc/desc")
     page: int = Field(1, ge=1)
     page_size: int = Field(50, ge=1, le=1000)
+
+
+class ForecastExportQuery(BaseModel):
+    """预测结果导出参数（无分页）"""
+    data_source_id: int
+    model_id: Optional[int] = Field(None, description="模型ID")
+    store_code: Optional[str] = Field(None, description="门店编码")
+    matnr: Optional[str] = Field(None, description="商品编码")
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    sort_by: Optional[str] = Field("forecast_date", description="排序字段")
+    sort_order: Optional[str] = Field("asc", description="排序方向")
 
 
 class ForecastItem(BaseModel):

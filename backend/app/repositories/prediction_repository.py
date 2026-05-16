@@ -91,10 +91,18 @@ class PredictionResultRepository:
         self.db.commit()
         return len(results)
 
+    ALLOWED_SORT_FIELDS = {
+        "forecast_date": PredictionResult.forecast_date,
+        "predicted_value": PredictionResult.predicted_value,
+        "store_code": PredictionResult.store_code,
+        "matnr": PredictionResult.matnr,
+    }
+
     def get_forecast(
         self, data_source_id: int, model_id: Optional[int] = None,
-        store_code: Optional[str] = None,
+        store_code: Optional[str] = None, matnr: Optional[str] = None,
         start_date: Optional[date] = None, end_date: Optional[date] = None,
+        sort_by: str = "forecast_date", sort_order: str = "asc",
         limit: int = 100, offset: int = 0
     ) -> List[PredictionResult]:
         q = self.db.query(PredictionResult).filter(
@@ -104,8 +112,33 @@ class PredictionResultRepository:
             q = q.filter(PredictionResult.model_id == model_id)
         if store_code:
             q = q.filter(PredictionResult.store_code == store_code)
+        if matnr:
+            q = q.filter(PredictionResult.matnr == matnr)
         if start_date:
             q = q.filter(PredictionResult.forecast_date >= start_date)
         if end_date:
             q = q.filter(PredictionResult.forecast_date <= end_date)
-        return q.order_by(PredictionResult.forecast_date).offset(offset).limit(limit).all()
+
+        sort_col = self.ALLOWED_SORT_FIELDS.get(sort_by, PredictionResult.forecast_date)
+        order_fn = sort_col.desc if sort_order == "desc" else sort_col.asc
+        return q.order_by(order_fn()).offset(offset).limit(limit).all()
+
+    def count_forecast(
+        self, data_source_id: int, model_id: Optional[int] = None,
+        store_code: Optional[str] = None, matnr: Optional[str] = None,
+        start_date: Optional[date] = None, end_date: Optional[date] = None,
+    ) -> int:
+        q = self.db.query(PredictionResult).filter(
+            PredictionResult.data_source_id == data_source_id
+        )
+        if model_id:
+            q = q.filter(PredictionResult.model_id == model_id)
+        if store_code:
+            q = q.filter(PredictionResult.store_code == store_code)
+        if matnr:
+            q = q.filter(PredictionResult.matnr == matnr)
+        if start_date:
+            q = q.filter(PredictionResult.forecast_date >= start_date)
+        if end_date:
+            q = q.filter(PredictionResult.forecast_date <= end_date)
+        return q.count()
