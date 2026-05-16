@@ -213,7 +213,8 @@ export default {
         ])
         const tasks = Array.isArray(tasksRes) ? tasksRes : (tasksRes.data || [])
         const forecasts = Array.isArray(forecastRes) ? forecastRes : (forecastRes.data || [])
-        all = [...tasks, ...forecasts]
+        // 排除运行中的任务（status="training"），只显示已完成的
+        all = [...tasks.filter(t => t.status !== 'training'), ...forecasts]
       } catch { /* silent */ }
 
       // 按 model_id 合并：同时有训练（metrics）和预测（result_count）记录时合并为一条
