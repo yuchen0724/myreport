@@ -175,7 +175,7 @@ def _train_with_progress(
 
         feature_cols = get_feature_columns()
         model = lgb.LGBMRegressor(
-            n_estimators=500,
+            n_estimators=200,
             learning_rate=0.05,
             max_depth=8,
             num_leaves=31,
@@ -183,6 +183,7 @@ def _train_with_progress(
             colsample_bytree=0.8,
             random_state=42,
             verbose=-1,
+            num_threads=2,
         )
 
         # 增量训练：边拉取边喂数据，不累积全量 DataFrame
@@ -339,6 +340,7 @@ def _train_and_predict_with_progress(
             colsample_bytree=0.8,
             random_state=42,
             verbose=-1,
+            num_threads=2,
         )
 
         # 拉取+训练+预测（每批内部训练完立即预测，不缓存全量数据）

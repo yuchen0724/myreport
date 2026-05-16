@@ -280,7 +280,7 @@ class PredictionService:
 
             # 4. 训练 LightGBM
             model = lgb.LGBMRegressor(
-                n_estimators=500,
+                n_estimators=200,
                 learning_rate=0.05,
                 max_depth=8,
                 num_leaves=31,
@@ -288,6 +288,7 @@ class PredictionService:
                 colsample_bytree=0.8,
                 random_state=42,
                 verbose=-1,
+                num_threads=2,
             )
             model.fit(X, y)
 
