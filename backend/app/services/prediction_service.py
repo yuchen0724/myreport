@@ -1,5 +1,6 @@
 """销售预测服务 - LightGBM 训练与推理"""
 
+import os
 import warnings
 import logging
 import numpy as np
@@ -55,8 +56,7 @@ class PredictionService:
         end_date = date.today()
         start_date = end_date - timedelta(days=days)
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
-        from app.utils.db_executor import execute_query
-
+        
         # 先获取总天数作为批次数量
         total_pages = (end_date - start_date).days
         batches = []
@@ -81,8 +81,7 @@ class PredictionService:
 
             page_no += 1
             # 日志记录每一页拉取情况
-            import logging as _log
-            _log.getLogger(__name__).info(f"[拉取] page={page_no}/{total_pages}, rows={len(rows) if rows else 0}")
+            logger.info(f"[拉取] page={page_no}/{total_pages}, rows={len(rows) if rows else 0}")
             if progress_callback:
                 progress_callback(page_no, total_pages, len(rows) if rows else 0)
 
@@ -125,16 +124,10 @@ class PredictionService:
         end_date = date.today()
         start_date = end_date - timedelta(days=days)
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
-        from app.utils.db_executor import execute_query
-        from app.utils.feature_engineering import build_features_from_history
-
-        import logging
-        logger = logging.getLogger(__name__)
 
         # 0. 快速获取最近活跃分组列表：取前一天峰值排前 N 的分组
         #    25.7亿行数据，GROUP BY 全表不可行，改为最近一天优先取高频分组
-        from datetime import timedelta as _td
-        latest_day = date.today() - _td(days=1)
+        latest_day = date.today() - timedelta(days=1)
         group_count_sql = f"""\
             SELECT /*+ SET_VAR(query_timeout=120) */
                 group_id, store_code, matnr, COUNT(*) as cnt
@@ -234,7 +227,6 @@ class PredictionService:
             raise ValueError("训练数据不足（无有效特征行）")
 
         # 评估：用最后一批数据
-        import numpy as np
         mae_val, rmse_val = 0.0, 0.0
         last_chunk = locals().get("chunk_df")
         if last_chunk is not None and len(last_chunk) > 0:
@@ -350,8 +342,6 @@ class PredictionService:
         Returns:
             List[PredictionResult]
         """
-        from app.utils.feature_engineering import build_features_from_history, get_feature_columns
-        from app.models.prediction import PredictionResult
         
         feature_cols = get_feature_columns()
         
@@ -374,7 +364,6 @@ class PredictionService:
         )
         
         # 获取所有门店列表（用于进度回调）
-        import numpy as np
         stores = sorted(latest["store_code"].unique())
         total_stores = len(stores)
         

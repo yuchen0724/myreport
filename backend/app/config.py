@@ -86,7 +86,7 @@ class Settings(BaseSettings):
         """Validate required fields are not empty or placeholder."""
         if not v:
             raise ValueError("Config value cannot be empty")
-        if v in ("changeme", "your-secret-key", "your-encryption-key"):
+        if v in ("changeme", "your-secret-key", "your-encryption-key", "change-me-in-production-please"):
             raise ValueError(f"Config value is a placeholder: {v}")
         return v
 

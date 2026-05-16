@@ -223,26 +223,18 @@ const chartConfig = computed(() => {
 
 // 自动分析数据并生成图表数据
 const analyzeChartData = () => {
-  console.group('[Chart] 📊 开始分析图表数据')
   
   if (!queryResult.value || !queryResult.value.rows || queryResult.value.rows.length === 0) {
-    console.log('[Chart] ⚠️ 无数据: queryResult 为空')
     chartData.value = []
-    console.groupEnd()
     return
   }
 
   const columns = queryResult.value.columns || []
   const rows = queryResult.value.rows || []
   
-  console.log('[Chart] ├─ 原始数据列:', columns)
-  console.log('[Chart] ├─ 原始数据行数:', rows.length)
-  console.log('[Chart] ├─ 数据预览:', rows.slice(0, 3))
   
   if (columns.length < 2) {
-    console.log('[Chart] ⚠️ 列数不足，无法生成图表')
     chartData.value = []
-    console.groupEnd()
     return
   }
 
@@ -267,7 +259,6 @@ const analyzeChartData = () => {
     }
   })
   
-  console.log('[Chart] 列类型分析:', { numericIndices, stringIndices })
   
   // Y 轴优先用数值列，X 轴用类别列
   if (numericIndices.length > 0) {
@@ -281,7 +272,6 @@ const analyzeChartData = () => {
   
   const xField = columns[xFieldIndex]
   const yField = columns[yFieldIndex]
-  console.log('[Chart] 智能选择字段:', { xField, yField, xFieldIndex, yFieldIndex })
 
   // 设置字段映射默认值
   fieldMapping.value.xAxis = xField
@@ -295,7 +285,6 @@ const analyzeChartData = () => {
     if (Array.isArray(row)) {
       xVal = row[xFieldIndex]
       yVal = row[yFieldIndex]
-      console.log('[Chart] 数组格式:', row, { xVal, yVal, xFieldIndex, yFieldIndex })
     } else if (typeof row === 'object') {
       // 支持对象格式
       xVal = row[xField] ?? row[xFieldIndex]
@@ -313,10 +302,7 @@ const analyzeChartData = () => {
     }
   })
 
-  console.log('[Chart] ├─ 转换后数据条目数:', data.length)
   chartData.value = data
-  console.log('[Chart] └─ 图表数据生成完成')
-  console.groupEnd()
 }
 
 /**
@@ -324,7 +310,6 @@ const analyzeChartData = () => {
  */
 const buildChartFromLLMRecommendation = (config) => {
   if (!queryResult.value || !config) {
-    console.log('[Chart] ⚠️ 无查询结果或图表配置，跳过 LLM 推荐')
     analyzeChartData()
     autoSelectChartType()
     return
@@ -333,8 +318,6 @@ const buildChartFromLLMRecommendation = (config) => {
   const columns = queryResult.value.columns || []
   const rows = queryResult.value.rows || []
   
-  console.log('[Chart] 🤖 LLM 推荐的图表配置:', config)
-  console.log('[Chart] 🤖 查询结果列:', columns)
 
   const xField = config.x_axis
   const yField = config.y_axis
@@ -351,7 +334,6 @@ const buildChartFromLLMRecommendation = (config) => {
     yFieldIndex = columns.findIndex(c => yField && c.toLowerCase().includes(yField.toLowerCase()))
   }
 
-  console.log('[Chart] 🤖 字段索引:', { xField, xFieldIndex, yField, yFieldIndex })
 
   // 设置字段映射默认值
   if (xFieldIndex !== -1) {
@@ -363,7 +345,6 @@ const buildChartFromLLMRecommendation = (config) => {
 
   // 如果找不到对应字段，回退到智能分析
   if (xFieldIndex === -1 || yFieldIndex === -1) {
-    console.log('[Chart] ⚠️ LLM 推荐的字段未找到，回退到智能分析')
     analyzeChartData()
     autoSelectChartType()
     return
@@ -387,7 +368,6 @@ const buildChartFromLLMRecommendation = (config) => {
     }
   })
 
-  console.log('[Chart] 🤖 LLM 推荐构建的图表数据:', data)
   chartData.value = data
 }
 
@@ -411,7 +391,6 @@ const rebuildChartFromFields = () => {
 
   if (xIndex === -1 || yIndex === -1) return
 
-  console.log('[Chart] 🔄 根据字段映射重建图表数据:', { xField, yField, xIndex, yIndex })
 
   chartData.value = rows.slice(0, 20).map(row => {
     const xVal = Array.isArray(row) ? row[xIndex] : row[columns[xIndex]]
@@ -444,7 +423,6 @@ watch(() => form.value.data_source_id, () => {
 })
 
 const loadDataSources = async () => {
-  console.group('[NL2SQL] 📥 加载数据源列表')
   try {
     const response = await getDataSourceList()
     dataSource.value = response
@@ -452,12 +430,8 @@ const loadDataSources = async () => {
     const map = {}
     response.forEach(ds => { map[ds.id] = ds.load_group })
     dsLoadGroupMap.value = map
-    console.log('[NL2SQL] ✅ 数据源加载成功, 数量:', response.length)
-    console.log('[NL2SQL] │ 数据源列表:', response.map(ds => ({ id: ds.id, name: ds.name, load_group: ds.load_group })))
-    console.groupEnd()
   } catch (error) {
     console.error('[NL2SQL] ❌ 数据源加载失败:', error)
-    console.groupEnd()
     ElMessage.error('加载数据源失败')
   }
 }
@@ -470,19 +444,15 @@ const loadGroups = async () => {
     return
   }
   groupLoading.value = true
-  console.group('[NL2SQL] 📥 加载集团列表')
   try {
     const groups = await getGroups(dsId)
     groupOptions.value = groups
-    console.log('[NL2SQL] ✅ 集团列表加载成功, 数量:', groups.length)
-    console.groupEnd()
     // 如果当前 group_id 不在新列表中，清空
     if (form.value.group_id && !groups.find(g => g.group_id === form.value.group_id)) {
       form.value.group_id = null
     }
   } catch (error) {
     console.error('[NL2SQL] ❌ 集团列表加载失败:', error)
-    console.groupEnd()
     groupOptions.value = []
     // 加载失败时不清空当前选择，允许用户手动输入
   } finally {
@@ -492,27 +462,18 @@ const loadGroups = async () => {
 
 const handleParse = async () => {
   if (!form.value.data_source_id) {
-    console.log('[NL2SQL] ⚠️ 验证失败: 未选择数据源')
     ElMessage.warning('请选择数据源')
     return
   }
   if (!form.value.question) {
-    console.log('[NL2SQL] ⚠️ 验证失败: 未输入问题')
     ElMessage.warning('请输入自然语言问题')
     return
   }
 
   const startTime = performance.now()
-  console.group('[NL2SQL] 🔄 开始解析')
-  console.log('├─ 数据源ID:', form.value.data_source_id)
-  console.log('├─ 问题:', form.value.question)
-  console.log('├─ 集团ID:', form.value.group_id)
-  console.log('└─ 发起时间:', new Date().toISOString())
-  console.groupEnd()
 
   loading.value = true
   try {
-    console.log('[NL2SQL] ⏳ 请求中...')
     
     const response = await parseQuestion(form.value)
     const endTime = performance.now()
@@ -522,28 +483,18 @@ const handleParse = async () => {
     executionTimeMs.value = response.execution_time_ms
     recommendedChart.value = response.recommended_chart  // 保存 LLM 推荐的图表配置
 
-    console.group('[NL2SQL] ✅ 解析完成')
-    console.log('├─ 客户端耗时:', `${(endTime - startTime).toFixed(2)}ms`)
-    console.log('├─ 服务端执行时间:', `${response.execution_time_ms}ms`)
-    console.log('├─ SQL建议数:', suggestions.value.length)
-    console.log('├─ 选中SQL:', response.selected_sql?.substring(0, 100) + '...')
-    console.log('├─ 查询结果:', queryResult.value ? {
       columns: queryResult.value.columns,
       rowCount: queryResult.value.rows?.length,
       total: queryResult.value.total
     } : 'null')
-    console.log('├─ 推荐的图表配置:', recommendedChart.value)
-    console.groupEnd()
 
     // 优先使用 LLM 推荐的图表配置，否则使用智能分析
     if (recommendedChart.value && recommendedChart.value.chart_type) {
-      console.log('[NL2SQL] 📊 使用 LLM 推荐的图表配置')
       chartType.value = recommendedChart.value.chart_type
       // 根据 LLM 推荐的字段构建图表数据
       buildChartFromLLMRecommendation(recommendedChart.value)
     } else {
       // 分析数据生成图表
-      console.log('[NL2SQL] 📊 使用智能分析图表数据...')
       analyzeChartData()
       // 根据数据特征自动选择图表类型
       autoSelectChartType()
@@ -560,13 +511,10 @@ const handleParse = async () => {
     ElMessage.error('解析失败：' + (error.message || '未知错误'))
   } finally {
     loading.value = false
-    console.log('[NL2SQL] 🏁 请求结束, loading 状态:', loading.value)
   }
 }
 
 const handleClear = () => {
-  console.group('[NL2SQL] 🧹 清空操作')
-  console.log('├─ 清空前状态:', {
     question: form.value.question,
     suggestions: suggestions.value.length,
     queryResult: queryResult.value ? '有数据' : 'null',
@@ -581,26 +529,18 @@ const handleClear = () => {
   chartType.value = 'bar'
   fieldMapping.value = { xAxis: '', yAxis: '' }
 
-  console.log('└─ 清空完成')
-  console.groupEnd()
 }
 
 // 根据数据特征自动选择图表类型
 const autoSelectChartType = () => {
-  console.group('[Chart] 🎯 智能选择图表类型')
   
   if (!queryResult.value || !queryResult.value.rows || queryResult.value.rows.length === 0) {
-    console.log('[Chart] ⚠️ 无数据')
-    console.groupEnd()
     return
   }
 
   const rowCount = queryResult.value.rows.length
   const columns = queryResult.value.columns || []
   
-  console.log('[Chart] ├─ 行数:', rowCount)
-  console.log('[Chart] ├─ 列:', columns)
-  console.log('[Chart] ├─ 图表数据条目:', chartData.value.length)
   
   // 获取 Y 轴数据的特征
   const yData = chartData.value.map(item => item.y)
@@ -621,7 +561,6 @@ const autoSelectChartType = () => {
   const maxMinRatio = maxVal / (minVal || 1)
   const hasLargeGap = maxMinRatio > 100
 
-  console.log('[Chart] ├─ 数据特征:', {
     total: total.toFixed(2),
     max: maxVal.toFixed(2),
     min: minVal.toFixed(2),
@@ -671,8 +610,6 @@ const autoSelectChartType = () => {
   }
 
   chartType.value = recommendedType
-  console.log('[Chart] └─ 推荐图表类型:', recommendedType, '- 原因:', reason)
-  console.groupEnd()
 }
 
 // 检查数组是否有序（递增或递减）
