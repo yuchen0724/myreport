@@ -216,8 +216,12 @@ export default {
         all = [...tasks, ...forecasts]
       } catch { /* silent */ }
 
-      // 按 created_at 倒序排序
-      all.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+      // 按 created_at 倒序排序（有指标的优先保留，确保训练记录不被预测记录覆盖）
+      all.sort((a, b) => {
+        if (a.metrics && !b.metrics) return -1
+        if (!a.metrics && b.metrics) return 1
+        return (b.created_at || '').localeCompare(a.created_at || '')
+      })
 
       // 按 model_id 去重（每个 model_id 只保留第一次出现的记录）
       const seen = new Set()
