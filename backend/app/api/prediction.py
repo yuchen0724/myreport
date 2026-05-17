@@ -104,6 +104,11 @@ def train_and_predict(
     """触发异步训练+预测（三阶段一键完成）"""
     user_id = current_user.id
     from app.tasks.prediction_tasks import train_and_predict_prediction_async
+    logger.info(
+        f"训练+预测提交: data_source_id={req.data_source_id}, "
+        f"train_days={req.train_days}, forecast_days={req.forecast_days}, "
+        f"batch_size={req.batch_size}, batch_unit={req.batch_unit}"
+    )
     try:
         task = train_and_predict_prediction_async.delay(
             data_source_id=req.data_source_id,

@@ -156,6 +156,7 @@ class PredictionService:
 
         # 每 N 个分组合并为一个批次，减少 DB 写入次数和模型 fit 调用
         BATCH_GROUP_SIZE = batch_unit
+        logger.info(f"[训练] batch_unit={batch_unit}, BATCH_GROUP_SIZE={BATCH_GROUP_SIZE}")
         batches = [all_groups[i:i+BATCH_GROUP_SIZE] for i in range(0, len(all_groups), BATCH_GROUP_SIZE)]
         total_batches = len(batches)
 

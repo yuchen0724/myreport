@@ -564,6 +564,7 @@ def train_and_predict_prediction_async(
         f"[Celery] 训练+预测开始: task_id={task_id}, "
         f"data_source_id={data_source_id}, train_days={train_days}, forecast_days={forecast_days}"
     )
+    logger.info(f"[Celery] 参数: batch_size={batch_size}, batch_unit={batch_unit}")
 
     try:
         model_id, result_count = _train_and_predict_with_progress(
