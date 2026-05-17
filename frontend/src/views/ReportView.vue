@@ -67,71 +67,88 @@
 
       <!-- 数据表格工具栏 -->
       <div v-if="data.length > 0" class="table-toolbar">
-        <el-popover
-          placement="bottom-start"
-          :width="200"
-          trigger="click"
-        >
-          <template #reference>
-            <el-button size="small">
-              <el-icon><Grid /></el-icon>
-              列展示
-            </el-button>
-          </template>
-          <div class="column-visibility">
-            <el-checkbox
-              v-model="checkAllColumns"
-              :indeterminate="isIndeterminate"
-              @change="handleCheckAllColumns"
-            >
-              全选
-            </el-checkbox>
-            <el-checkbox-group v-model="visibleColumns" @change="handleCheckedColumns">
-              <el-checkbox
-                v-for="col in columns"
-                :key="col"
-                :label="col"
-                :value="col"
-              >
-                {{ col }}
-              </el-checkbox>
-            </el-checkbox-group>
-          </div>
-        </el-popover>
-        
-        <el-input
-          v-model="searchText"
-          placeholder="搜索表格数据..."
-          clearable
-          size="small"
-          style="width: 200px; margin-left: 10px"
-        >
-          <template #prefix>
-            <el-icon><Search /></el-icon>
-          </template>
-        </el-input>
+        <TableToolbar
+          :all-columns="columns"
+          v-model="visibleColumns"
+          v-model:search-text="searchText"
+          :enable-expand="columns.length > 6"
+          :expanded="showExpand"
+          @toggle-expand="toggleExpand"
+        />
       </div>
 
       <!-- 数据表格 -->
       <el-table
         v-if="data.length > 0"
-        :data="data"
+        ref="tableRef"
+        :data="paginatedData"
         border
         stripe
         :default-sort="{ prop: sortProp, order: sortOrder }"
         @sort-change="handleSortChange"
+        @header-dragend="handleHeaderDragEnd"
+        :show-summary="true"
+        :summary-method="handleSummary"
         max-height="500"
         style="width: 100%"
       >
+        <!-- 行展开列 -->
+        <el-table-column type="expand" v-if="showExpand">
+          <template #default="{ row }">
+            <div class="expand-detail">
+              <el-descriptions :column="2" border size="small">
+                <el-descriptions-item
+                  v-for="(val, key) in row"
+                  :key="key"
+                  :label="key"
+                >
+                  {{ val !== null && val !== undefined ? val : '-' }}
+                </el-descriptions-item>
+              </el-descriptions>
+            </div>
+          </template>
+        </el-table-column>
+
         <el-table-column
           v-for="col in visibleColumns"
           :key="col"
           :prop="col"
           :label="col"
-          min-width="120"
+          :width="storage.loadColumnWidth(col) || undefined"
+          :fixed="storage.loadFixedColumn(col) || false"
+          min-width="80"
           show-overflow-tooltip
           sortable="custom"
-        />
+        >
+          <!-- 列头操作：固定列 + 汇总 -->
+          <template #header>
+            <div class="column-header-with-actions">
+              <span>{{ col }}</span>
+              <el-dropdown trigger="click" size="small" @command="(cmd) => handleColumnAction(cmd, col)">
+                <el-button size="small" circle :icon="MoreFilled" class="col-action-btn" />
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="fixed-left" :disabled="storage.loadFixedColumn(col) === 'left'">
+                      固定到左侧
+                    </el-dropdown-item>
+                    <el-dropdown-item command="fixed-right" :disabled="storage.loadFixedColumn(col) === 'right'">
+                      固定到右侧
+                    </el-dropdown-item>
+                    <el-dropdown-item command="clear-fixed" :disabled="!storage.loadFixedColumn(col)">
+                      取消固定
+                    </el-dropdown-item>
+                    <el-dropdown-item divided command="summary-sum">汇总：求和</el-dropdown-item>
+                    <el-dropdown-item command="summary-avg">汇总：平均数</el-dropdown-item>
+                    <el-dropdown-item command="summary-min">汇总：最小值</el-dropdown-item>
+                    <el-dropdown-item command="summary-max">汇总：最大值</el-dropdown-item>
+                    <el-dropdown-item command="summary-count">汇总：计数</el-dropdown-item>
+                    <el-dropdown-item divided command="clear-summary">清除汇总</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+          </template>
+        </el-table-column>
       </el-table>
 
       <!-- 空状态 -->
@@ -157,13 +174,16 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Download, Document, Search, Grid } from '@element-plus/icons-vue'
+import { Download, Document, Search, Grid, MoreFilled } from '@element-plus/icons-vue'
 import { getMenus, getMenuWithTemplate } from '@/api/menu'
 import { executeQuery } from '@/api/query'
 import { exportExcel, exportPDF } from '@/api/report'
+import TableToolbar from '@/components/TableToolbar.vue'
+import { useTableStorage } from '@/composables/useTableStorage'
+import Sortable from 'sortablejs'
 
 const route = useRoute()
 const loading = ref(false)
@@ -177,30 +197,44 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const params = reactive({})
 const templateParams = ref([])
-const nextCursor = ref(null)  // 游标分页：下一页游标
+const nextCursor = ref(null)
 
-// 表格增强功能
+// 表格增强
 const searchText = ref('')
 const visibleColumns = ref([])
-const checkAllColumns = ref(true)
-const isIndeterminate = ref(false)
 const sortProp = ref('')
 const sortOrder = ref(null)
+const showExpand = ref(false)
+const tableRef = ref(null)
 
-// 初始化可见列
+// tableId 按路由参数计算，支持持久化
+const tableId = computed(() => `report:${route.params.id || 'default'}`)
+const storage = useTableStorage(tableId.value)
+
+function toggleExpand() {
+  showExpand.value = !showExpand.value
+}
+
+// 初始化可见列 + 恢复持久化列顺序
 watch(columns, (newCols) => {
+  const savedOrder = storage.loadColumnOrder()
+  if (savedOrder && savedOrder.length > 0) {
+    const valid = savedOrder.filter(c => newCols.includes(c))
+    if (valid.length > 0) {
+      visibleColumns.value = valid
+      return
+    }
+  }
   visibleColumns.value = [...newCols]
 }, { immediate: true })
 
-// 筛选数据
+// 搜索筛���
 const filteredData = computed(() => {
   if (!searchText.value) return data.value
   const keyword = searchText.value.toLowerCase()
-  return data.value.filter(row => {
-    return Object.values(row).some(val => 
-      String(val).toLowerCase().includes(keyword)
-    )
-  })
+  return data.value.filter(row =>
+    Object.values(row).some(val => String(val).toLowerCase().includes(keyword))
+  )
 })
 
 // 分页数据
@@ -210,101 +244,137 @@ const paginatedData = computed(() => {
   return filteredData.value.slice(start, end)
 })
 
-// 更新总数 - 只有在筛选时才更新（搜索筛选是在当前页数据内过滤）
-// 注意：不再覆盖 total，因为 total 来自 API 的真实总数
-watch(filteredData, (newData) => {
-  // 如果有搜索词，过滤后的数据条数作为参考
-  // 但分页总数仍使用 API 返回的 total（来自后端 COUNT）
-  if (searchText.value) {
-    // 只有搜索筛选时才更新，用于本地过滤显示
-    // 但 el-pagination 的 total 仍使用 API 返回的 total
-  }
-})
-
-// 列展示控制
-const handleCheckAllColumns = (val) => {
-  visibleColumns.value = val ? [...columns.value] : []
-  isIndeterminate.value = false
+// ---- 列拖拽 ----
+function initColumnDrag() {
+  if (!tableRef.value) return
+  const el = tableRef.value.$el.querySelector('.el-table__header-wrapper .el-table__header tr')
+  if (!el || el._sortableInitialized) return
+  Sortable.create(el, {
+    animation: 150,
+    onEnd: (evt) => {
+      if (evt.oldIndex === evt.newIndex) return
+      const order = [...visibleColumns.value]
+      const [moved] = order.splice(evt.oldIndex, 1)
+      order.splice(evt.newIndex, 0, moved)
+      visibleColumns.value = order
+      storage.saveColumnOrder(order)
+    }
+  })
+  el._sortableInitialized = true
 }
 
-const handleCheckedColumns = (value) => {
-  const checkedCount = value.length
-  checkAllColumns.value = checkedCount === columns.value.length
-  isIndeterminate.value = checkedCount > 0 && checkedCount < columns.value.length
+// ---- 列宽拖动持久化 ----
+function handleHeaderDragEnd(newWidth, oldWidth, column, event) {
+  if (column && column.property) {
+    storage.saveColumnWidth(column.property, newWidth)
+  }
+}
+
+// ---- 固定列 + 汇总列操作 ----
+function handleColumnAction(cmd, col) {
+  switch (true) {
+    case cmd === 'fixed-left':
+      storage.saveFixedColumn(col, 'left')
+      break
+    case cmd === 'fixed-right':
+      storage.saveFixedColumn(col, 'right')
+      break
+    case cmd === 'clear-fixed':
+      storage.saveFixedColumn(col, false)
+      break
+    case cmd.startsWith('summary-'): {
+      const type = cmd.replace('summary-', '')
+      const sc = storage.loadSummaryConfig() || {}
+      storage.saveSummaryConfig({ ...sc, [col]: type })
+      break
+    }
+    case cmd === 'clear-summary': {
+      const sc = storage.loadSummaryConfig() || {}
+      if (sc[col]) {
+        delete sc[col]
+        storage.saveSummaryConfig(sc)
+      }
+      break
+    }
+  }
+  visibleColumns.value = [...visibleColumns.value]
+}
+
+// ---- 汇总行计算 ----
+function handleSummary({ columns: cols, data: rows }) {
+  const config = storage.loadSummaryConfig()
+  if (!config || Object.keys(config).length === 0) return []
+
+  const labels = { sum: '合计', avg: '平均', min: '最小', max: '最大', count: '计数' }
+
+  return cols.map(col => {
+    const colKey = col.property
+    const summary = config[colKey]
+    if (!summary) return ''
+
+    const vals = rows.map(r => Number(r[colKey])).filter(v => !isNaN(v))
+    if (vals.length === 0) return ''
+
+    let result
+    switch (summary) {
+      case 'sum': result = vals.reduce((a, b) => a + b, 0); break
+      case 'avg': result = vals.reduce((a, b) => a + b, 0) / vals.length; break
+      case 'min': result = Math.min(...vals); break
+      case 'max': result = Math.max(...vals); break
+      case 'count': result = vals.length; break
+      default: return ''
+    }
+    return `${labels[summary]}: ${Number.isInteger(result) ? result : result.toFixed(2)}`
+  })
 }
 
 // 排序处理
 const handleSortChange = ({ prop, order }) => {
   sortProp.value = prop
   sortOrder.value = order
-  if (!prop || !order) {
-    // 取消排序，恢复原始顺序
-    return
-  }
-  const multiplier = order === 'ascending' ? 1 : -1
+  if (!prop || !order) return
+  const mult = order === 'ascending' ? 1 : -1
   data.value.sort((a, b) => {
-    const valA = a[prop]
-    const valB = b[prop]
-    if (valA === valB) return 0
-    if (valA === null || valA === undefined) return 1
-    if (valB === null || valB === undefined) return -1
-    if (typeof valA === 'number' && typeof valB === 'number') {
-      return (valA - valB) * multiplier
-    }
-    return String(valA).localeCompare(String(valB)) * multiplier
+    const va = a[prop]; const vb = b[prop]
+    if (va === vb) return 0
+    if (va == null) return 1
+    if (vb == null) return -1
+    return typeof va === 'number' && typeof vb === 'number'
+      ? (va - vb) * mult
+      : String(va).localeCompare(String(vb)) * mult
   })
 }
 
-// 通过 path 查找菜单（当路由参数不是数字ID时）
+// 通过 path 查找菜单
 const findMenuIdByPath = async (path) => {
   try {
     const menus = await getMenus({ skip: 0, limit: 1000 })
     const menuList = Array.isArray(menus) ? menus : (menus.data || [])
     const matched = menuList.find(m => m.path === path)
     return matched ? matched.id : null
-  } catch {
-    return null
-  }
+  } catch { return null }
 }
 
 // 加载菜单和模板信息
 const loadMenuInfo = async () => {
   let menuId = route.params.id
-  if (!menuId) {
-    ElMessage.error('缺少菜单ID')
-    return
-  }
-
+  if (!menuId) { ElMessage.error('缺少菜单ID'); return }
   try {
     loading.value = true
-
-    // 如果路由参数不是纯数字（如 /report/sales），先按 path 查找菜单
     if (!/^\d+$/.test(menuId)) {
       const resolvedId = await findMenuIdByPath('/report/' + menuId)
-      if (resolvedId) {
-        menuId = resolvedId
-      } else {
-        ElMessage.error('未找到对应菜单')
-        return
-      }
+      if (resolvedId) { menuId = resolvedId }
+      else { ElMessage.error('未找到对应菜单'); return }
     }
-
     const res = await getMenuWithTemplate(menuId)
     menuInfo.value = res
     templateInfo.value = res.template
-
-    // 解析模板参数
     if (templateInfo.value?.config?.params) {
       templateParams.value = templateInfo.value.config.params
-      // 设置默认值
       templateParams.value.forEach(p => {
-        if (p.default) {
-          params[p.name] = p.default
-        }
+        if (p.default) params[p.name] = p.default
       })
     }
-
-    // 无论有无参数都等待用户主动点击查询，不自动加载数据
   } catch (error) {
     ElMessage.error('加载报表失败：' + (error.message || '未知错误'))
   } finally {
@@ -319,21 +389,10 @@ const buildSqlWithParams = () => {
   let sql = config.sql
   Object.entries(params).forEach(([key, value]) => {
     let replaceValue = value
-    // 处理 Date 对象，转换为 YYYYMMDD 格式
     if (value instanceof Date) {
-      const year = value.getFullYear()
-      const month = String(value.getMonth() + 1).padStart(2, '0')
-      const day = String(value.getDate()).padStart(2, '0')
-      replaceValue = `${year}${month}${day}`
-    }
-    // 处理日期范围数组 [startDate, endDate]
-    else if (Array.isArray(value) && value[0] instanceof Date) {
-      replaceValue = value.map(d => {
-        const year = d.getFullYear()
-        const month = String(d.getMonth() + 1).padStart(2, '0')
-        const day = String(d.getDate()).padStart(2, '0')
-        return `${year}${month}${day}`
-      }).join(',')
+      replaceValue = `${value.getFullYear()}${String(value.getMonth()+1).padStart(2,'0')}${String(value.getDate()).padStart(2,'0')}`
+    } else if (Array.isArray(value) && value[0] instanceof Date) {
+      replaceValue = value.map(d => `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`).join(',')
     }
     sql = sql.replace(new RegExp(`\\$\\{${key}\\}|:${key}`, 'g'), replaceValue ?? '')
   })
@@ -342,40 +401,23 @@ const buildSqlWithParams = () => {
 
 // 加载数据
 const loadData = async () => {
-  if (!templateInfo.value) {
-    ElMessage.warning('未关联报表模板')
-    return
-  }
-
+  if (!templateInfo.value) { ElMessage.warning('未关联报表模板'); return }
   const config = templateInfo.value.config
-  if (!config) {
-    ElMessage.error('模板缺少配置信息')
-    return
-  }
-  if (!config.data_source_id) {
-    ElMessage.error('模板缺少数据源配置')
-    return
-  }
-  if (!config.sql) {
-    ElMessage.error('模板缺少 SQL 配置')
-    return
-  }
+  if (!config) { ElMessage.error('模板缺少配置信息'); return }
+  if (!config.data_source_id) { ElMessage.error('模板缺少数据源配置'); return }
+  if (!config.sql) { ElMessage.error('模板缺少 SQL 配置'); return }
 
   try {
     loading.value = true
-    // 游标分页：翻到第2页及以后时，使用 next_cursor
     const useCursor = currentPage.value > 1 && nextCursor.value
     const res = await executeQuery({
       data_source_id: config.data_source_id,
       sql: buildSqlWithParams(),
-      params: {},  // 前端已替换占位符，后端无需再处理
-      page: useCursor ? 1 : currentPage.value,  // 游标模式时固定 page=1
+      params: {},
+      page: useCursor ? 1 : currentPage.value,
       page_size: Math.min(pageSize.value, 5000),
-      cursor: useCursor ? nextCursor.value : undefined  // 传递游标
+      cursor: useCursor ? nextCursor.value : undefined,
     })
-
-    // executeQuery 调用 /api/query/sql，返回 SQLQueryResponse { columns, rows, total, ... }
-    // rows 是二维数组 [[val1, val2], ...]，需转换为对象数组适配 el-table
     const cols = res.columns || []
     const rawRows = res.rows || []
     data.value = rawRows.map(row => {
@@ -385,7 +427,11 @@ const loadData = async () => {
     })
     columns.value = cols
     total.value = res.total || 0
-    nextCursor.value = res.next_cursor || null  // 保存下一页游标
+    nextCursor.value = res.next_cursor || null
+
+    // 数据加载完成后初始化列拖拽
+    await nextTick()
+    initColumnDrag()
   } catch (error) {
     ElMessage.error('查询失败：' + (error.response?.data?.detail || error.message || '未知错误'))
   } finally {
@@ -393,84 +439,52 @@ const loadData = async () => {
   }
 }
 
-// 分页变化时重新请求后端
+// 分页变化
 const handlePageChange = () => {
-  // 跳到第1页时重置游标
-  if (currentPage.value === 1) {
-    nextCursor.value = null
-  }
+  if (currentPage.value === 1) nextCursor.value = null
   loadData()
 }
 
 // 导出
 const handleExport = async (format) => {
-  if (!templateInfo.value) {
-    ElMessage.warning('未关联报表模板')
-    return
-  }
-
+  if (!templateInfo.value) { ElMessage.warning('未关联报表模板'); return }
   try {
     exporting.value = true
-    
     const config = templateInfo.value.config
     const sql = buildSqlWithParams()
-
-    const requestData = {
-      data_source_id: config.data_source_id,
-      sql: sql
-    }
+    const requestData = { data_source_id: config.data_source_id, sql }
 
     if (format === 'pdf') {
-      // PDF: 同步导出，直接下载 blob
       const blob = await exportPDF(requestData)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url
-      a.download = `${menuInfo.value.name || 'report'}.pdf`
-      a.click()
+      a.href = url; a.download = `${menuInfo.value.name || 'report'}.pdf`; a.click()
       window.URL.revokeObjectURL(url)
       ElMessage.success('导出成功')
       return
     }
 
-    // Excel: 异步导出
     const asyncFn = (await import('@/api/report')).exportExcelAsync
     const res = await asyncFn(requestData)
-
     const taskId = res?.task_id
-    if (!taskId) {
-      ElMessage.error('导出任务创建失败')
-      return
-    }
+    if (!taskId) { ElMessage.error('导出任务创建失败'); return }
 
-    // 轮询任务状态
     let taskStatus = 'pending'
-    let maxAttempts = 60 // 最多等待 60 秒
-
+    let maxAttempts = 60
     while (taskStatus === 'pending' || taskStatus === 'processing') {
-      await new Promise(resolve => setTimeout(resolve, 2000))
-
+      await new Promise(r => setTimeout(r, 2000))
       const statusRes = await import('@/api/report').then(m => m.getExportTask(taskId))
       taskStatus = statusRes?.status
-
       maxAttempts--
-      if (maxAttempts <= 0) {
-        ElMessage.warning('导出超时，请稍后查看任务状态')
-        break
-      }
+      if (maxAttempts <= 0) { ElMessage.warning('导出超时'); break }
     }
 
     if (taskStatus === 'completed') {
-      // 下载文件
       const fileRes = await import('@/api/report').then(m => m.downloadExportFile(taskId))
-      const blob = new Blob([fileRes], { 
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      })
+      const blob = new Blob([fileRes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url
-      a.download = `${menuInfo.value.name || 'report'}.xlsx`
-      a.click()
+      a.href = url; a.download = `${menuInfo.value.name || 'report'}.xlsx`; a.click()
       window.URL.revokeObjectURL(url)
       ElMessage.success('导出成功')
     } else {
@@ -485,53 +499,38 @@ const handleExport = async (format) => {
 
 // 监听路由变化
 watch(() => route.params.id, (newId) => {
-  if (newId) {
-    loadMenuInfo()
-  }
+  if (newId) loadMenuInfo()
 })
 
 onMounted(() => {
-  if (route.params.id) {
-    loadMenuInfo()
-  }
+  if (route.params.id) loadMenuInfo()
 })
 </script>
 
 <style scoped>
-.report-view {
-  padding: 20px;
-}
-
+.report-view { padding: 20px; }
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
-
 .title-section {
   display: flex;
   align-items: center;
   gap: 12px;
 }
-
-.title {
-  font-size: 18px;
-  font-weight: 600;
-}
-
+.title { font-size: 18px; font-weight: 600; }
 .params-section {
   margin-bottom: 20px;
   padding: 16px;
   background: #f5f7fa;
   border-radius: 4px;
 }
-
 .params-form {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-
 .pagination {
   display: flex;
   align-items: center;
@@ -539,9 +538,23 @@ onMounted(() => {
   margin-top: 16px;
   justify-content: flex-end;
 }
-
 .deep-page-tip {
   color: #e6a23c;
   font-size: 12px;
+}
+.column-header-with-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.col-action-btn {
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+.col-action-btn:hover {
+  opacity: 1;
+}
+.expand-detail {
+  padding: 12px;
 }
 </style>
