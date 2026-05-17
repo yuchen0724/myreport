@@ -34,7 +34,7 @@ const props = defineProps({
   chartType: {
     type: String,
     required: true,
-    validator: (val) => ['line', 'bar', 'pie', 'scatter', 'radar', 'gauge', 'funnel'].includes(val)
+    validator: (val) => ['line', 'bar', 'pie', 'scatter', 'radar', 'gauge', 'funnel', 'heatmap', 'treemap', 'boxplot'].includes(val)
   },
   data: {
     type: Array,
@@ -72,9 +72,24 @@ const props = defineProps({
     type: Boolean,
     default: true
   },
+  // 是否启用 DataZoom（按 chartType 条件生效）
+  enableDataZoom: {
+    type: Boolean,
+    default: true
+  },
+  // 钻取配置：{ enabled: boolean, path: [{field, value, label}] }
+  drillConfig: {
+    type: Object,
+    default: () => ({ enabled: false, path: [] })
+  },
+  // 联动组 ID：同一组 ID 的 ChartRenderer 在点击时联动
+  linkageGroup: {
+    type: String,
+    default: ''
+  },
 })
 
-const emit = defineEmits(['chartClick', 'chartReady'])
+const emit = defineEmits(['chartClick', 'chartReady', 'drillDown'])
 
 const chartRef = ref(null)
 const particleRef = ref(null)
@@ -143,9 +158,23 @@ const initChart = () => {
   
   updateChart()
   
-  // 点击事件
+  // 点击事件 — 同时支持钻取和联动
   chartInstance.on('click', (params) => {
     emit('chartClick', params)
+    // 钻取：如果启用且点击的是分类轴数据
+    if (props.drillConfig.enabled && params.name) {
+      emit('drillDown', {
+        field: props.config.x_axis || 'category',
+        value: params.name,
+        label: params.name,
+      })
+    }
+    // 联动：触发同组其他图表
+    if (props.linkageGroup) {
+      window.__chartLinkage__ = window.__chartLinkage__ || {}
+      window.__chartLinkage__[props.linkageGroup] = params
+      window.dispatchEvent(new CustomEvent('chart-linkage', { detail: { group: props.linkageGroup, params } }))
+    }
   })
   
   // 注册主题
@@ -153,6 +182,25 @@ const initChart = () => {
   echarts.registerTheme('light', LIGHT_THEME)
   
   window.addEventListener('resize', handleResize)
+  
+  // 联动监听
+  if (props.linkageGroup) {
+    const linkageHandler = (e) => {
+      if (e.detail.group === props.linkageGroup) {
+        const p = e.detail.params
+        if (chartInstance && p.dataIndex != null && p.seriesIndex != null) {
+          chartInstance.dispatchAction({ type: 'highlight', seriesIndex: p.seriesIndex, dataIndex: p.dataIndex })
+        }
+      }
+    }
+    window.addEventListener('chart-linkage', linkageHandler)
+    // 在 unmount 时清理
+    const origDispose = chartInstance.dispose.bind(chartInstance)
+    chartInstance.dispose = () => {
+      window.removeEventListener('chart-linkage', linkageHandler)
+      origDispose()
+    }
+  }
   
   emit('chartReady', chartInstance)
 }
@@ -216,6 +264,17 @@ const generateChartOption = () => {
     baseOption.toolbox = TOOLBOX_CONFIG
   }
 
+  // 添加 DataZoom（折线图/散点图/柱状图/热力图启用）
+  const zoomableCharts = ['line', 'bar', 'scatter', 'heatmap']
+  if (props.enableDataZoom && zoomableCharts.includes(props.chartType)) {
+    baseOption.dataZoom = [
+      { type: 'inside', start: 0, end: 100 },
+      { type: 'slider', start: 0, end: 100, bottom: 10, height: 20 },
+    ]
+    // 为 dataZoom slider 留底部空间
+    baseOption.grid = { ...baseOption.grid, bottom: props.chartType === 'heatmap' ? '10%' : '15%' }
+  }
+
   // 根据图表类型生成配置
   switch (props.chartType) {
     case 'line':
@@ -232,6 +291,12 @@ const generateChartOption = () => {
       return generateGaugeOption(baseOption)
     case 'funnel':
       return generateFunnelOption(baseOption)
+    case 'heatmap':
+      return generateHeatmapOption(baseOption)
+    case 'treemap':
+      return generateTreemapOption(baseOption)
+    case 'boxplot':
+      return generateBoxplotOption(baseOption)
     default:
       return baseOption
   }
@@ -709,6 +774,125 @@ const generateFunnelOption = (baseOption) => {
         data: funnelData,
       },
     ],
+  }
+}
+
+// 🗺️ 热力图配置
+const generateHeatmapOption = (baseOption) => {
+  // 热力图需要 [x, y, value] 三元组，数据格式和普通图表不同
+  // 使用 config.heatmapData 作为三维数组
+  const heatmapData = props.config.heatmapData || props.data.map(item => [item.x, item.y])
+  const xCategories = [...new Set(heatmapData.map(d => d[0]))]
+  const yCategories = [...new Set(heatmapData.map(d => d[1]))]
+
+  return {
+    ...baseOption,
+    tooltip: {
+      position: 'top',
+      formatter: (p) => `X: ${p.data[0]}<br/>Y: ${p.data[1]}<br/>值: ${p.data[2] || '-'}`,
+    },
+    xAxis: {
+      type: 'category',
+      data: xCategories,
+      splitArea: { show: true },
+      axisLabel: { rotate: 45 },
+    },
+    yAxis: {
+      type: 'category',
+      data: yCategories,
+      splitArea: { show: true },
+    },
+    visualMap: {
+      min: 0,
+      max: Math.max(...heatmapData.map(d => d[2] || 1), 1),
+      calculable: true,
+      orient: 'vertical',
+      right: 0,
+      top: 'center',
+      inRange: {
+        color: ['#313695', '#4575b4', '#74add1', '#abd9e9', '#fee090', '#fdae61', '#f46d43', '#d73027'],
+      },
+    },
+    series: [{
+      type: 'heatmap',
+      data: heatmapData,
+      label: { show: heatmapData.length <= 50 },
+      emphasis: {
+        itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' },
+      },
+    }],
+  }
+}
+
+// 📦 矩形树图配置
+const generateTreemapOption = (baseOption) => {
+  const treemapData = props.data.map(item => ({
+    name: item.x,
+    value: item.y,
+  }))
+
+  return {
+    ...baseOption,
+    tooltip: {
+      formatter: (p) => `${p.name}: ${p.value}`,
+    },
+    series: [{
+      type: 'treemap',
+      data: treemapData,
+      roam: true,
+      width: '90%',
+      height: '80%',
+      top: 60,
+      label: {
+        show: true,
+        formatter: (p) => `${p.name}\n${p.value}`,
+        fontSize: 12,
+      },
+      itemStyle: {
+        borderColor: props.darkMode ? '#1a1d29' : '#fff',
+        borderWidth: 2,
+        borderRadius: 4,
+      },
+      levels: [{
+        colorSaturation: [0.3, 0.6],
+        itemStyle: {
+          borderColorSaturation: 0.7,
+          gapWidth: 2,
+        },
+      }],
+    }],
+  }
+}
+
+// 📦 箱线图配置
+const generateBoxplotOption = (baseOption) => {
+  // 箱线图期望数据格式：[{ x: '类别1', y: [min, Q1, median, Q3, max] }, ...]
+  const xData = props.data.map(item => item.x)
+  const yData = props.data.map(item => Array.isArray(item.y) ? item.y : [0, 0, 0, 0, 0])
+
+  return {
+    ...baseOption,
+    xAxis: {
+      type: 'category',
+      data: xData,
+      axisLabel: { rotate: xData.length > 8 ? 30 : 0 },
+    },
+    yAxis: {
+      type: 'value',
+      splitLine: {
+        lineStyle: { color: props.darkMode ? 'rgba(255,255,255,0.08)' : '#eee' },
+      },
+    },
+    series: [{
+      type: 'boxplot',
+      data: yData,
+      itemStyle: {
+        color: createLinearGradient(echarts, props.colorTheme),
+      },
+      emphasis: {
+        itemStyle: { shadowBlur: 20 },
+      },
+    }],
   }
 }
 
