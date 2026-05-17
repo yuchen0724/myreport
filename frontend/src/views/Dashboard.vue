@@ -293,10 +293,50 @@ export default {
           widget_type: w.widget_type, widget_subtype: w.widget_subtype || "",
           title: w.title, extra_config: w.extra_config || {},
         }))
+        // 加载完布局后注入图表数据
+        refreshChartData()
       } catch (err) {
         console.error("加载布局详情失败:", err)
         ElMessage.error("加载布局失败")
       }
+    }
+
+    // 图表类型 → dashboardData 对应 key 的映射
+    const getChartDataSource = (widgetType, widgetSubtype) => {
+      const MAP = {
+        line: 'chart_query_trend',
+        scatter: 'chart_duration_scatter',
+      }
+      return MAP[widgetSubtype] || null
+    }
+    // 按 widget 标题匹配饼图/柱状图数据源
+    const getChartDataByTitle = (title) => {
+      const MAP = {
+        '近7天导出趋势': 'chart_export_trend',
+        '数据源查询分布': 'chart_data_source_pie',
+        '模板类型分布': 'chart_template_pie',
+      }
+      return MAP[title] || null
+    }
+
+    // 用 dashboardData 更新布局中所有 chart widget 的 chartData
+    const refreshChartData = () => {
+      layoutItems.value.forEach(item => {
+        if (item.widget_type !== 'chart') return
+        const extraConfig = { ...item.extra_config }
+        // 1) 按 subtype 映射（折线、散点）
+        let dataKey = getChartDataSource(item.widget_type, item.widget_subtype)
+        if (!dataKey) {
+          // 2) 按 title 映射（饼图、柱状图）
+          dataKey = getChartDataByTitle(item.title)
+        }
+        if (dataKey && dashboardData.value[dataKey]) {
+          extraConfig.chartData = dashboardData.value[dataKey]
+          item.extra_config = extraConfig
+        }
+      })
+      // 触发响应式刷新
+      layoutItems.value = [...layoutItems.value]
     }
 
     const switchLayout = async (id) => {
@@ -501,6 +541,13 @@ export default {
     onMounted(() => {
       loadData()
     })
+
+    // dashboardData 加载完成或切换后，刷新所有 chart widget 的 chartData
+    watch(dashboardData, () => {
+      if (layoutItems.value.length > 0) {
+        refreshChartData()
+      }
+    }, { deep: true })
 
     return {
       loading, error, isEditing, savingLayout,

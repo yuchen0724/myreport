@@ -96,3 +96,8 @@ class DashboardDataResponse(BaseModel):
     template_count: int = 0
     recent_queries: List[dict] = []
     recent_templates: List[dict] = []
+    chart_query_trend: List[dict] = []
+    chart_data_source_pie: List[dict] = []
+    chart_export_trend: List[dict] = []
+    chart_template_pie: List[dict] = []
+    chart_duration_scatter: List[dict] = []

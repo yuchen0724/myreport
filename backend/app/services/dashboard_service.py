@@ -198,6 +198,8 @@ class DashboardService:
     # ==================== 仪表盘统计数据 ====================
 
     def get_dashboard_data(self, user_id: int) -> dict:
+        from sqlalchemy import cast, Date
+
         data_source_count = self.db.query(func.count(DataSource.id)).scalar() or 0
         query_count = self.db.query(func.count(QueryHistory.id)).scalar() or 0
         export_count = self.db.query(func.count(ExportTask.id)).scalar() or 0
@@ -218,6 +220,84 @@ class DashboardService:
             .limit(5)
             .all()
         )
+
+        # — 图表数据 —
+        # 1. 近 30 天查询趋势（按日）
+        daily_query = (
+            self.db.query(
+                cast(QueryHistory.created_at, Date).label("day"),
+                func.count(QueryHistory.id).label("cnt"),
+            )
+            .filter(QueryHistory.user_id == user_id)
+            .group_by(cast(QueryHistory.created_at, Date))
+            .order_by(cast(QueryHistory.created_at, Date))
+            .all()
+        )
+        from datetime import datetime, timedelta, timezone
+        today = datetime.now(timezone.utc).date()
+        day_map = {r.day: r.cnt for r in daily_query}
+        query_trend = []
+        for i in range(29, -1, -1):
+            d = today - timedelta(days=i)
+            query_trend.append({"x": d.strftime("%m-%d"), "y": day_map.get(d, 0)})
+
+        # 2. 数据源查询分布
+        ds_query = (
+            self.db.query(
+                DataSource.name.label("ds_name"),
+                func.count(QueryHistory.id).label("cnt"),
+            )
+            .join(QueryHistory, QueryHistory.data_source_id == DataSource.id)
+            .filter(QueryHistory.user_id == user_id)
+            .group_by(DataSource.name)
+            .order_by(func.count(QueryHistory.id).desc())
+            .all()
+        )
+        data_source_trend = [{"x": r.ds_name, "y": r.cnt} for r in ds_query]
+
+        # 3. 近 7 天导出趋势
+        daily_export = (
+            self.db.query(
+                cast(ExportTask.created_at, Date).label("day"),
+                func.count(ExportTask.id).label("cnt"),
+            )
+            .group_by(cast(ExportTask.created_at, Date))
+            .order_by(cast(ExportTask.created_at, Date))
+            .all()
+        )
+        export_day_map = {r.day: r.cnt for r in daily_export}
+        export_trend = []
+        for i in range(6, -1, -1):
+            d = today - timedelta(days=i)
+            export_trend.append({"x": d.strftime("%m-%d"), "y": export_day_map.get(d, 0)})
+
+        # 4. 模板类型分布（按描述中的关键词归类）
+        template_type_map = {"销售预测": 0, "数据查询": 0, "基础统计": 0, "其他": 0}
+        for t in recent_templates:
+            desc = (t.description or "").lower()
+            if "预测" in desc:
+                template_type_map["销售预测"] += 1
+            elif "查询" in desc or "sql" in desc:
+                template_type_map["数据查询"] += 1
+            elif "统计" in desc or "汇总" in desc:
+                template_type_map["基础统计"] += 1
+            else:
+                template_type_map["其他"] += 1
+        template_pie = [{"x": k, "y": v} for k, v in template_type_map.items() if v > 0]
+
+        # 5. 最近 5 次查询耗时
+        recent_durations = (
+            self.db.query(QueryHistory)
+            .filter(QueryHistory.user_id == user_id, QueryHistory.duration.isnot(None))
+            .order_by(desc(QueryHistory.created_at))
+            .limit(5)
+            .all()
+        )
+        # reverse 让时间正序排列
+        recent_durations.reverse()
+        duration_scatter = []
+        for i, qh in enumerate(recent_durations):
+            duration_scatter.append({"x": qh.query_text[:30] if qh.query_text else f"查询{i+1}", "y": qh.duration})
 
         return {
             "data_source_count": data_source_count,
@@ -243,4 +323,10 @@ class DashboardService:
                 }
                 for t in recent_templates
             ],
+            # 图表数据
+            "chart_query_trend": query_trend,
+            "chart_data_source_pie": data_source_trend,
+            "chart_export_trend": export_trend,
+            "chart_template_pie": template_pie,
+            "chart_duration_scatter": duration_scatter,
         }
