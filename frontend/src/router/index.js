@@ -14,6 +14,12 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: "/dashboard/layouts",
+    name: "DashboardLayouts",
+    component: () => import("@/views/LayoutList.vue"),
+    meta: { requiresAuth: true }
+  },
+  {
     path: "/datasources",
     name: "DataSourceList",
     component: () => import("@/views/DataSourceList.vue"),
