@@ -274,12 +274,12 @@ class DashboardService:
         # 4. 模板类型分布（按描述中的关键词归类）
         template_type_map = {"销售预测": 0, "数据查询": 0, "基础统计": 0, "其他": 0}
         for t in recent_templates:
-            desc = (t.description or "").lower()
-            if "预测" in desc:
+            t_desc = (t.description or "").lower()
+            if "预测" in t_desc:
                 template_type_map["销售预测"] += 1
-            elif "查询" in desc or "sql" in desc:
+            elif "查询" in t_desc or "sql" in t_desc:
                 template_type_map["数据查询"] += 1
-            elif "统计" in desc or "汇总" in desc:
+            elif "统计" in t_desc or "汇总" in t_desc:
                 template_type_map["基础统计"] += 1
             else:
                 template_type_map["其他"] += 1
@@ -288,7 +288,7 @@ class DashboardService:
         # 5. 最近 5 次查询耗时
         recent_durations = (
             self.db.query(QueryHistory)
-            .filter(QueryHistory.user_id == user_id, QueryHistory.duration.isnot(None))
+            .filter(QueryHistory.user_id == user_id, QueryHistory.execution_time_ms.isnot(None))
             .order_by(desc(QueryHistory.created_at))
             .limit(5)
             .all()
@@ -297,7 +297,7 @@ class DashboardService:
         recent_durations.reverse()
         duration_scatter = []
         for i, qh in enumerate(recent_durations):
-            duration_scatter.append({"x": qh.query_text[:30] if qh.query_text else f"查询{i+1}", "y": qh.duration})
+            duration_scatter.append({"x": qh.query_text[:30] if qh.query_text else f"查询{i+1}", "y": qh.execution_time_ms})
 
         return {
             "data_source_count": data_source_count,
