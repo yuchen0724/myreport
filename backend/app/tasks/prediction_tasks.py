@@ -4,6 +4,7 @@ import json
 import logging
 import lightgbm as lgb
 from typing import Optional
+from celery.exceptions import Ignore
 from app.celery_app import celery_app
 from app.core.database import SessionLocal
 from app.services.prediction_service import PredictionService
@@ -19,6 +20,12 @@ logger = logging.getLogger(__name__)
 _PROGRESS_TTL = 7200
 
 _redis_client = None
+
+
+def _is_unretriable_exc(exc: Exception) -> bool:
+    """判断异常是否不应重试（重试也不会有任何改善）"""
+    from sqlalchemy.exc import ProgrammingError
+    return isinstance(exc, (ValueError, ProgrammingError, AssertionError))
 
 
 def _get_redis():
@@ -474,6 +481,18 @@ def train_prediction_model_async(
         )
         return {"model_id": model_id, "status": "success"}
     except Exception as e:
+        if _is_unretriable_exc(e):
+            # 数据源不存在、DB 参数错误等——重试也没用，直接失败
+            logger.warning(
+                f"[Celery] 训练任务 {task_id} 因不可重试异常直接失败: "
+                f"{type(e).__name__}: {e}"
+            )
+            r = _get_redis()
+            key = _progress_key(task_id)
+            _mark_progress_failed(r, key, str(e))
+            # 标记 DB 模型为 failed
+            _mark_db_model_failed(task_id, str(e))
+            raise Ignore()
         # 重试前确保 Redis 状态是 running（覆盖失败状态）
         r = _get_redis()
         key = _progress_key(task_id)
@@ -550,6 +569,14 @@ def train_and_predict_prediction_async(
         )
         return {"model_id": model_id, "result_count": result_count, "status": "success"}
     except Exception as e:
+        if _is_unretriable_exc(e):
+            logger.warning(
+                f"[Celery] 训练+预测任务 {task_id} 因不可重试异常直接失败: "
+                f"{type(e).__name__}: {e}"
+            )
+            _mark_progress_failed(r, key, str(e))
+            _mark_db_model_failed(task_id, str(e))
+            raise Ignore()
         is_last_retry = self.request.retries >= self.max_retries
         if is_last_retry:
             # 所有重试用尽，标记模型为失败并写入失败预测历史，记录告警
@@ -931,3 +958,32 @@ def _load_db_progress(task_id: str) -> dict | None:
         return None
     finally:
         db.close()
+
+
+def _mark_progress_failed(r, key: str, error: str):
+    """标记 Redis 进度为失败"""
+    try:
+        r.hset(key, mapping={
+            "status": "failed",
+            "percent": "0",
+            "phase": "失败",
+            "detail": error[:200],
+            "error": error[:200],
+        })
+    except Exception:
+        pass
+
+
+def _mark_db_model_failed(task_id: str, error: str):
+    """标记 DB 模型记录为失败"""
+    try:
+        db = SessionLocal()
+        try:
+            db.query(PredictionModel).filter(
+                PredictionModel.task_id == task_id
+            ).update({"status": "failed", "error_message": error[:500]})
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass

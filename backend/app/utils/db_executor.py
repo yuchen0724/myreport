@@ -78,7 +78,13 @@ def execute_query(ds, sql: str) -> tuple:
     else:
         raise ValueError(f"不支持的数据源类型: {ds.type}")
 
-    connect_args = {"connect_timeout": 30, "read_timeout": 300}
+    connect_args = {}
+    # PostgreSQL 的 psycopg2 不支持 read_timeout
+    if ds_type == "POSTGRESQL":
+        connect_args["connect_timeout"] = 30
+    else:
+        connect_args["connect_timeout"] = 30
+        connect_args["read_timeout"] = 300
 
     # SOCKS5 代理（设置 5 分钟超时，避免无限挂死）
     original_socket, use_socks = setup_proxy_for_ds(ds, timeout=300)

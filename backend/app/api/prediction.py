@@ -30,16 +30,26 @@ def train_model(
     """触发异步模型训练"""
     user_id = current_user.id
     from app.tasks.prediction_tasks import train_prediction_model_async
-    task = train_prediction_model_async.delay(
-        data_source_id=req.data_source_id,
-        train_days=req.train_days,
-        table_name=req.table_name,
-        target_field=req.target_field,
-        date_field=req.date_field,
-        store_field=req.store_field,
-        sku_field=req.sku_field,
-        user_id=user_id,
-    )
+    try:
+        task = train_prediction_model_async.delay(
+            data_source_id=req.data_source_id,
+            train_days=req.train_days,
+            table_name=req.table_name,
+            target_field=req.target_field,
+            date_field=req.date_field,
+            store_field=req.store_field,
+            sku_field=req.sku_field,
+            user_id=user_id,
+        )
+    except Exception as e:
+        logger.error(
+            f"训练任务提交失败: data_source_id={req.data_source_id}, "
+            f"train_days={req.train_days}, error={e}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"任务提交失败：Celery 消息队列连接异常，请检查 Redis 和 Celery Worker 状态。"
+        )
     return TrainResponse(
         model_id=0, status="pending",
         task_id=task.id,
@@ -94,13 +104,24 @@ def train_and_predict(
     """触发异步训练+预测（三阶段一键完成）"""
     user_id = current_user.id
     from app.tasks.prediction_tasks import train_and_predict_prediction_async
-    task = train_and_predict_prediction_async.delay(
-        data_source_id=req.data_source_id,
-        train_days=req.train_days,
-        forecast_days=req.forecast_days,
-        table_name=req.table_name,
-        user_id=user_id,
-    )
+    try:
+        task = train_and_predict_prediction_async.delay(
+            data_source_id=req.data_source_id,
+            train_days=req.train_days,
+            forecast_days=req.forecast_days,
+            table_name=req.table_name,
+            user_id=user_id,
+        )
+    except Exception as e:
+        logger.error(
+            f"训练+预测任务提交失败: data_source_id={req.data_source_id}, "
+            f"train_days={req.train_days}, forecast_days={req.forecast_days}, "
+            f"error={e}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"任务提交失败：Celery 消息队列连接异常，请检查 Redis 和 Celery Worker 状态。"
+        )
     return PredictResponse(
         task_id=task.id,
         status="pending",
@@ -193,11 +214,16 @@ def get_my_train_tasks(
     running_models = []
     recent_models = []
     seen_ids = set()
+    seen_task_ids = set()
     fixed_count = 0
     for m in all_models:
         if m.id in seen_ids:
             continue
         seen_ids.add(m.id)
+        if m.task_id:
+            if m.task_id in seen_task_ids:
+                continue
+            seen_task_ids.add(m.task_id)
         if m.task_id and m.task_id in running_task_ids:
             running_models.append(m)
         elif m.status in ("ready", "failed") and m.deleted_at is None:
@@ -354,16 +380,22 @@ def delete_train_history_by_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """通过 task_id 删除训练记录（task_id 为主键）
+    
+    即使 PredictionModel 不存在（任务在创建模型前就失败了），
+    也确保清理 ForecastHistory + Redis 进度。
+    """
     model = db.query(PredictionModel).filter(
         PredictionModel.task_id == task_id,
         PredictionModel.created_by == current_user.id,
     ).first()
-    if not model:
-        raise HTTPException(status_code=404, detail="训练记录不存在或无权操作")
-    if model.status in ("training",):
-        raise HTTPException(status_code=400, detail="正在训练中的任务不能删除，请先停止")
-    _soft_delete_model(model, db)
-    # 同时清理关联的预测历史记录
+
+    if model:
+        if model.status in ("training",):
+            raise HTTPException(status_code=400, detail="正在训练中的任务不能删除，请先停止")
+        _soft_delete_model(model, db)
+
+    # 始终清理关联的预测历史记录
     try:
         db.query(ForecastHistory).filter(
             ForecastHistory.task_id == task_id
@@ -371,6 +403,16 @@ def delete_train_history_by_task(
         db.commit()
     except Exception:
         pass
+
+    # 始终清理 Redis 进度
+    try:
+        from app.tasks.prediction_tasks import _get_redis, _progress_key
+        r = _get_redis()
+        if r:
+            r.delete(_progress_key(task_id))
+    except Exception:
+        pass
+
     return {"status": "deleted"}
 
 

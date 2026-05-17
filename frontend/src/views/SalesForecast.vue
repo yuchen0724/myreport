@@ -217,16 +217,16 @@ export default {
         all = [...tasks.filter(t => t.status !== 'training'), ...forecasts]
       } catch { /* silent */ }
 
-      // 按 model_id 合并：同时有训练（metrics）和预测（result_count）记录时合并为一条
+      // 按 task_id 合并：同时有训练（metrics）和预测（result_count）记录时合并为一条
       const merged = new Map()
       for (const item of all) {
-        const key = item.model_id || item.task_id
-        if (!key) { merged.set(`_${Math.random()}`, item); continue }
+        const key = item.task_id || item.model_id || `_${Math.random()}`
         if (merged.has(key)) {
           const existing = merged.get(key)
           if (item.metrics) existing.metrics = item.metrics
           if (item.result_count) existing.result_count = item.result_count
           if (!existing.data_source_name) existing.data_source_name = item.data_source_name
+          if (!existing.model_id && item.model_id) existing.model_id = item.model_id
         } else {
           merged.set(key, { ...item })
         }
@@ -345,10 +345,15 @@ export default {
         await ElMessageBox.confirm(`确认删除 ${label} 吗？`, '确认删除',
           { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' })
       } catch { return }
-      if (!modelId) { ElMessage.warning('缺少模型ID，无法删除'); return }
       loading.value = true
       try {
-        await deleteTrainHistory(modelId)
+        if (modelId) {
+          await deleteTrainHistory(modelId)
+        } else if (taskId) {
+          await deleteTrainHistoryByTask(taskId)
+        } else {
+          ElMessage.warning('缺少标识信息，无法删除'); return
+        }
         ElMessage.success('删除成功')
       } catch (e) {
         ElMessage.error(`删除失败: ${e.message || e}`)
@@ -389,6 +394,8 @@ export default {
     onBeforeUnmount(() => { stopPolling() })
 
     async function checkRunningTasks() {
+      // 收集已有 task_id 集合，防止重复
+      const existingTaskIds = new Set(taskProgresses.value.map(p => p.taskId))
       try {
         const tasksRes = await getMyTrainTasks()
         const list = Array.isArray(tasksRes) ? tasksRes : (tasksRes.data || [])
@@ -396,11 +403,10 @@ export default {
         for (const t of list) {
           if (t.status === 'training' && t.task_id) {
             hasRunning = true
-            const exists = taskProgresses.value.find(p => p.taskId === t.task_id)
-            if (!exists) {
-              const progress = t.progress || {}
-              taskProgresses.value.push({ taskId: t.task_id, modelId: t.model_id, percent: progress.percent || 0, phase: progress.phase || '正在恢复', detail: progress.detail || '查询任务状态...', status: 'running', taskType: 'train', createdAt: t.created_at ? new Date(t.created_at).toLocaleString() : '', dataSourceName: t.data_source_name || '' })
-            }
+            if (existingTaskIds.has(t.task_id)) continue
+            existingTaskIds.add(t.task_id)
+            const progress = t.progress || {}
+            taskProgresses.value.push({ taskId: t.task_id, modelId: t.model_id, percent: progress.percent || 0, phase: progress.phase || '正在恢复', detail: progress.detail || '查询任务状态...', status: 'running', taskType: 'train', createdAt: t.created_at ? new Date(t.created_at).toLocaleString() : '', dataSourceName: t.data_source_name || '' })
           } else if (t.status === 'ready' || t.status === 'failed') {
             // loadHistory 已处理
           }
@@ -412,10 +418,9 @@ export default {
           for (const f of forecastList) {
             if (f.task_id) {
               hasRunning = true
-              const exists = taskProgresses.value.find(p => p.taskId === f.task_id)
-              if (!exists) {
-                taskProgresses.value.push({ taskId: f.task_id, modelId: f.model_id, percent: f.percent || 0, phase: f.phase || '正在恢复', detail: f.detail || '预测任务恢复中...', status: 'running', taskType: 'predict', createdAt: '', dataSourceName: f.data_source_name || '' })
-              }
+              if (existingTaskIds.has(f.task_id)) continue
+              existingTaskIds.add(f.task_id)
+              taskProgresses.value.push({ taskId: f.task_id, modelId: f.model_id, percent: f.percent || 0, phase: f.phase || '正在恢复', detail: f.detail || '预测任务恢复中...', status: 'running', taskType: 'predict', createdAt: '', dataSourceName: f.data_source_name || '' })
             }
           }
         } catch { /* silent */ }
