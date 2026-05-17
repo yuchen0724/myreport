@@ -42,6 +42,9 @@
                 <el-option label="🎯 雷达图" value="radar" />
                 <el-option label="🎚️ 仪表盘" value="gauge" />
                 <el-option label="🔻 漏斗图" value="funnel" />
+                <el-option label="🗺️ 热力图" value="heatmap" />
+                <el-option label="📦 矩形树图" value="treemap" />
+                <el-option label="📊 箱线图" value="boxplot" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -126,6 +129,15 @@
     <!-- 图表展示区域 -->
     <transition name="fade">
       <el-card v-if="chartData" class="chart-card" shadow="always">
+        <!-- 钻取面包屑 -->
+        <div v-if="drillPath.length > 0" class="drill-crumb">
+          <el-breadcrumb separator=">">
+            <el-breadcrumb-item><a href="#" @click.prevent="handleDrillUp(-1)">全部</a></el-breadcrumb-item>
+            <el-breadcrumb-item v-for="(drill, idx) in drillPath" :key="idx">
+              <a href="#" @click.prevent="handleDrillUp(idx)">{{ drill.label || drill.value }}</a>
+            </el-breadcrumb-item>
+          </el-breadcrumb>
+        </div>
         <ChartRenderer
           :chart-type="chartData.chart_type"
           :data="chartData.data"
@@ -135,8 +147,12 @@
           :show-particles="chartData.config.showParticles"
           :dark-mode="true"
           :show-toolbox="true"
+          :enable-data-zoom="true"
+          :drill-config="{ enabled: true, path: drillPath }"
+          :linkage-group="'chart-viewer'"
           @chart-click="handleChartClick"
           @chart-ready="handleChartReady"
+          @drill-down="handleDrillDown"
         />
       </el-card>
     </transition>
@@ -182,6 +198,7 @@ const form = ref({
 const dataSources = ref([])
 const chartData = ref(null)
 const loading = ref(false)
+const drillPath = ref([])
 let chartInstance = null
 
 onMounted(async () => {
@@ -213,6 +230,7 @@ const handleGenerate = async () => {
 
   loading.value = true
   chartData.value = null
+  drillPath.value = []
   
   try {
     const response = await generateChart(form.value)
@@ -237,6 +255,7 @@ const handleClear = () => {
   form.value.sql = ''
   form.value.chart_config.title = ''
   chartData.value = null
+  drillPath.value = []
 }
 
 const handleRandomTheme = () => {
@@ -254,6 +273,46 @@ const handleChartClick = (params) => {
 const handleChartReady = (instance) => {
   chartInstance = instance
   console.log('图表已就绪')
+}
+
+// 钻取：用户点击图表某个数据项，带上钻取路径重新查询
+const handleDrillDown = async (drill) => {
+  drillPath.value.push(drill)
+  await drillQuery()
+}
+
+// 钻取回退：点击面包屑撤销到指定层级
+const handleDrillUp = async (idx) => {
+  if (idx < 0) {
+    drillPath.value = []
+  } else {
+    drillPath.value = drillPath.value.slice(0, idx + 1)
+  }
+  await drillQuery()
+}
+
+// 执行带钻取路径的图表查询
+const drillQuery = async () => {
+  loading.value = true
+  try {
+    const response = await generateChart({
+      ...form.value,
+      drill_path: drillPath.value,
+    })
+    chartData.value = {
+      ...response,
+      config: {
+        ...response.config,
+        colorTheme: form.value.chart_config.colorTheme,
+        height: form.value.chart_config.height,
+        showParticles: form.value.chart_config.showParticles,
+      }
+    }
+  } catch (error) {
+    ElMessage.error('钻取查询失败：' + (error.message || '未知错误'))
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
