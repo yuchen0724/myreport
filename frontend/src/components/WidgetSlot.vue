@@ -100,14 +100,25 @@ export default {
     watch(
       () => props.dashboardData,
       (val) => {
-        if (!val || Object.keys(val).length === 0) return
+        if (!val || Object.keys(val).length === 0) {
+          console.log(`[WidgetSlot] dashboardData empty for '${props.title}'`)
+          return
+        }
         // 如果已有 chartData 就不覆盖
-        if (chartData.value.length > 0) return
+        if (chartData.value.length > 0) {
+          console.log(`[WidgetSlot] already has chartData (${chartData.value.length} items) for '${props.title}'`)
+          return
+        }
         let dataKey = getChartDataKeyBySubtype(props.subtype)
         if (!dataKey) dataKey = getChartDataKey(props.title)
         if (dataKey && val[dataKey] && val[dataKey].length > 0) {
-          console.log(`[WidgetSlot] auto-filled chartData for '${props.title}' from ${dataKey}`)
+          console.log(`[WidgetSlot] auto-filled chartData for '${props.title}' from ${dataKey} (${val[dataKey].length} items)`)
+          console.log(`[WidgetSlot] current chartData ref before:`, JSON.stringify(chartData.value).slice(0,50))
           chartData.value = val[dataKey]
+          console.log(`[WidgetSlot] chartData ref after:`, JSON.stringify(chartData.value).slice(0,50))
+        } else {
+          console.log(`[WidgetSlot] NO data found for '${props.title}': dataKey=${dataKey}, hasKey=${!!val[dataKey]}, keyLen=${val[dataKey]?.length}`)
+          console.log(`[WidgetSlot] available dashboardData keys:`, Object.keys(val))
         }
       },
       { deep: true, immediate: true }
