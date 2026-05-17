@@ -17,6 +17,7 @@ class DashboardLayoutResponse(BaseModel):
 
 class DashboardLayoutCreate(BaseModel):
     name: str = "新建布局"
+    is_default: bool = False
 
 
 class DashboardLayoutUpdate(BaseModel):
@@ -44,11 +45,12 @@ class WidgetConfigResponse(BaseModel):
 class WidgetConfigCreate(BaseModel):
     widget_type: str
     widget_subtype: Optional[str] = None
-    title: str
+    title: str = ""
     grid_x: int = 0
     grid_y: int = 0
     grid_w: int = 4
     grid_h: int = 2
+    visible: bool = True
     extra_config: Optional[Dict[str, Any]] = None
 
 

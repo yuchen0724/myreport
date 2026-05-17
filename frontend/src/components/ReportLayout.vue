@@ -42,7 +42,7 @@
 
 <script>
 import { GridLayout, GridItem } from "grid-layout-plus"
-import "grid-layout-plus/lib/index.cjs" // 确保样式加载
+import "grid-layout-plus/es/index.mjs" // 样式随模块加载
 import WidgetSlot from "./WidgetSlot.vue"
 
 export default {

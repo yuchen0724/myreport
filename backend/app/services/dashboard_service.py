@@ -39,8 +39,8 @@ class DashboardService:
             .first()
         )
 
-    def create_layout(self, user_id: int, name: str) -> DashboardLayout:
-        layout = DashboardLayout(user_id=user_id, name=name)
+    def create_layout(self, user_id: int, name: str, is_default: bool = False) -> DashboardLayout:
+        layout = DashboardLayout(user_id=user_id, name=name, is_default=is_default)
         self.db.add(layout)
         self.db.commit()
         self.db.refresh(layout)

@@ -60,7 +60,7 @@ async def create_layout(
     current_user_id: int = Depends(get_current_user_id),
 ):
     service = DashboardService(db)
-    layout = service.create_layout(current_user_id, payload.name)
+    layout = service.create_layout(current_user_id, payload.name, payload.is_default)
     return DashboardLayoutDetail(
         id=layout.id,
         user_id=layout.user_id,
