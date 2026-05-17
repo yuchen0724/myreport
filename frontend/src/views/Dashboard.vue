@@ -269,6 +269,11 @@ export default {
         widgets.value = widgetConfigs
         dashboardData.value = data
 
+        // 用 setTimeout 确保 layoutItems 渲染完成后注入图表数据
+        if (layoutItems.value.length > 0) {
+          setTimeout(() => refreshChartData(), 50)
+        }
+
         // 自动跳转第一个布局或默认布局
         if (layoutList.length > 0) {
           const defaultLayout = layoutList.find(l => l.is_default) || layoutList[0]
