@@ -321,7 +321,9 @@ export default {
 
     // 用 dashboardData 更新布局中所有 chart widget 的 chartData
     const refreshChartData = () => {
-      layoutItems.value.forEach(item => {
+      console.log("[Dashboard] refreshChartData called, layoutItems:", layoutItems.value.length, "dashboardData keys:", Object.keys(dashboardData.value))
+      let injected = 0
+      layoutItems.value.forEach((item, idx) => {
         if (item.widget_type !== 'chart') return
         const extraConfig = { ...item.extra_config }
         // 1) 按 subtype 映射（折线、散点）
@@ -333,8 +335,13 @@ export default {
         if (dataKey && dashboardData.value[dataKey]) {
           extraConfig.chartData = dashboardData.value[dataKey]
           item.extra_config = extraConfig
+          injected++
+          console.log(`[Dashboard] injected chartData for '${item.title}' (${dataKey}): ${dashboardData.value[dataKey].length} items`)
+        } else {
+          console.log(`[Dashboard] NO data for '${item.title}', dataKey=${dataKey}, hasDashboard=${!!dashboardData.value[dataKey]}`)
         }
       })
+      console.log(`[Dashboard] injected ${injected}/${layoutItems.value.filter(i => i.widget_type === 'chart').length} charts`)
       // 触发响应式刷新
       layoutItems.value = [...layoutItems.value]
     }

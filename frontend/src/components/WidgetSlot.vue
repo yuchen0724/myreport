@@ -80,6 +80,39 @@ export default {
       { deep: true }
     )
 
+    // 从 dashboardData 自动匹配图表数据
+    const getChartDataKey = (title) => {
+      const MAP = {
+        '近7天导出趋势': 'chart_export_trend',
+        '数据源查询分布': 'chart_data_source_pie',
+        '模板类型分布': 'chart_template_pie',
+      }
+      return MAP[title] || null
+    }
+    const getChartDataKeyBySubtype = (subtype) => {
+      const MAP = {
+        line: 'chart_query_trend',
+        scatter: 'chart_duration_scatter',
+      }
+      return MAP[subtype] || null
+    }
+
+    watch(
+      () => props.dashboardData,
+      (val) => {
+        if (!val || Object.keys(val).length === 0) return
+        // 如果已有 chartData 就不覆盖
+        if (chartData.value.length > 0) return
+        let dataKey = getChartDataKeyBySubtype(props.subtype)
+        if (!dataKey) dataKey = getChartDataKey(props.title)
+        if (dataKey && val[dataKey] && val[dataKey].length > 0) {
+          console.log(`[WidgetSlot] auto-filled chartData for '${props.title}' from ${dataKey}`)
+          chartData.value = val[dataKey]
+        }
+      },
+      { deep: true, immediate: true }
+    )
+
     return { chartData, chartConfig, tableResult, iframeUrl, Setting, Delete }
   },
 }
