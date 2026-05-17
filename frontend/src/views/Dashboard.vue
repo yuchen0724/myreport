@@ -186,6 +186,13 @@
         <el-button type="primary" @click="confirmRename">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 组件编辑弹窗 -->
+    <WidgetEditorDialog
+      v-model="showWidgetEditor"
+      :widget="editingWidgetRef"
+      @saved="handleWidgetSaved"
+    />
   </div>
 </template>
 
@@ -197,9 +204,10 @@ import draggable from "vuedraggable"
 import DashboardWidget from "@/components/DashboardWidget.vue"
 import ReportLayout from "@/components/ReportLayout.vue"
 import WidgetAddPanel from "@/components/WidgetAddPanel.vue"
+import WidgetEditorDialog from "@/components/WidgetEditorDialog.vue"
 import {
   getLayoutList, getLayoutDetail, createLayout, updateLayout, deleteLayout, saveWidgetBatch,
-  getWidgetConfig, saveWidgetConfig, getDashboardData,
+  getWidgetConfig, saveWidgetConfig, getDashboardData, updateWidget,
 } from "@/api/dashboard"
 
 const ALL_WIDGET_META = {
@@ -223,6 +231,7 @@ export default {
   components: {
     DashboardWidget, ReportLayout, WidgetAddPanel, draggable,
     Sort, View, Hide, Plus, Edit, Delete, Setting,
+    WidgetEditorDialog,
   },
   setup() {
     const loading = ref(true)
@@ -240,6 +249,8 @@ export default {
     const showPresetDialog = ref(false)
     const showRenameDialog = ref(false)
     const renameValue = ref("")
+    const showWidgetEditor = ref(false)
+    const editingWidgetRef = ref(null)
 
     // ===== 旧版兼容 =====
     const widgets = ref([])
@@ -411,6 +422,21 @@ export default {
       }
     }
 
+    const handleWidgetSaved = async ({ widgetId, payload }) => {
+      if (!currentLayoutId.value || !widgetId) return
+      savingLayout.value = true
+      try {
+        await updateWidget(currentLayoutId.value, widgetId, payload)
+        ElMessage.success("组件已更新")
+        await switchToLayout(currentLayoutId.value)
+      } catch (err) {
+        console.error("保存组件配置失败:", err)
+        ElMessage.error("保存组件配置失败")
+      } finally {
+        savingLayout.value = false
+      }
+    }
+
     const addWidget = (item) => {
       const newWidget = {
         i: `new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -433,7 +459,8 @@ export default {
     }
 
     const editWidget = (item) => {
-      ElMessage.info(`编辑 ${item.title} — 功能待扩展`)
+      editingWidgetRef.value = item
+      showWidgetEditor.value = true
     }
 
     const applyPreset = (key) => {
@@ -567,10 +594,12 @@ export default {
       loading, error, isEditing, savingLayout,
       layouts, currentLayoutId, currentLayout, layoutItems,
       showAddPanel, showPresetDialog, showRenameDialog, renameValue,
+      showWidgetEditor, editingWidgetRef,
       presets,
       widgets, dashboardData, editingWidgets,
       visibleWidgets, hiddenWidgetTypes,
       switchLayout, createNewLayout, toggleEdit, saveLayout,
+      handleWidgetSaved,
       addWidget, removeWidget, editWidget,
       applyPreset, renameLayout, confirmRename, handleDeleteLayout,
       toggleVisibility, addLegacyWidget,
