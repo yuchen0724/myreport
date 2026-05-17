@@ -81,7 +81,7 @@
       />
 
       <!-- 网格布局 -->
-      <div class="layout-area">
+      <div class="layout-area fade-in-up">
         <div v-if="isEditing && layoutItems.length === 0" class="empty-layout-hint">
           <el-empty description="布局为空，点击「添加组件」开始配置" />
         </div>
@@ -110,10 +110,11 @@
 
       <div v-if="!isEditing" class="widget-grid">
         <div
-          v-for="w in visibleWidgets"
+          v-for="(w, idx) in visibleWidgets"
           :key="w.widget_type"
           class="widget-grid-item"
-          :class="'widget-' + w.widget_type"
+          :class="['widget-' + w.widget_type, 'fade-in-up']"
+          :style="{ animationDelay: idx * 0.08 + 's' }"
         >
           <DashboardWidget :widget="w" :dashboard-data="dashboardData" />
         </div>
@@ -523,6 +524,12 @@ export default {
 .dashboard-content {
   padding: 20px;
 }
+
+/* 入场动画 */
+.fade-in-up {
+  animation: fadeInUp 0.5s ease forwards;
+  opacity: 0;
+}
 .dashboard-toolbar {
   margin-bottom: 20px;
   display: flex;
@@ -646,4 +653,10 @@ export default {
 .preset-icon { color: #409eff; margin-bottom: 8px; }
 .preset-name { font-weight: 600; margin-bottom: 4px; }
 .preset-desc { font-size: 12px; color: #909399; }
+
+/* 入场动画关键帧 */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 </style>

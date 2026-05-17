@@ -3,7 +3,7 @@
     <el-card v-if="isStatCard" shadow="hover">
       <div class="stat-card">
         <h3>{{ widget.title }}</h3>
-        <p class="stat-number">{{ statValue }}</p>
+        <p class="stat-number">{{ displayValue || statValue }}</p>
       </div>
     </el-card>
     <el-card v-else shadow="hover">
@@ -32,6 +32,7 @@
 
 <script>
 import { computed } from 'vue'
+import { useCountUp } from '@/composables/useCountUp'
 
 const STAT_CARD_TYPES = ['data_source_count', 'query_count', 'export_count', 'template_count']
 
@@ -39,19 +40,20 @@ export default {
   name: 'DashboardWidget',
   props: {
     widget: { type: Object, required: true },
-    dashboardData: { type: Object, required: true }
+    dashboardData: { type: Object, required: true },
+    animationEnabled: { type: Boolean, default: true },
   },
   setup(props) {
     const isStatCard = computed(() => STAT_CARD_TYPES.includes(props.widget.widget_type))
+    const statValue = computed(() => props.dashboardData[props.widget.widget_type] ?? 0)
 
-    const statValue = computed(() => {
-      return props.dashboardData[props.widget.widget_type] ?? 0
-    })
+    // 数字滚动动画
+    const { displayValue } = useCountUp(statValue, 1200, props.animationEnabled)
 
     const recentQueries = computed(() => props.dashboardData.recent_queries || [])
     const recentTemplates = computed(() => props.dashboardData.recent_templates || [])
 
-    return { isStatCard, statValue, recentQueries, recentTemplates }
+    return { isStatCard, displayValue, statValue, recentQueries, recentTemplates }
   }
 }
 </script>

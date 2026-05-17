@@ -52,6 +52,15 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  // 动画配置
+  animationDuration: {
+    type: Number,
+    default: 1500
+  },
+  animationEasing: {
+    type: String,
+    default: 'cubicOut'
+  },
   height: {
     type: String,
     default: '400px'
@@ -226,6 +235,9 @@ const updateChart = async () => {
 const generateChartOption = () => {
   const baseOption = {
     ...ANIMATION_CONFIG,
+    // 支持通过 prop 覆盖动画时长
+    animationDuration: props.animationDuration,
+    animationEasing: props.animationEasing || ANIMATION_CONFIG.animationEasing,
     backgroundColor: 'transparent',
     title: {
       text: props.config.title || '',
