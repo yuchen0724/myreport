@@ -4,34 +4,47 @@
 
     <!-- 操作区域 -->
     <el-card class="action-card" shadow="never">
-      <el-form :model="form" label-width="120px" inline>
-        <el-form-item label="数据源">
-          <el-select v-model="form.dataSourceId" placeholder="选择数据源" style="width: 240px" @change="onDataSourceChange">
-            <el-option
-              v-for="ds in dataSources"
-              :key="ds.id"
-              :label="ds.name"
-              :value="ds.id"
+      <el-form :model="form" label-width="auto">
+        <!-- 第一行：固定宽度参数 -->
+        <div class="param-row">
+          <el-form-item label="数据源">
+            <el-select v-model="form.dataSourceId" placeholder="选择数据源" style="width: 200px" @change="onDataSourceChange">
+              <el-option
+                v-for="ds in dataSources"
+                :key="ds.id"
+                :label="ds.name"
+                :value="ds.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="训练天数">
+            <el-input-number v-model="form.trainDays" :min="30" :max="730" :step="30" />
+          </el-form-item>
+          <el-form-item label="预测天数">
+            <el-input-number v-model="form.forecastDays" :min="7" :max="365" :step="7" />
+          </el-form-item>
+          <el-form-item label="分组数">
+            <el-input-number v-model="form.batchSize" :min="50" :max="1000" :step="50" />
+          </el-form-item>
+        </div>
+        <!-- 第二行：查询语句（独占双行宽度） -->
+        <div class="sql-row">
+          <el-form-item label="查询语句">
+            <el-input
+              v-model="form.tableName"
+              type="textarea"
+              :rows="2"
+              placeholder="可选，默认使用: 库名.ads_cockpit_fd_store_ware_d&#10;可写完整 SQL 子查询，如 (SELECT * FROM db.table WHERE ...) AS a"
+              clearable
             />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="训练天数">
-          <el-input-number v-model="form.trainDays" :min="30" :max="730" :step="30" />
-        </el-form-item>
-        <el-form-item label="预测天数">
-          <el-input-number v-model="form.forecastDays" :min="7" :max="365" :step="7" />
-        </el-form-item>
-        <el-form-item label="数据表名">
-          <el-input v-model="form.tableName" placeholder="可选，默认: 库名.ads_cockpit_fd_store_ware_d" style="width: 320px" clearable />
-        </el-form-item>
-        <el-form-item label="分组数">
-          <el-input-number v-model="form.batchSize" :min="50" :max="1000" :step="50" />
-        </el-form-item>
-        <el-form-item>
+          </el-form-item>
+        </div>
+        <!-- 第三行：按钮靠右 -->
+        <div class="action-row">
           <el-button type="warning" @click="handleTrainAndPredict" :loading="trainAndPredictLoading" :disabled="!form.dataSourceId">
             <el-icon><Refresh /></el-icon> 训练并预测
           </el-button>
-        </el-form-item>
+        </div>
       </el-form>
     </el-card>
 
@@ -446,6 +459,41 @@ export default {
 <style scoped>
 .sales-forecast { padding: 16px; }
 .action-card { margin: 16px 0; }
+.action-card .el-form { padding: 4px 0; }
+
+/* 第一行：参数水平排列，可换行 */
+.param-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+  margin-bottom: 0;
+}
+.param-row .el-form-item {
+  margin-bottom: 12px;
+}
+
+/* 第二行：SQL 输入框撑满 */
+.sql-row {
+  margin-bottom: 8px;
+}
+.sql-row .el-form-item {
+  width: 100%;
+  margin-bottom: 0;
+}
+.sql-row :deep(.el-form-item__content) {
+  width: 100%;
+}
+.sql-row :deep(.el-textarea) {
+  width: 100%;
+}
+
+/* 第三行：按钮靠右 */
+.action-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
 .chart-card { margin-bottom: 16px; }
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .pagination { margin-top: 16px; display: flex; justify-content: flex-end; }
