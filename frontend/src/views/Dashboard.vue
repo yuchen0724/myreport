@@ -350,7 +350,7 @@ export default {
       })
       console.log(`[Dashboard] injected ${injected}/${layoutItems.value.filter(i => i.widget_type === 'chart').length} charts`)
       // 触发响应式刷新：重建整个 ReportLayout 确保所有子组件 props 刷新
-      layoutKey.value++
+      if (injected > 0) layoutKey.value++
     }
 
     const switchLayout = async (id) => {
