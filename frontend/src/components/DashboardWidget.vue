@@ -44,8 +44,20 @@ export default {
     animationEnabled: { type: Boolean, default: true },
   },
   setup(props) {
-    const isStatCard = computed(() => STAT_CARD_TYPES.includes(props.widget.widget_type))
-    const statValue = computed(() => props.dashboardData[props.widget.widget_type] ?? 0)
+    const isStatCard = computed(() => {
+      // 新布局模式：widget_type='stat', subtype='data_source_count'
+      if (props.widget.widget_type === 'stat') return true
+      // 旧版兼容：widget_type='data_source_count'
+      return STAT_CARD_TYPES.includes(props.widget.widget_type)
+    })
+    const statValue = computed(() => {
+      // 新布局模式：从 subtype 取数（如 dashboardData['data_source_count']）
+      if (props.widget.widget_subtype && props.widget.widget_type === 'stat') {
+        return props.dashboardData[props.widget.widget_subtype] ?? 0
+      }
+      // 旧版兼容
+      return props.dashboardData[props.widget.widget_type] ?? 0
+    })
 
     // 数字滚动动画
     const { displayValue } = useCountUp(statValue, 1200, props.animationEnabled)
