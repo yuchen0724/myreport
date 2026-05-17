@@ -99,3 +99,4 @@ class TrainAndPredictRequest(BaseModel):
         description="销售数据表名（完整名称，如 retail_analysis.ads_cockpit_fd_store_ware_d）"
     )
     batch_size: Optional[int] = Field(None, description="活跃分组数（LIMIT），默认200")
+    batch_unit: Optional[int] = Field(None, description="每批处理的分组数，默认10")

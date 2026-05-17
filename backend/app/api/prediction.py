@@ -112,11 +112,13 @@ def train_and_predict(
             table_name=req.table_name,
             user_id=user_id,
             batch_size=req.batch_size,
+            batch_unit=req.batch_unit,
         )
     except Exception as e:
         logger.error(
             f"训练+预测任务提交失败: data_source_id={req.data_source_id}, "
             f"train_days={req.train_days}, forecast_days={req.forecast_days}, "
+            f"batch_size={req.batch_size}, batch_unit={req.batch_unit}, "
             f"error={e}"
         )
         raise HTTPException(

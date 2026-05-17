@@ -279,6 +279,7 @@ def _train_and_predict_with_progress(
     table_name: Optional[str],
     user_id: Optional[int] = None,
     batch_size: Optional[int] = None,
+    batch_unit: Optional[int] = None,
 ) -> tuple:
     """带进度汇报的训练+预测三阶段流水线
 
@@ -354,6 +355,7 @@ def _train_and_predict_with_progress(
             ds.id, train_days, model, feature_cols,
             table_name=table_name,
             batch_size=batch_size or 200,
+            batch_unit=batch_unit or 10,
             fetch_callback=None,
             train_callback=None,
             predict_callback=_batch_complete_callback,
@@ -537,6 +539,7 @@ def train_and_predict_prediction_async(
     table_name: Optional[str] = None,
     user_id: Optional[int] = None,
     batch_size: Optional[int] = None,
+    batch_unit: Optional[int] = None,
 ):
     """异步训练+预测（三阶段一键完成）
 
@@ -570,6 +573,7 @@ def train_and_predict_prediction_async(
             table_name,
             user_id=user_id,
             batch_size=batch_size,
+            batch_unit=batch_unit,
         )
         return {"model_id": model_id, "result_count": result_count, "status": "success"}
     except Exception as e:

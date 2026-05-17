@@ -100,6 +100,7 @@ class PredictionService:
     def _fetch_and_train_incremental(self, ds_id: int, days: int, model, feature_cols,
                                       table_name: str = None,
                                       batch_size: int = 200,
+                                      batch_unit: int = 10,
                                       fetch_callback: callable = None,
                                       train_callback: callable = None,
                                       predict_callback: callable = None) -> tuple:
@@ -154,7 +155,7 @@ class PredictionService:
         logger.info(f"[训练] 活跃分组数={len(all_groups)}")
 
         # 每 N 个分组合并为一个批次，减少 DB 写入次数和模型 fit 调用
-        BATCH_GROUP_SIZE = 10
+        BATCH_GROUP_SIZE = batch_unit
         batches = [all_groups[i:i+BATCH_GROUP_SIZE] for i in range(0, len(all_groups), BATCH_GROUP_SIZE)]
         total_batches = len(batches)
 

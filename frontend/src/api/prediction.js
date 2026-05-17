@@ -71,12 +71,13 @@ export function exportForecastExcel(params) {
   return request.get('/prediction/forecast/export', { params, responseType: 'blob' })
 }
 
-export function trainAndPredict(dataSourceId, trainDays, forecastDays, tableName, batchSize) {
+export function trainAndPredict(dataSourceId, trainDays, forecastDays, tableName, batchSize, batchUnit) {
   return request.post('/prediction/train-and-predict', {
     data_source_id: dataSourceId,
     train_days: trainDays || null,
     forecast_days: forecastDays || null,
     table_name: tableName || null,
     batch_size: batchSize || null,
+    batch_unit: batchUnit || null,
   })
 }

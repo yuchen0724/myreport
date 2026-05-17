@@ -26,6 +26,9 @@
           <el-form-item label="分组数">
             <el-input-number v-model="form.batchSize" :min="50" :max="1000" :step="50" />
           </el-form-item>
+          <el-form-item label="每批分组数">
+            <el-input-number v-model="form.batchUnit" :min="1" :max="50" :step="1" />
+          </el-form-item>
         </div>
         <!-- 第二行：查询语句（独占双行宽度） -->
         <div class="sql-row">
@@ -185,10 +188,11 @@ export default {
             forecastDays: parsed.forecastDays ?? 30,
             tableName: parsed.tableName ?? '',
             batchSize: parsed.batchSize ?? 200,
+            batchUnit: parsed.batchUnit ?? 10,
           }
         }
       } catch { /* 忽略 */ }
-      return { dataSourceId: null, trainDays: 365, forecastDays: 30, tableName: '', batchSize: 200 }
+      return { dataSourceId: null, trainDays: 365, forecastDays: 30, tableName: '', batchSize: 200, batchUnit: 10 }
     }
 
     const form = ref(loadStoredForm())
@@ -387,7 +391,8 @@ export default {
       try {
         const tableName = form.value.tableName.trim() || null
         const batchSize = form.value.batchSize || null
-        const res = await trainAndPredict(form.value.dataSourceId, form.value.trainDays, form.value.forecastDays, tableName, batchSize)
+        const batchUnit = form.value.batchUnit || null
+        const res = await trainAndPredict(form.value.dataSourceId, form.value.trainDays, form.value.forecastDays, tableName, batchSize, batchUnit)
         const taskId = res.task_id || (res.data && res.data.task_id)
         if (!taskId) { resultMsg.value = '任务提交失败'; return }
         const ds = dataSources.value.find(d => d.id === form.value.dataSourceId)
