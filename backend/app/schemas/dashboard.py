@@ -1,5 +1,69 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+
+
+class DashboardLayoutResponse(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    is_default: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DashboardLayoutCreate(BaseModel):
+    name: str = "新建布局"
+
+
+class DashboardLayoutUpdate(BaseModel):
+    name: Optional[str] = None
+    is_default: Optional[bool] = None
+
+
+class WidgetConfigResponse(BaseModel):
+    id: Optional[int] = None
+    widget_type: str
+    widget_subtype: Optional[str] = None
+    title: str
+    grid_x: int = 0
+    grid_y: int = 0
+    grid_w: int = 4
+    grid_h: int = 2
+    position: int = 0
+    visible: bool = True
+    extra_config: Optional[Dict[str, Any]] = None
+
+    class Config:
+        from_attributes = True
+
+
+class WidgetConfigCreate(BaseModel):
+    widget_type: str
+    widget_subtype: Optional[str] = None
+    title: str
+    grid_x: int = 0
+    grid_y: int = 0
+    grid_w: int = 4
+    grid_h: int = 2
+    extra_config: Optional[Dict[str, Any]] = None
+
+
+class WidgetConfigUpdate(BaseModel):
+    title: Optional[str] = None
+    grid_x: Optional[int] = None
+    grid_y: Optional[int] = None
+    grid_w: Optional[int] = None
+    grid_h: Optional[int] = None
+    visible: Optional[bool] = None
+    extra_config: Optional[Dict[str, Any]] = None
+
+
+class DashboardLayoutDetail(DashboardLayoutResponse):
+    widgets: List[WidgetConfigResponse] = []
 
 
 class DashboardWidgetConfigResponse(BaseModel):
@@ -19,7 +83,7 @@ class DashboardWidgetUpdate(BaseModel):
     visible: bool
 
 
-class DashboardLayoutUpdate(BaseModel):
+class DashboardLayoutUpdateOld(BaseModel):
     widgets: List[DashboardWidgetUpdate]
 
 

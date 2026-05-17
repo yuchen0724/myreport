@@ -1,8 +1,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 from sqlalchemy.orm import joinedload
-from typing import List
-from app.models.dashboard_widget import DashboardWidgetConfig
+from typing import List, Optional, Dict, Any
+from app.models.dashboard_widget import DashboardLayout, DashboardWidgetConfig
 from app.models.query_history import QueryHistory
 from app.models.template import Template
 from app.models.data_source import DataSource
@@ -22,10 +22,143 @@ class DashboardService:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_widgets(self, user_id: int) -> List[DashboardWidgetConfig]:
+    # ==================== 布局 CRUD ====================
+
+    def get_layouts(self, user_id: int) -> List[DashboardLayout]:
+        return (
+            self.db.query(DashboardLayout)
+            .filter(DashboardLayout.user_id == user_id)
+            .order_by(DashboardLayout.updated_at.desc().nullslast(), DashboardLayout.id.desc())
+            .all()
+        )
+
+    def get_layout(self, layout_id: int, user_id: int) -> Optional[DashboardLayout]:
+        return (
+            self.db.query(DashboardLayout)
+            .filter(DashboardLayout.id == layout_id, DashboardLayout.user_id == user_id)
+            .first()
+        )
+
+    def create_layout(self, user_id: int, name: str) -> DashboardLayout:
+        layout = DashboardLayout(user_id=user_id, name=name)
+        self.db.add(layout)
+        self.db.commit()
+        self.db.refresh(layout)
+        return layout
+
+    def update_layout(self, layout_id: int, user_id: int, data: Dict[str, Any]) -> Optional[DashboardLayout]:
+        layout = self.get_layout(layout_id, user_id)
+        if not layout:
+            return None
+        if "name" in data:
+            layout.name = data["name"]
+        if "is_default" in data:
+            layout.is_default = data["is_default"]
+        self.db.commit()
+        self.db.refresh(layout)
+        return layout
+
+    def delete_layout(self, layout_id: int, user_id: int) -> bool:
+        layout = self.get_layout(layout_id, user_id)
+        if not layout:
+            return False
+        self.db.delete(layout)
+        self.db.commit()
+        return True
+
+    # ==================== Widget CRUD ====================
+
+    def get_widgets(self, layout_id: int) -> List[DashboardWidgetConfig]:
+        return (
+            self.db.query(DashboardWidgetConfig)
+            .filter(DashboardWidgetConfig.layout_id == layout_id)
+            .order_by(DashboardWidgetConfig.position)
+            .all()
+        )
+
+    def create_widget(self, layout_id: int, user_id: int, data: Dict[str, Any]) -> DashboardWidgetConfig:
+        config = DashboardWidgetConfig(
+            user_id=user_id,
+            layout_id=layout_id,
+            widget_type=data["widget_type"],
+            widget_subtype=data.get("widget_subtype"),
+            title=data.get("title", ""),
+            grid_x=data.get("grid_x", 0),
+            grid_y=data.get("grid_y", 0),
+            grid_w=data.get("grid_w", 4),
+            grid_h=data.get("grid_h", 2),
+            position=data.get("position", 0),
+            visible=True,
+            extra_config=data.get("extra_config", {}),
+        )
+        self.db.add(config)
+        self.db.commit()
+        self.db.refresh(config)
+        return config
+
+    def update_widget(self, widget_id: int, user_id: int, data: Dict[str, Any]) -> Optional[DashboardWidgetConfig]:
+        widget = (
+            self.db.query(DashboardWidgetConfig)
+            .filter(DashboardWidgetConfig.id == widget_id, DashboardWidgetConfig.user_id == user_id)
+            .first()
+        )
+        if not widget:
+            return None
+        for field in ("title", "grid_x", "grid_y", "grid_w", "grid_h", "visible", "extra_config", "widget_subtype"):
+            if field in data:
+                setattr(widget, field, data[field])
+        self.db.commit()
+        self.db.refresh(widget)
+        return widget
+
+    def delete_widget(self, widget_id: int, user_id: int) -> bool:
+        widget = (
+            self.db.query(DashboardWidgetConfig)
+            .filter(DashboardWidgetConfig.id == widget_id, DashboardWidgetConfig.user_id == user_id)
+            .first()
+        )
+        if not widget:
+            return False
+        self.db.delete(widget)
+        self.db.commit()
+        return True
+
+    # ==================== 批量更新布局内的 Widgets ====================
+
+    def save_layout_widgets(self, layout_id: int, user_id: int, widgets_data: List[Dict]) -> List[DashboardWidgetConfig]:
+        """清空布局内所有 widget，批量重建（用于编辑模式整体保存）"""
+        self.db.query(DashboardWidgetConfig).filter(
+            DashboardWidgetConfig.layout_id == layout_id
+        ).delete()
+
+        new_configs = []
+        for i, w in enumerate(widgets_data):
+            config = DashboardWidgetConfig(
+                user_id=user_id,
+                layout_id=layout_id,
+                widget_type=w["widget_type"],
+                widget_subtype=w.get("widget_subtype"),
+                title=w.get("title", ""),
+                grid_x=w.get("grid_x", 0),
+                grid_y=w.get("grid_y", 0),
+                grid_w=w.get("grid_w", 4),
+                grid_h=w.get("grid_h", 2),
+                position=i,
+                visible=w.get("visible", True),
+                extra_config=w.get("extra_config", {}),
+            )
+            self.db.add(config)
+            new_configs.append(config)
+
+        self.db.commit()
+        return new_configs
+
+    # ==================== 旧版兼容（无布局的 widgets） ====================
+
+    def get_legacy_widgets(self, user_id: int) -> List[DashboardWidgetConfig]:
         configs = (
             self.db.query(DashboardWidgetConfig)
-            .filter(DashboardWidgetConfig.user_id == user_id)
+            .filter(DashboardWidgetConfig.user_id == user_id, DashboardWidgetConfig.layout_id.is_(None))
             .order_by(DashboardWidgetConfig.position)
             .all()
         )
@@ -34,14 +167,17 @@ class DashboardService:
         return self._default_configs(user_id)
 
     def _default_configs(self, user_id: int) -> List[DashboardWidgetConfig]:
-        return [
-            DashboardWidgetConfig(user_id=user_id, **widget)
-            for widget in DEFAULT_WIDGETS
-        ]
+        configs = []
+        for w in DEFAULT_WIDGETS:
+            config = DashboardWidgetConfig(user_id=user_id, **w)
+            self.db.add(config)
+            configs.append(config)
+        self.db.commit()
+        return configs
 
-    def save_widgets(self, user_id: int, widgets_data: List[dict]) -> List[DashboardWidgetConfig]:
+    def save_legacy_widgets(self, user_id: int, widgets_data: List[dict]) -> List[DashboardWidgetConfig]:
         self.db.query(DashboardWidgetConfig).filter(
-            DashboardWidgetConfig.user_id == user_id
+            DashboardWidgetConfig.user_id == user_id, DashboardWidgetConfig.layout_id.is_(None)
         ).delete()
 
         new_configs = []
@@ -58,6 +194,8 @@ class DashboardService:
 
         self.db.commit()
         return new_configs
+
+    # ==================== 仪表盘统计数据 ====================
 
     def get_dashboard_data(self, user_id: int) -> dict:
         data_source_count = self.db.query(func.count(DataSource.id)).scalar() or 0
