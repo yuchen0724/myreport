@@ -26,7 +26,7 @@ export default defineConfig({
     // 启用CSS代码分割
     cssCodeSplit: true,
     // 启用压缩
-    minify: 'terser',
+    minify: 'esbuild',
     terserOptions: {
       compress: {
         drop_console: true, // 生产环境移除console
