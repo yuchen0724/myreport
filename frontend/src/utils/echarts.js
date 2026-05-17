@@ -8,6 +8,9 @@ import {
   RadarChart,
   GaugeChart,
   FunnelChart,
+  HeatmapChart,
+  TreemapChart,
+  BoxplotChart,
 } from 'echarts/charts'
 import {
   TitleComponent,
@@ -30,6 +33,9 @@ echarts.use([
   RadarChart,
   GaugeChart,
   FunnelChart,
+  HeatmapChart,
+  TreemapChart,
+  BoxplotChart,
   TitleComponent,
   TooltipComponent,
   LegendComponent,

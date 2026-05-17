@@ -32,10 +32,22 @@ class ChartService:
         Raises:
             ValueError: 当配置的 X/Y 轴字段在查询结果中不存在时
         """
+        # 处理钻取路径：在原始 SQL 末尾追加 WHERE 条件
+        sql = request.sql
+        if request.drill_path:
+            for drill in request.drill_path:
+                where_clause = f"WHERE {drill.field}='{drill.value}'"
+                # 只在没有 WHERE 子句时追加，否则用 AND
+                # 注意：这里简化处理，在复杂查询（含子查询/UNION）时可能有问题
+                import re
+                if re.search(r'\bWHERE\b', sql, re.IGNORECASE):
+                    sql += f" AND {drill.field}='{drill.value}'"
+                else:
+                    sql += f" WHERE {drill.field}='{drill.value}'"
         # 执行查询
         query_request = SQLQueryRequest(
             data_source_id=request.data_source_id,
-            sql=request.sql,
+            sql=sql,
             params={}
         )
         result = self.query_service.execute_sql(query_request, user_id)
