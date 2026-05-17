@@ -139,9 +139,9 @@ class PredictionService:
               AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
             GROUP BY group_id, store_code, matnr
             ORDER BY cnt DESC
-            LIMIT 500
+            LIMIT 200
         """
-        logger.info(f"[训练] 取前一天 TOP 500 活跃分组...")
+        logger.info(f"[训练] 取前一天 TOP 200 活跃分组...")
         group_rows, _ = execute_query(ds, group_count_sql)
         if not group_rows:
             raise ValueError("无有效训练数据")
