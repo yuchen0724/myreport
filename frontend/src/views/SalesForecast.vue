@@ -198,7 +198,7 @@ export default {
     const form = ref(loadStoredForm())
 
     // 表单值变化时自动保存到 localStorage
-    watch(form.value, () => {
+    watch(form, () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(form.value))
     }, { deep: true })
     const dataSources = ref([])
