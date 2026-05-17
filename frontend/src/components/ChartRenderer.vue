@@ -166,6 +166,27 @@ const initChart = () => {
   }
   
   updateChart()
+
+  // 用 ResizeObserver 监视容器尺寸变化，首次有实际宽高时自动 resize
+  let resizeTimer = null
+  const observer = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const { width, height } = entry.contentRect
+      if (width > 0 && height > 0) {
+        if (resizeTimer) clearTimeout(resizeTimer)
+        resizeTimer = setTimeout(() => {
+          if (chartInstance && chartRef.value) {
+            chartInstance.resize()
+            console.log(`[ChartRenderer] ResizeObserver resize: ${width}x${height}`)
+          }
+        }, 100)
+        break
+      }
+    }
+  })
+  if (chartRef.value) {
+    observer.observe(chartRef.value)
+  }
   
   // 点击事件 — 同时支持钻取和联动
   chartInstance.on('click', (params) => {
