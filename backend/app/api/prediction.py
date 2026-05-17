@@ -111,6 +111,7 @@ def train_and_predict(
             forecast_days=req.forecast_days,
             table_name=req.table_name,
             user_id=user_id,
+            batch_size=req.batch_size,
         )
     except Exception as e:
         logger.error(

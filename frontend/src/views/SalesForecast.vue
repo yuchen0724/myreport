@@ -24,6 +24,9 @@
         <el-form-item label="数据表名">
           <el-input v-model="form.tableName" placeholder="可选，默认: 库名.ads_cockpit_fd_store_ware_d" style="width: 320px" clearable />
         </el-form-item>
+        <el-form-item label="分组数">
+          <el-input-number v-model="form.batchSize" :min="50" :max="1000" :step="50" />
+        </el-form-item>
         <el-form-item>
           <el-button type="warning" @click="handleTrainAndPredict" :loading="trainAndPredictLoading" :disabled="!form.dataSourceId">
             <el-icon><Refresh /></el-icon> 训练并预测
@@ -168,10 +171,11 @@ export default {
             trainDays: parsed.trainDays ?? 365,
             forecastDays: parsed.forecastDays ?? 30,
             tableName: parsed.tableName ?? '',
+            batchSize: parsed.batchSize ?? 200,
           }
         }
       } catch { /* 忽略 */ }
-      return { dataSourceId: null, trainDays: 365, forecastDays: 30, tableName: '' }
+      return { dataSourceId: null, trainDays: 365, forecastDays: 30, tableName: '', batchSize: 200 }
     }
 
     const form = ref(loadStoredForm())
@@ -369,7 +373,8 @@ export default {
       resultMsg.value = ''
       try {
         const tableName = form.value.tableName.trim() || null
-        const res = await trainAndPredict(form.value.dataSourceId, form.value.trainDays, form.value.forecastDays, tableName)
+        const batchSize = form.value.batchSize || null
+        const res = await trainAndPredict(form.value.dataSourceId, form.value.trainDays, form.value.forecastDays, tableName, batchSize)
         const taskId = res.task_id || (res.data && res.data.task_id)
         if (!taskId) { resultMsg.value = '任务提交失败'; return }
         const ds = dataSources.value.find(d => d.id === form.value.dataSourceId)
