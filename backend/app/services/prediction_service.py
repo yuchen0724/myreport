@@ -58,8 +58,6 @@ class PredictionService:
         end_date = date.today()
         start_date = end_date - timedelta(days=days)
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
-        # 如果 table_name 是子查询（如 (SELECT * FROM ...)），加别名满足 MySQL 要求
-        table = f"{table} src" if table_name else table
         
         # 先获取总天数作为批次数量
         total_pages = (end_date - start_date).days
@@ -132,8 +130,9 @@ class PredictionService:
         test_split_date = end_date - timedelta(days=30)  # 最后 30 天为测试集
         train_end_date = test_split_date
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
-        # 如果 table_name 是子查询（如 (SELECT * FROM ...)），加别名满足 MySQL 要求
-        table = f"{table} src" if table_name else table
+        # 用 WITH CTE 统一处理，避免子查询别名问题
+        cte_prefix = f"WITH t_table AS ({table}) " if table_name else ""
+        table_ref = "t_table"
 
         # 0. 快速获取最近活跃分组列表：取前一天峰值排前 N 的分组
         #    25.7亿行数据，GROUP BY 全表不可行，改为最近一天优先取高频分组
@@ -142,7 +141,7 @@ class PredictionService:
         top_groups_dt = latest_day.strftime('%Y%m%d')
         top_groups_subquery = f"""(
             SELECT group_id, store_code, matnr
-            FROM {table}
+            FROM t_table
             WHERE dt >= '{top_groups_dt}'
               AND exclude_flag != 1
               AND (service_flag != 1 OR service_flag IS NULL)
@@ -152,10 +151,10 @@ class PredictionService:
             LIMIT {batch_size}
         ) top_g"""
 
-        group_count_sql = f"""\
+        group_count_sql = f"""{cte_prefix}\
             SELECT /*+ SET_VAR(query_timeout=120) */
                 group_id, store_code, matnr, COUNT(*) as cnt
-            FROM {table}
+            FROM t_table
             WHERE dt >= '{top_groups_dt}'
               AND exclude_flag != 1
               AND (service_flag != 1 OR service_flag IS NULL)
@@ -198,10 +197,10 @@ class PredictionService:
             )
             where_groups = f"(group_id, store_code, matnr) IN ({group_tuples})"
 
-            sql = f"""\
+            sql = f"""{cte_prefix}\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
                     src.dt, src.group_id, src.store_code, src.matnr, src.{TARGET_COL}
-                FROM {table}
+                FROM t_table src
                 JOIN {top_groups_subquery}
                   ON src.group_id = top_g.group_id
                  AND src.store_code = top_g.store_code
@@ -282,10 +281,10 @@ class PredictionService:
         try:
             # 查询所有活跃分组的历史数据（含训练范围，供特征工程生成 lag 特征）
             # 用 JOIN 子查询替代 OR 拼接，避免超长 SQL
-            test_sql = f"""\
+            test_sql = f"""{cte_prefix}\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
                     src.dt, src.group_id, src.store_code, src.matnr, src.{TARGET_COL}
-                FROM {table}
+                FROM t_table src
                 JOIN {top_groups_subquery}
                   ON src.group_id = top_g.group_id
                  AND src.store_code = top_g.store_code
