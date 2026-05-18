@@ -196,18 +196,18 @@ class PredictionService:
 
             sql = f"""\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
-                    a.dt, a.group_id, a.store_code, a.matnr, a.{TARGET_COL}
-                FROM {table} a
+                    t.dt, t.group_id, t.store_code, t.matnr, t.{TARGET_COL}
+                FROM {table} t
                 JOIN {top_groups_subquery}
-                  ON a.group_id = top_g.group_id
-                 AND a.store_code = top_g.store_code
-                 AND a.matnr = top_g.matnr
-                WHERE a.dt >= '{start_date.strftime('%Y%m%d')}' AND a.dt < '{train_end_date.strftime('%Y%m%d')}'
-                  AND a.exclude_flag != 1
-                  AND (a.service_flag != 1 OR a.service_flag IS NULL)
-                  AND (a.shopping_bag_flag != 1 OR a.shopping_bag_flag IS NULL)
+                  ON t.group_id = top_g.group_id
+                 AND t.store_code = top_g.store_code
+                 AND t.matnr = top_g.matnr
+                WHERE t.dt >= '{start_date.strftime('%Y%m%d')}' AND t.dt < '{train_end_date.strftime('%Y%m%d')}'
+                  AND t.exclude_flag != 1
+                  AND (t.service_flag != 1 OR t.service_flag IS NULL)
+                  AND (t.shopping_bag_flag != 1 OR t.shopping_bag_flag IS NULL)
                   AND ({where_groups})
-                ORDER BY a.store_code, a.matnr, a.dt
+                ORDER BY t.store_code, t.matnr, t.dt
             """
             logger.info(f"[训练] 分批批次 batch={batch_no}/{total_batches}, 该批分组数={len(batch_groups)}, SQL: {sql.replace(chr(10), ' ').strip()}")
 
@@ -280,17 +280,17 @@ class PredictionService:
             # 用 JOIN 子查询替代 OR 拼接，避免超长 SQL
             test_sql = f"""\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
-                    a.dt, a.group_id, a.store_code, a.matnr, a.{TARGET_COL}
-                FROM {table} a
+                    t.dt, t.group_id, t.store_code, t.matnr, t.{TARGET_COL}
+                FROM {table} t
                 JOIN {top_groups_subquery}
-                  ON a.group_id = top_g.group_id
-                 AND a.store_code = top_g.store_code
-                 AND a.matnr = top_g.matnr
-                WHERE a.dt >= '{start_date.strftime('%Y%m%d')}' AND a.dt < '{end_date.strftime('%Y%m%d')}'
-                  AND a.exclude_flag != 1
-                  AND (a.service_flag != 1 OR a.service_flag IS NULL)
-                  AND (a.shopping_bag_flag != 1 OR a.shopping_bag_flag IS NULL)
-                ORDER BY a.store_code, a.matnr, a.dt
+                  ON t.group_id = top_g.group_id
+                 AND t.store_code = top_g.store_code
+                 AND t.matnr = top_g.matnr
+                WHERE t.dt >= '{start_date.strftime('%Y%m%d')}' AND t.dt < '{end_date.strftime('%Y%m%d')}'
+                  AND t.exclude_flag != 1
+                  AND (t.service_flag != 1 OR t.service_flag IS NULL)
+                  AND (t.shopping_bag_flag != 1 OR t.shopping_bag_flag IS NULL)
+                ORDER BY t.store_code, t.matnr, t.dt
             """
             logger.info("[评估] 查询测试集数据（含历史范围供特征工程）...")
             test_rows, test_cols = execute_query(ds, test_sql)
