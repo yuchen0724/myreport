@@ -286,8 +286,11 @@ class PredictionService:
                 test_all_feat = build_features_from_history(test_df)
                 test_feat = test_all_feat.dropna(subset=feature_cols)
                 # 只过滤测试时间段的行进行评估
+                # build_features_from_history 把 dt 转成了 datetime64[ns]，需用 pd.Timestamp 比较
+                ts_split = pd.Timestamp(test_split_date)
+                ts_end = pd.Timestamp(end_date)
                 test_feat = test_feat[
-                    (test_feat["dt"] >= test_split_date) & (test_feat["dt"] < end_date)
+                    (test_feat["dt"] >= ts_split) & (test_feat["dt"] < ts_end)
                 ]
                 test_sample_count = len(test_feat)
                 if test_sample_count > 0:
