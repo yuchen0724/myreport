@@ -443,27 +443,68 @@ class PredictionService:
                 .reset_index()
             )
             
-            # 用 DataFrame 切片（保留列名），避免 sklearn feature names warning
-            current_features = sku_latest[feature_cols]
-            
-            for i in range(forecast_days):
-                preds = model.predict(current_features)
-                forecast_date = date.today() + timedelta(days=i + 1)
-                
-                for idx, row in sku_latest.iterrows():
+            # 按每个 SKU 递归滚动预测
+            # 原理：每天构造一个小窗口 DataFrame（历史真实值 + 已预测的未来值 + 待预测日占位），
+            # 通过 build_features_from_history 重建所有 lag/rolling/时间特征后，
+            # 取最后一行（待预测日）的特征来 predict。
+            # 预测值追加到窗口继续下一天，窗口始终保持单调递增。
+            lookback_window = max(28, forecast_days)
+            for sku_idx, (sku_row_idx, sku_row) in enumerate(sku_latest.iterrows()):
+                store_code = sku_row["store_code"]
+                matnr_val = sku_row["matnr"]
+
+                sku_history = store_df[
+                    (store_df["store_code"] == store_code) &
+                    (store_df["matnr"] == matnr_val)
+                ].sort_values("dt")
+
+                # 取历史最后 lookback_window 天作为初始滑动窗口
+                window_vals = list(sku_history[TARGET_COL].values[-lookback_window:])
+                window_dates = list(sku_history["dt"].values[-lookback_window:])
+                # window_dates 中元素是 datetime64[ns] 类型
+
+                for i in range(forecast_days):
+                    future_dt = date.today() + timedelta(days=i + 1)
+                    future_dt_ts = pd.Timestamp(future_dt)
+
+                    # 构建窗口 DataFrame
+                    rows = []
+                    for j in range(len(window_vals)):
+                        rows.append({
+                            "store_code": store_code,
+                            "matnr": matnr_val,
+                            "dt": window_dates[j],
+                            TARGET_COL: window_vals[j],
+                        })
+                    rows.append({
+                        "store_code": store_code,
+                        "matnr": matnr_val,
+                        "dt": future_dt_ts,
+                        TARGET_COL: 0.0,  # 占位，build_features 不依赖当前值
+                    })
+
+                    feat_df = build_features_from_history(pd.DataFrame(rows))
+                    feat_df = feat_df.dropna(subset=feature_cols)
+
+                    if feat_df.empty:
+                        pred = model.predict(
+                            sku_latest.iloc[[sku_row_idx]][feature_cols]
+                        )[0]
+                    else:
+                        pred = model.predict(feat_df.iloc[-1:][feature_cols])[0]
+
                     results.append(PredictionResult(
                         model_id=model_record.id,
                         data_source_id=model_record.data_source_id,
-                        store_code=row["store_code"],
-                        matnr=row["matnr"],
-                        forecast_date=forecast_date,
-                        predicted_value=round(float(preds[idx]), 2),
+                        store_code=store_code,
+                        matnr=matnr_val,
+                        forecast_date=future_dt,
+                        predicted_value=round(float(pred), 2),
                     ))
-                
-                # 简易滚动：用预测值更新 lag_1 特征
-                if i < forecast_days - 1:
-                    current_features = current_features.copy()
-                    current_features["lag_1"] = preds
+
+                    if i < forecast_days - 1:
+                        window_vals.append(float(pred))
+                        window_dates.append(future_dt_ts)
             
             if progress_callback:
                 progress_callback(model_record.id, store_idx + 1, total_stores, store_code)
@@ -518,26 +559,61 @@ class PredictionService:
                 .reset_index()
             )
 
-            current_features = latest[feature_cols]
+            # 按每个 SKU 递归滚动预测
+            lookback_window = max(28, forecast_days)
+            for sku_idx, (sku_row_idx, sku_row) in enumerate(latest.iterrows()):
+                store_code = sku_row["store_code"]
+                matnr_val = sku_row["matnr"]
 
-            for i in range(forecast_days):
-                preds = model.predict(current_features)
-                forecast_date = date.today() + timedelta(days=i + 1)
+                sku_history = store_df[
+                    (store_df["store_code"] == store_code) &
+                    (store_df["matnr"] == matnr_val)
+                ].sort_values("dt")
 
-                for idx, row in latest.iterrows():
+                window_vals = list(sku_history[TARGET_COL].values[-lookback_window:])
+                window_dates = list(sku_history["dt"].values[-lookback_window:])
+
+                for i in range(forecast_days):
+                    forecast_date = date.today() + timedelta(days=i + 1)
+                    future_dt_ts = pd.Timestamp(forecast_date)
+
+                    rows = []
+                    for j in range(len(window_vals)):
+                        rows.append({
+                            "store_code": store_code,
+                            "matnr": matnr_val,
+                            "dt": window_dates[j],
+                            TARGET_COL: window_vals[j],
+                        })
+                    rows.append({
+                        "store_code": store_code,
+                        "matnr": matnr_val,
+                        "dt": future_dt_ts,
+                        TARGET_COL: 0.0,
+                    })
+
+                    feat_df = build_features_from_history(pd.DataFrame(rows))
+                    feat_df = feat_df.dropna(subset=feature_cols)
+
+                    if feat_df.empty:
+                        # 使用 sku_latest 中该 SKU 的原始行特征作为 fallback
+                        fallback_row = latest.iloc[[sku_idx]][feature_cols]
+                        pred = model.predict(fallback_row)[0]
+                    else:
+                        pred = model.predict(feat_df.iloc[-1:][feature_cols])[0]
+
                     results.append(PredictionResult(
                         model_id=model_record.id,
                         data_source_id=ds_id,
-                        store_code=row["store_code"],
-                        matnr=row["matnr"],
+                        store_code=store_code,
+                        matnr=matnr_val,
                         forecast_date=forecast_date,
-                        predicted_value=round(float(preds[idx]), 2),
+                        predicted_value=round(float(pred), 2),
                     ))
 
-                # 简易滚动：用预测值更新 lag_1 特征
-                if i < forecast_days - 1:
-                    current_features = current_features.copy()
-                    current_features["lag_1"] = preds
+                    if i < forecast_days - 1:
+                        window_vals.append(float(pred))
+                        window_dates.append(future_dt_ts)
 
             if progress_callback:
                 progress_callback(model_record.id, store_idx + 1, total_stores, store_code)
