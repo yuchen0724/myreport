@@ -147,20 +147,20 @@ class PredictionService:
               AND (service_flag != 1 OR service_flag IS NULL)
               AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
             GROUP BY group_id, store_code, matnr
-            ORDER BY COUNT(*) DESC
+            ORDER BY SUM(actual_sale_untaxed_amt) DESC
             LIMIT {batch_size}
         ) top_g"""
 
         group_count_sql = f"""{cte_prefix}\
             SELECT /*+ SET_VAR(query_timeout=120) */
-                group_id, store_code, matnr, COUNT(*) as cnt
+                group_id, store_code, matnr, SUM(actual_sale_untaxed_amt) as total_sales
             FROM {table_ref}
             WHERE dt >= '{top_groups_dt}'
               AND exclude_flag != 1
               AND (service_flag != 1 OR service_flag IS NULL)
               AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
             GROUP BY group_id, store_code, matnr
-            ORDER BY cnt DESC
+            ORDER BY total_sales DESC
             LIMIT {batch_size}
         """
         logger.info(f"[训练] 取前一天 TOP {batch_size} 活跃分组...")
