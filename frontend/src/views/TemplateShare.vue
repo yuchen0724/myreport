@@ -56,51 +56,37 @@
 
             <div class="share-history">
               <h4>我的分享记录</h4>
-              <el-table :data="shareHistory" style="width: 100%">
-                <el-table-column prop="template_name" label="模板名称" />
-                <el-table-column prop="shared_users" label="分享给用户">
-                  <template #default="{ row }">
-                    <el-tag
-                      v-for="user in row.shared_users"
-                      :key="user.id"
-                      style="margin-right: 5px"
-                    >
-                      {{ user.username }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="shared_at" label="分享时间" width="180">
-                  <template #default="{ row }">
-                    {{ formatDate(row.shared_at) }}
-                  </template>
-                </el-table-column>
-              </el-table>
+              <StaticTableEnhancer :columns="shareHistoryColumns" :data="shareHistory" table-id="template-share-history">
+                <template #shared_users="{ row }">
+                  <el-tag
+                    v-for="user in row.shared_users"
+                    :key="user.id"
+                    style="margin-right: 5px"
+                  >
+                    {{ user.username }}
+                  </el-tag>
+                </template>
+                <template #shared_at="{ row }">
+                  {{ formatDate(row.shared_at) }}
+                </template>
+              </StaticTableEnhancer>
             </div>
           </el-tab-pane>
 
           <!-- 分享给我的模板 -->
           <el-tab-pane label="分享给我的模板" name="shared">
-            <el-table :data="sharedToMe" style="width: 100%" v-loading="sharedLoading">
-              <el-table-column prop="id" label="ID" width="80" />
-              <el-table-column prop="name" label="模板名称" />
-              <el-table-column prop="description" label="描述" />
-              <el-table-column prop="shared_by" label="分享者" width="120">
-                <template #default="{ row }">
-                  {{ row.shared_by_username || row.shared_by }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="shared_at" label="分享时间" width="180">
-                <template #default="{ row }">
-                  {{ formatDate(row.shared_at) }}
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="150">
-                <template #default="{ row }">
-                  <el-button size="small" @click="handleUseTemplate(row)">使用</el-button>
-                  <el-button size="small" type="primary" @click="handleViewTemplate(row)">查看</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
+            <StaticTableEnhancer :columns="sharedToMeColumns" :data="sharedToMe" :loading="sharedLoading" table-id="template-shared-to-me">
+              <template #shared_by="{ row }">
+                {{ row.shared_by_username || row.shared_by }}
+              </template>
+              <template #shared_at="{ row }">
+                {{ formatDate(row.shared_at) }}
+              </template>
+              <template #operations="{ row }">
+                <el-button size="small" @click="handleUseTemplate(row)">使用</el-button>
+                <el-button size="small" type="primary" @click="handleViewTemplate(row)">查看</el-button>
+              </template>
+            </StaticTableEnhancer>
           </el-tab-pane>
 
           <!-- 分享详情 -->
@@ -127,22 +113,16 @@
 
             <div v-if="templateShares.length > 0">
               <h4>模板分享详情</h4>
-              <el-table :data="templateShares" style="width: 100%" v-loading="detailLoading">
-                <el-table-column prop="username" label="用户名" />
-                <el-table-column prop="email" label="邮箱" />
-                <el-table-column prop="shared_at" label="分享时间" width="180">
-                  <template #default="{ row }">
-                    {{ formatDate(row.shared_at) }}
-                  </template>
-                </el-table-column>
-                <el-table-column label="操作" width="100">
-                  <template #default="{ row }">
-                    <el-button size="small" type="danger" @click="handleRevokeShare(row)">
-                      取消分享
-                    </el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
+              <StaticTableEnhancer :columns="templateSharesColumns" :data="templateShares" :loading="detailLoading" table-id="template-share-detail">
+                <template #shared_at="{ row }">
+                  {{ formatDate(row.shared_at) }}
+                </template>
+                <template #operations="{ row }">
+                  <el-button size="small" type="danger" @click="handleRevokeShare(row)">
+                    取消分享
+                  </el-button>
+                </template>
+              </StaticTableEnhancer>
             </div>
             <el-empty v-else description="请选择模板查看分享详情" />
           </el-tab-pane>
@@ -157,6 +137,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateList } from '@/api/template'
 import { shareTemplate, getSharedTemplates, getTemplateShares, unshareTemplate } from '@/api/template_share'
 import { getUserList } from '@/api/user'
+import StaticTableEnhancer from '@/components/StaticTableEnhancer.vue'
+
 const router = useRouter()
 const activeTab = ref('share')
 const shareFormRef = ref(null)
@@ -188,6 +170,29 @@ const shareHistory = ref([])
 const shareLoading = ref(false)
 const sharedLoading = ref(false)
 const detailLoading = ref(false)
+
+// 表格列定义
+const shareHistoryColumns = [
+  { prop: 'template_name', label: '模板名称' },
+  { prop: 'shared_users', label: '分享给用户', slotName: 'shared_users' },
+  { prop: 'shared_at', label: '分享时间', width: 180, slotName: 'shared_at' },
+]
+
+const sharedToMeColumns = [
+  { prop: 'id', label: 'ID', width: 80 },
+  { prop: 'name', label: '模板名称' },
+  { prop: 'description', label: '描述' },
+  { prop: 'shared_by', label: '分享者', width: 120, slotName: 'shared_by' },
+  { prop: 'shared_at', label: '分享时间', width: 180, slotName: 'shared_at' },
+  { prop: 'operations', label: '操作', width: 150, slotName: 'operations' },
+]
+
+const templateSharesColumns = [
+  { prop: 'username', label: '用户名' },
+  { prop: 'email', label: '邮箱' },
+  { prop: 'shared_at', label: '分享时间', width: 180, slotName: 'shared_at' },
+  { prop: 'operations', label: '操作', width: 100, slotName: 'operations' },
+]
 
 // 日期格式化
 const formatDate = (date) => {

@@ -9,29 +9,22 @@
           </div>
         </template>
 
-        <el-table :data="versions" style="width: 100%">
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="version" label="版本号" width="100" />
-          <el-table-column prop="created_at" label="创建时间" width="180">
-            <template #default="{ row }">
-              {{ formatDate(row.created_at) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="created_by" label="创建者" width="100" />
-          <el-table-column label="操作" width="250">
-            <template #default="{ row }">
-              <el-button type="primary" size="small" @click="handleView(row)">
-                查看
-              </el-button>
-              <el-button type="success" size="small" @click="handleRollback(row)">
-                回滚
-              </el-button>
-              <el-button type="info" size="small" @click="handleCompare(row)">
-                对比
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+        <StaticTableEnhancer :columns="tableColumns" :data="versions" table-id="template-version-history-list">
+          <template #created_at="{ row }">
+            {{ formatDate(row.created_at) }}
+          </template>
+          <template #operations="{ row }">
+            <el-button type="primary" size="small" @click="handleView(row)">
+              查看
+            </el-button>
+            <el-button type="success" size="small" @click="handleRollback(row)">
+              回滚
+            </el-button>
+            <el-button type="info" size="small" @click="handleCompare(row)">
+              对比
+            </el-button>
+          </template>
+        </StaticTableEnhancer>
       </el-card>
 
       <el-card v-if="selectedVersion" style="margin-top: 20px;">
@@ -80,6 +73,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateVersions, rollbackTemplate, getVersionDiff } from '@/api/template'
 import VersionDiff from '@/components/VersionDiff.vue'
+import StaticTableEnhancer from '@/components/StaticTableEnhancer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -92,6 +86,14 @@ const baseVersion = ref(null)
 const versionDiffVisible = ref(false)
 const version1 = ref(null)
 const version2 = ref(null)
+
+const tableColumns = [
+  { prop: 'id', label: 'ID', width: 80 },
+  { prop: 'version', label: '版本号', width: 100 },
+  { prop: 'created_at', label: '创建时间', width: 180, slotName: 'created_at' },
+  { prop: 'created_by', label: '创建者', width: 100 },
+  { prop: 'operations', label: '操作', width: 250, slotName: 'operations' },
+]
 
 onMounted(async () => {
   await loadVersions()

@@ -118,45 +118,41 @@
       <template #header>
         <div class="card-header"><span>任务历史</span></div>
       </template>
-      <el-table :data="taskHistory" border stripe style="width: 100%">
-        <el-table-column prop="data_source_name" label="数据源" width="140" />
-        <el-table-column label="模型ID" width="80">
-          <template #default="{ row }"><el-tag size="small">{{ row.model_id ?? '-' }}</el-tag></template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 'ready' || row.status === 'success' ? 'success' : 'danger'" size="small">
-              {{ row.status === 'ready' || row.status === 'success' ? '成功' : '失败' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="指标" width="200">
-          <template #default="{ row }">
-            <span style="font-size: 12px">
-              <template v-if="row.metrics">
-                MAE={{ row.metrics.mae?.toFixed(2) }}
-              </template>
-              <template v-if="row.result_count">
-                <template v-if="row.metrics"> | </template>
-                预测{{ row.result_count }}条
-              </template>
-              <template v-if="!row.metrics && !row.result_count">-</template>
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="task_id" label="任务ID" min-width="150">
-          <template #default="{ row }">
-            <code style="font-size: 12px">{{ row.task_id ? row.task_id.slice(0, 16) + '...' : '-' }}</code>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="时间" width="165" />
-        <el-table-column prop="error_message" label="错误" min-width="140" show-overflow-tooltip />
-        <el-table-column label="操作" width="80" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" type="danger" link @click="handleDeleteHistory(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <StaticTableEnhancer
+        :columns="historyColumns"
+        :data="taskHistory"
+        :show-toolbar="false"
+        table-id="sales-forecast-history"
+        border
+        stripe
+      >
+        <template #model_id="{ row }">
+          <el-tag size="small">{{ row.model_id ?? '-' }}</el-tag>
+        </template>
+        <template #status="{ row }">
+          <el-tag :type="row.status === 'ready' || row.status === 'success' ? 'success' : 'danger'" size="small">
+            {{ row.status === 'ready' || row.status === 'success' ? '成功' : '失败' }}
+          </el-tag>
+        </template>
+        <template #metrics="{ row }">
+          <span style="font-size: 12px">
+            <template v-if="row.metrics">
+              MAE={{ row.metrics.mae?.toFixed(2) }}
+            </template>
+            <template v-if="row.result_count">
+              <template v-if="row.metrics"> | </template>
+              预测{{ row.result_count }}条
+            </template>
+            <template v-if="!row.metrics && !row.result_count">-</template>
+          </span>
+        </template>
+        <template #task_id="{ row }">
+          <code style="font-size: 12px">{{ row.task_id ? row.task_id.slice(0, 16) + '...' : '-' }}</code>
+        </template>
+        <template #operations="{ row }">
+          <el-button size="small" type="danger" link @click="handleDeleteHistory(row)">删除</el-button>
+        </template>
+      </StaticTableEnhancer>
     </el-card>
 
 
@@ -169,10 +165,11 @@ import { Refresh } from '@element-plus/icons-vue'
 import { trainAndPredict, getTrainStatus, getPredictStatus, getMyTrainTasks, stopTrainTask, getForecastHistory, getForecastRunning, deleteForecastProgress, deleteTrainHistory, deleteTrainHistoryByTask } from '@/api/prediction'
 import { getDataSourceList } from '@/api/data_source'
 import { ElMessageBox, ElMessage } from 'element-plus'
+import StaticTableEnhancer from '@/components/StaticTableEnhancer.vue'
 
 export default {
   name: 'SalesForecast',
-  components: { Refresh },
+  components: { Refresh, StaticTableEnhancer },
   setup() {
     const STORAGE_KEY = 'sales_forecast_form'
 
@@ -212,6 +209,16 @@ export default {
     let _pollingInterval = null
     let _pollingTaskId = null
 
+    const historyColumns = [
+      { prop: 'data_source_name', label: '数据源', width: 140 },
+      { prop: 'model_id', label: '模型ID', width: 80, slotName: 'model_id' },
+      { prop: 'status', label: '状态', width: 90, slotName: 'status' },
+      { prop: 'metrics', label: '指标', width: 200, slotName: 'metrics' },
+      { prop: 'task_id', label: '任务ID', minWidth: 150, slotName: 'task_id' },
+      { prop: 'created_at', label: '时间', width: 165 },
+      { prop: 'error_message', label: '错误', minWidth: 140 },
+      { prop: 'operations', label: '操作', width: 80, slotName: 'operations' },
+    ]
 
     async function loadDataSources() {
       try {

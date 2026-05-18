@@ -9,22 +9,15 @@
           </div>
         </template>
 
-        <el-table :data="versions" style="width: 100%">
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="version" label="版本号" width="100" />
-          <el-table-column prop="created_at" label="创建时间" width="180">
-            <template #default="{ row }">
-              {{ formatDate(row.created_at) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="created_by" label="创建者" width="100" />
-          <el-table-column label="操作" width="150">
-            <template #default="{ row }">
-              <el-button size="small" @click="handleView(row)">查看</el-button>
-              <el-button size="small" type="primary" @click="handleRollback(row)">回滚</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+        <StaticTableEnhancer :columns="tableColumns" :data="versions" table-id="template-version-list">
+          <template #created_at="{ row }">
+            {{ formatDate(row.created_at) }}
+          </template>
+          <template #operations="{ row }">
+            <el-button size="small" @click="handleView(row)">查看</el-button>
+            <el-button size="small" type="primary" @click="handleRollback(row)">回滚</el-button>
+          </template>
+        </StaticTableEnhancer>
 
         <!-- 配置预览对话框 -->
         <el-dialog v-model="configDialogVisible" title="配置预览" width="60%">
@@ -38,11 +31,21 @@ import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateVersions, rollbackTemplate } from '@/api/template'
+import StaticTableEnhancer from '@/components/StaticTableEnhancer.vue'
+
 const router = useRouter()
 const route = useRoute()
 const versions = ref([])
 const configDialogVisible = ref(false)
 const currentConfig = ref('')
+
+const tableColumns = [
+  { prop: 'id', label: 'ID', width: 80 },
+  { prop: 'version', label: '版本号', width: 100 },
+  { prop: 'created_at', label: '创建时间', width: 180, slotName: 'created_at' },
+  { prop: 'created_by', label: '创建者', width: 100 },
+  { prop: 'operations', label: '操作', width: 150, slotName: 'operations' },
+]
 
 onMounted(async () => {
   await loadVersions()

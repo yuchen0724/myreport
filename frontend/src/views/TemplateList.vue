@@ -9,33 +9,23 @@
           </div>
         </template>
 
-      <el-table :data="templates" style="width: 100%">
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="名称" />
-        <el-table-column prop="description" label="描述" />
-        <el-table-column prop="version" label="版本" width="80" />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="row.is_public ? 'success' : 'info'">
-              {{ row.is_public ? '公开' : '私有' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
-          <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="350">
-          <template #default="{ row }">
-            <el-button size="small" @click="handleView(row)">查看</el-button>
-            <el-button size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button size="small" @click="handleShare(row)">分享</el-button>
-            <el-button size="small" @click="handleVersions(row)">版本</el-button>
-            <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <StaticTableEnhancer :columns="tableColumns" :data="templates" table-id="template-list">
+        <template #is_public="{ row }">
+          <el-tag :type="row.is_public ? 'success' : 'info'">
+            {{ row.is_public ? '公开' : '私有' }}
+          </el-tag>
+        </template>
+        <template #created_at="{ row }">
+          {{ formatDate(row.created_at) }}
+        </template>
+        <template #operations="{ row }">
+          <el-button size="small" @click="handleView(row)">查看</el-button>
+          <el-button size="small" @click="handleEdit(row)">编辑</el-button>
+          <el-button size="small" @click="handleShare(row)">分享</el-button>
+          <el-button size="small" @click="handleVersions(row)">版本</el-button>
+          <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
+        </template>
+      </StaticTableEnhancer>
     </el-card>
 
     <!-- 分享对话框 -->
@@ -71,6 +61,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTemplateList, deleteTemplate } from '@/api/template'
 import { shareTemplate } from '@/api/template_share'
 import { getUserList } from '@/api/user'
+import StaticTableEnhancer from '@/components/StaticTableEnhancer.vue'
 
 const router = useRouter()
 const templates = ref([])
@@ -81,6 +72,16 @@ const shareForm = ref({
 })
 const users = ref([])
 const usersLoading = ref(false)
+
+const tableColumns = [
+  { prop: 'id', label: 'ID', width: 80 },
+  { prop: 'name', label: '名称' },
+  { prop: 'description', label: '描述' },
+  { prop: 'version', label: '版本', width: 80 },
+  { prop: 'is_public', label: '状态', width: 100, slotName: 'is_public' },
+  { prop: 'created_at', label: '创建时间', width: 180, slotName: 'created_at' },
+  { prop: 'operations', label: '操作', width: 350, slotName: 'operations' },
+]
 
 onMounted(async () => {
   await loadTemplates()

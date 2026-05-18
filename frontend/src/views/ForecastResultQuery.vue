@@ -137,14 +137,16 @@
         <span v-else>&nbsp;</span>
       </div>
 
-      <el-table
+      <EnhancedTable
         :data="forecastData"
-        v-loading="loading"
-        empty-text="暂无匹配的预测结果"
-        border
-        stripe
-        style="width: 100%"
-        @sort-change="handleSortChange"
+        :columns="tableColumns"
+        :loading="loading"
+        table-id="forecast-result"
+        :show-toolbar="true"
+        :summarizable="false"
+        :enable-expand="false"
+        :searchable="true"
+        :max-height="500"
       >
         <el-table-column prop="store_code" label="门店编码" width="120" show-overflow-tooltip />
         <el-table-column prop="matnr" label="商品编码" width="160" show-overflow-tooltip />
@@ -164,7 +166,7 @@
             {{ row.upper_bound != null ? row.upper_bound.toFixed(2) : '-' }}
           </template>
         </el-table-column>
-      </el-table>
+      </EnhancedTable>
 
       <div class="pagination-wrapper" v-if="total > 0">
         <el-pagination
@@ -188,6 +190,16 @@ import { ElMessage } from 'element-plus'
 import { getDataSourceList } from '@/api/data_source'
 import { getForecast, getMyTrainTasks, exportForecastExcel } from '@/api/prediction'
 import * as echarts from 'echarts'
+import EnhancedTable from '@/components/EnhancedTable.vue'
+
+const tableColumns = ref([])
+
+// 扩展 forecastData 响应，同步 tableColumns
+watch(forecastData, (data) => {
+  if (data && data.length > 0) {
+    tableColumns.value = Object.keys(data[0])
+  }
+}, { immediate: true })
 
 const dataSources = ref([])
 const models = ref([])

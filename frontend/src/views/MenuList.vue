@@ -9,50 +9,39 @@
         </el-button>
       </div>
 
-      <el-table
+      <StaticTableEnhancer
+        :columns="tableColumns"
         :data="menuTree"
+        table-id="menu-list"
         row-key="id"
         border
         default-expand-all
         :tree-props="{ children: 'children', hasChildren: 'hasChildren' }"
       >
-        <el-table-column prop="name" label="菜单名称" width="200" />
-        <el-table-column prop="path" label="路由路径" width="180" />
-        <el-table-column prop="icon" label="图标" width="100">
-          <template #default="{ row }">
-            <el-icon v-if="row.icon"><component :is="row.icon" /></el-icon>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="template_name" label="关联模板" width="150">
-          <template #default="{ row }">
-            <span v-if="row.template_name">{{ row.template_name }}</span>
-            <el-tag v-else type="info" size="small">无</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="sort_order" label="排序" width="80" align="center" />
-        <el-table-column prop="is_enabled" label="状态" width="80" align="center">
-          <template #default="{ row }">
-            <el-tag :type="row.is_enabled ? 'success' : 'danger'" size="small">
-              {{ row.is_enabled ? '启用' : '禁用' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="is_visible" label="可见" width="80" align="center">
-          <template #default="{ row }">
-            <el-tag :type="row.is_visible ? '' : 'warning'" size="small">
-              {{ row.is_visible ? '是' : '否' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
-          <template #default="{ row }">
-            <el-button type="primary" link @click="handleEdit(row)">编辑</el-button>
-            <el-button type="primary" link @click="handleAddChild(row)">添加子菜单</el-button>
-            <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+        <template #icon="{ row }">
+          <el-icon v-if="row.icon"><component :is="row.icon" /></el-icon>
+          <span v-else>-</span>
+        </template>
+        <template #template_name="{ row }">
+          <span v-if="row.template_name">{{ row.template_name }}</span>
+          <el-tag v-else type="info" size="small">无</el-tag>
+        </template>
+        <template #is_enabled="{ row }">
+          <el-tag :type="row.is_enabled ? 'success' : 'danger'" size="small">
+            {{ row.is_enabled ? '启用' : '禁用' }}
+          </el-tag>
+        </template>
+        <template #is_visible="{ row }">
+          <el-tag :type="row.is_visible ? '' : 'warning'" size="small">
+            {{ row.is_visible ? '是' : '否' }}
+          </el-tag>
+        </template>
+        <template #operations="{ row }">
+          <el-button type="primary" link @click="handleEdit(row)">编辑</el-button>
+          <el-button type="primary" link @click="handleAddChild(row)">添加子菜单</el-button>
+          <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
+        </template>
+      </StaticTableEnhancer>
     </el-card>
 
     <!-- 新增/编辑对话框 -->
@@ -138,6 +127,19 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { getMenus, getMenuTree, createMenu, updateMenu, deleteMenu } from '@/api/menu'
 import { getTemplateList } from '@/api/template'
+import StaticTableEnhancer from '@/components/StaticTableEnhancer.vue'
+
+// 表格列定义
+const tableColumns = [
+  { prop: 'name', label: '菜单名称', width: 200 },
+  { prop: 'path', label: '路由路径', width: 180 },
+  { prop: 'icon', label: '图标', width: 100, slotName: 'icon' },
+  { prop: 'template_name', label: '关联模板', width: 150, slotName: 'template_name' },
+  { prop: 'sort_order', label: '排序', width: 80 },
+  { prop: 'is_enabled', label: '状态', width: 80, slotName: 'is_enabled' },
+  { prop: 'is_visible', label: '可见', width: 80, slotName: 'is_visible' },
+  { prop: 'operations', label: '操作', width: 200, slotName: 'operations' },
+]
 
 // 数据
 const menuTree = ref([])

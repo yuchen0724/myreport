@@ -51,15 +51,17 @@
               <el-button @click="queryResult = null">关闭</el-button>
             </div>
           </template>
-          <el-table :data="queryResult.rows" style="width: 100%" max-height="400">
-            <el-table-column
-              v-for="(column, index) in queryResult.columns"
-              :key="index"
-              :prop="index.toString()"
-              :label="column"
-              :width="150"
-            />
-          </el-table>
+          <EnhancedTable
+            v-if="detailTableData.length > 0"
+            :data="detailTableData"
+            :columns="queryResult.columns"
+            :loading="previewing"
+            table-id="template-preview"
+            :summarizable="false"
+            :enable-expand="false"
+            :searchable="true"
+            :max-height="400"
+          />
           <div class="result-footer">
             <div class="result-info">共 {{ queryResult.total }} 条记录，执行时间：{{ queryResult.execution_time_ms }}ms</div>
             <el-pagination
@@ -87,6 +89,18 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getTemplate } from '@/api/template'
 import { executeQuery } from '@/api/query'
+import EnhancedTable from '@/components/EnhancedTable.vue'
+
+// 将索引数组 rows 转换为对象数组
+const detailTableData = computed(() => {
+  if (!queryResult.value?.rows || !queryResult.value?.columns) return []
+  const cols = queryResult.value.columns
+  return queryResult.value.rows.map(row => {
+    const obj = {}
+    cols.forEach((col, i) => { obj[col] = row[i] })
+    return obj
+  })
+})
 const router = useRouter()
 const route = useRoute()
 const template = ref(null)

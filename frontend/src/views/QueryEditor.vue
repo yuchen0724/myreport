@@ -35,14 +35,12 @@
         <h3>查询结果</h3>
       </template>
       <div v-if="result" class="result-container">
-        <el-table :data="result.rows" max-height="500">
-          <el-table-column
-            v-for="(col, index) in result.columns"
-            :key="index"
-            :prop="index.toString()"
-            :label="col"
-          />
-        </el-table>
+        <EnhancedTable
+          :data="tableData"
+          :columns="result.columns"
+          :loading="false"
+          table-id="query-editor-result"
+        />
         <div class="result-info">
           <p>执行时间: <strong>{{ result.execution_time_ms }}ms</strong></p>
           <p>行数: <strong>{{ result.total }}</strong></p>
@@ -56,15 +54,16 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getDataSourceList } from '@/api/data_source'
 import { executeSQL } from '@/api/query'
 import { exportExcel } from '@/api/report'
+import EnhancedTable from '@/components/EnhancedTable.vue'
 
 export default {
   name: 'QueryEditor',
-  components: { },
+  components: { EnhancedTable },
   setup() {
     const loading = ref(false)
     const dataSources = ref([])
@@ -73,6 +72,18 @@ export default {
       sql: ''
     })
     const result = ref(null)
+
+    // 将索引数组 rows 转换为对象数组
+    const tableData = computed(() => {
+      if (!result.value || !result.value.rows || !result.value.columns) return []
+      return result.value.rows.map(row => {
+        const obj = {}
+        result.value.columns.forEach((col, i) => {
+          obj[col] = row[i]
+        })
+        return obj
+      })
+    })
 
     const loadDataSources = async () => {
       try {
@@ -137,6 +148,7 @@ export default {
       dataSources,
       queryForm,
       result,
+      tableData,
       handleExecute,
       handleExport
     }

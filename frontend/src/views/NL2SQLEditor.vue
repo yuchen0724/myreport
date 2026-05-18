@@ -153,15 +153,17 @@
         </div>
         
         <!-- 数据表格 -->
-        <el-table :data="queryResult.rows" style="width: 100%" max-height="400">
-          <el-table-column
-            v-for="(column, index) in queryResult.columns"
-            :key="index"
-            :prop="index.toString()"
-            :label="column"
-            show-overflow-tooltip
-          />
-        </el-table>
+        <EnhancedTable
+          v-if="nl2sqlTableData.length > 0"
+          :data="nl2sqlTableData"
+          :columns="queryResult?.columns || []"
+          :loading="loading"
+          table-id="nl2sql-result"
+          :summarizable="false"
+          :enable-expand="false"
+          :searchable="true"
+          :max-height="400"
+        />
         <div class="result-info">
           <span>共 {{ queryResult.total }} 条记录</span>
           <span>执行时间：{{ executionTimeMs }}ms</span>
@@ -199,6 +201,18 @@ import { parseQuestion, getGroups } from '@/api/nl2sql'
 import { getDataSourceList } from '@/api/data_source'
 import ChartRenderer from '@/components/ChartRenderer.vue'
 import { formatSQL } from '@/utils/sqlFormat'
+import EnhancedTable from '@/components/EnhancedTable.vue'
+
+// 将索引数组 rows 转换为对象数组
+const nl2sqlTableData = computed(() => {
+  if (!queryResult.value?.rows || !queryResult.value?.columns) return []
+  const cols = queryResult.value.columns
+  return queryResult.value.rows.map(row => {
+    const obj = {}
+    cols.forEach((col, i) => { obj[col] = row[i] })
+    return obj
+  })
+})
 
 const form = ref({
   data_source_id: null,

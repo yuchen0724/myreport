@@ -52,52 +52,40 @@
           </div>
         </template>
 
-        <el-table :data="tasks" style="width: 100%">
-          <el-table-column prop="id" label="任务ID" width="200" />
-          <el-table-column prop="status" label="状态" width="100">
-            <template #default="{ row }">
-              <el-tag :type="getStatusType(row.status)">
-                {{ getStatusText(row.status) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="sql" label="SQL" width="300" show-overflow-tooltip>
-            <template #default="{ row }">
-              {{ row.sql || '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="progress" label="进度" width="150">
-            <template #default="{ row }">
-              <el-progress :percentage="row.progress" :stroke-width="10" />
-            </template>
-          </el-table-column>
-          <el-table-column prop="row_count" label="行数" width="100" />
-          <el-table-column prop="created_at" label="创建时间" width="180">
-            <template #default="{ row }">
-              {{ row.created_at ? formatDate(row.created_at) : '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="150">
-            <template #default="{ row }">
-              <el-button
-                v-if="row.status === 'SUCCESS'"
-                type="primary"
-                size="small"
-                @click="handleDownload(row.id)"
-              >
-                下载
-              </el-button>
-              <el-button
-                v-if="row.status === 'FAILED'"
-                type="danger"
-                size="small"
-                @click="handleViewError(row)"
-              >
-                查看错误
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+        <StaticTableEnhancer :columns="taskColumns" :data="tasks" table-id="async-export-list">
+          <template #status="{ row }">
+            <el-tag :type="getStatusType(row.status)">
+              {{ getStatusText(row.status) }}
+            </el-tag>
+          </template>
+          <template #sql="{ row }">
+            {{ row.sql || '-' }}
+          </template>
+          <template #progress="{ row }">
+            <el-progress :percentage="row.progress" :stroke-width="10" />
+          </template>
+          <template #created_at="{ row }">
+            {{ row.created_at ? formatDate(row.created_at) : '-' }}
+          </template>
+          <template #operations="{ row }">
+            <el-button
+              v-if="row.status === 'SUCCESS'"
+              type="primary"
+              size="small"
+              @click="handleDownload(row.id)"
+            >
+              下载
+            </el-button>
+            <el-button
+              v-if="row.status === 'FAILED'"
+              type="danger"
+              size="small"
+              @click="handleViewError(row)"
+            >
+              查看错误
+            </el-button>
+          </template>
+        </StaticTableEnhancer>
       </el-card>
     </div></template>
 
@@ -106,6 +94,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { createExportTask, getTaskStatus, getUserTasks, downloadExportFile } from '@/api/async_export'
 import { getDataSourceList } from '@/api/data_source'
+import StaticTableEnhancer from '@/components/StaticTableEnhancer.vue'
 
 const form = ref({
   data_source_id: null,
@@ -117,6 +106,16 @@ const dataSources = ref([])
 const tasks = ref([])
 const creating = ref(false)
 let refreshInterval = null
+
+const taskColumns = [
+  { prop: 'id', label: '任务ID', width: 200 },
+  { prop: 'status', label: '状态', width: 100, slotName: 'status' },
+  { prop: 'sql', label: 'SQL', width: 300, slotName: 'sql' },
+  { prop: 'progress', label: '进度', width: 150, slotName: 'progress' },
+  { prop: 'row_count', label: '行数', width: 100 },
+  { prop: 'created_at', label: '创建时间', width: 180, slotName: 'created_at' },
+  { prop: 'operations', label: '操作', width: 150, slotName: 'operations' },
+]
 
 const loadDataSources = async () => {
   try {

@@ -31,6 +31,7 @@
 
     <!-- 搜索框 -->
     <el-input
+      v-if="showSearch"
       v-model="searchText"
       placeholder="搜索表格数据..."
       clearable
@@ -67,6 +68,7 @@ const props = defineProps({
   modelValue: { type: Array, required: true },
   enableExpand: { type: Boolean, default: false },
   expanded: { type: Boolean, default: false },
+  showSearch: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['update:modelValue', 'update:searchText', 'toggle-expand'])
