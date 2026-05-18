@@ -132,7 +132,7 @@ class PredictionService:
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
         # 用 WITH CTE 统一处理，避免子查询别名问题
         cte_prefix = f"WITH t_table AS ({table}) " if table_name else ""
-        table_ref = "t_table"
+        table_ref = "t_table" if table_name else table
 
         # 0. 快速获取最近活跃分组列表：取前一天峰值排前 N 的分组
         #    25.7亿行数据，GROUP BY 全表不可行，改为最近一天优先取高频分组
@@ -141,7 +141,7 @@ class PredictionService:
         top_groups_dt = latest_day.strftime('%Y%m%d')
         top_groups_subquery = f"""(
             SELECT group_id, store_code, matnr
-            FROM t_table
+            FROM {table_ref}
             WHERE dt >= '{top_groups_dt}'
               AND exclude_flag != 1
               AND (service_flag != 1 OR service_flag IS NULL)
@@ -154,7 +154,7 @@ class PredictionService:
         group_count_sql = f"""{cte_prefix}\
             SELECT /*+ SET_VAR(query_timeout=120) */
                 group_id, store_code, matnr, COUNT(*) as cnt
-            FROM t_table
+            FROM {table_ref}
             WHERE dt >= '{top_groups_dt}'
               AND exclude_flag != 1
               AND (service_flag != 1 OR service_flag IS NULL)
@@ -200,7 +200,7 @@ class PredictionService:
             sql = f"""{cte_prefix}\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
                     src.dt, src.group_id, src.store_code, src.matnr, src.{TARGET_COL}
-                FROM t_table src
+                FROM {table_ref} src
                 JOIN {top_groups_subquery}
                   ON src.group_id = top_g.group_id
                  AND src.store_code = top_g.store_code
@@ -284,7 +284,7 @@ class PredictionService:
             test_sql = f"""{cte_prefix}\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
                     src.dt, src.group_id, src.store_code, src.matnr, src.{TARGET_COL}
-                FROM t_table src
+                FROM {table_ref} src
                 JOIN {top_groups_subquery}
                   ON src.group_id = top_g.group_id
                  AND src.store_code = top_g.store_code
