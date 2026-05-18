@@ -6,12 +6,19 @@ import lightgbm as lgb
 from typing import Optional
 from celery.exceptions import Ignore
 from app.celery_app import celery_app
+from app.config import get_settings
 from app.core.database import SessionLocal
 from app.services.prediction_service import PredictionService
 from app.models.prediction import PredictionModel
 from app.utils.feature_engineering import get_feature_columns
 
 logger = logging.getLogger(__name__)
+
+# 任务配置（从 Settings 读取，支持 .env 覆盖）
+_settings = get_settings()
+PREDICTION_TASK_MAX_RETRIES: int = _settings.prediction_task_max_retries
+PREDICTION_TASK_SOFT_TIME_LIMIT: int = _settings.prediction_task_soft_time_limit
+PREDICTION_TASK_TIME_LIMIT: int = _settings.prediction_task_time_limit
 
 # Redis 存储训练进度（替代内存字典方案）
 # 每条进度用 Redis HASH 存储：train:progress:{task_id}
@@ -556,7 +563,7 @@ def train_prediction_model_async(
         raise self.retry(exc=e, countdown=300)
 
 
-@celery_app.task(bind=True, max_retries=1, soft_time_limit=300, time_limit=600)
+@celery_app.task(bind=True, max_retries=PREDICTION_TASK_MAX_RETRIES, soft_time_limit=PREDICTION_TASK_SOFT_TIME_LIMIT, time_limit=PREDICTION_TASK_TIME_LIMIT)
 def train_and_predict_prediction_async(
     self,
     data_source_id: int,

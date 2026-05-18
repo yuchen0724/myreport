@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     prediction_min_history_days: int = 90
     prediction_retrain_cron: str = "0 2 * * *"  # 每天凌晨2点重训练
 
+    # Prediction Celery task 参数
+    prediction_task_max_retries: int = 1
+    prediction_task_soft_time_limit: int = 300
+    prediction_task_time_limit: int = 600
+
     @field_validator("database_url", "secret_key")
     @classmethod
     def validate_required(cls, v: str) -> str:
