@@ -139,7 +139,6 @@
 
       <EnhancedTable
         :data="forecastData"
-        :columns="tableColumns"
         :loading="loading"
         table-id="forecast-result"
         :show-toolbar="true"
@@ -183,15 +182,6 @@ import { getForecast, getMyTrainTasks, exportForecastExcel } from '@/api/predict
 import * as echarts from 'echarts'
 import EnhancedTable from '@/components/EnhancedTable.vue'
 
-const tableColumns = ref([])
-
-// 扩展 forecastData 响应，同步 tableColumns
-watch(forecastData, (data) => {
-  if (data && data.length > 0) {
-    tableColumns.value = Object.keys(data[0])
-  }
-}, { immediate: true })
-
 const dataSources = ref([])
 const models = ref([])
 const loading = ref(false)
@@ -200,7 +190,6 @@ const forecastData = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
-
 const filters = reactive({
   dataSourceId: null,
   modelId: null,

@@ -133,7 +133,14 @@ const props = defineProps({
 const emit = defineEmits(['re-query'])
 
 // useTableEnhancer 内部创建的 columns ref
-const columnsRef = computed(() => props.columns)
+// 如果用户未传 columns 或 columns 为空，从 data[0] 自动推导
+const columnsRef = computed(() => {
+  if (props.columns && props.columns.length > 0) return props.columns
+  if (props.data && props.data.length > 0) {
+    return Object.keys(props.data[0])
+  }
+  return []
+})
 
 const enhancer = useTableEnhancer({
   mode: 'dynamic',
