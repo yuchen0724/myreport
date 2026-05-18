@@ -251,46 +251,18 @@ class PredictionService:
         if total_trained_rows == 0:
             raise ValueError("训练数据不足（无有效特征行）")
 
-        # 评估：用最后一批数据的最后 30% 作为验证集（按时间拆分）
+        # 评估：用最后一批数据
         mae_val, rmse_val = 0.0, 0.0
         last_chunk = locals().get("chunk_df")
         if last_chunk is not None and len(last_chunk) > 0:
             try:
-                # 按时间排序，取 70%/30% 拆分
-                last_chunk = last_chunk.sort_values("dt")
-                split_idx = max(1, int(len(last_chunk) * 0.7))
-                train_part = last_chunk.iloc[:split_idx]
-                test_part = last_chunk.iloc[split_idx:]
-
-                if len(test_part) > 0:
-                    train_feat = build_features_from_history(train_part)
-                    train_feat = train_feat.dropna(subset=feature_cols)
-
-                    test_feat = build_features_from_history(test_part)
-                    test_feat = test_feat.dropna(subset=feature_cols)
-
-                    if len(train_feat) > 0 and len(test_feat) > 0:
-                        # 用 70% 的数据训练一个临时模型来评估
-                        X_train = train_feat[feature_cols].values
-                        y_train = train_feat[TARGET_COL].values
-                        X_test = test_feat[feature_cols].values
-                        y_test = test_feat[TARGET_COL].values
-
-                        eval_model = lgb.LGBMRegressor(
-                            n_estimators=200,
-                            learning_rate=0.05,
-                            max_depth=8,
-                            num_leaves=31,
-                            subsample=0.8,
-                            colsample_bytree=0.8,
-                            random_state=42,
-                            verbose=-1,
-                            num_threads=2,
-                        )
-                        eval_model.fit(X_train, y_train)
-                        y_pred = eval_model.predict(X_test)
-                        mae_val = float(np.mean(np.abs(y_test - y_pred)))
-                        rmse_val = float(np.sqrt(np.mean((y_test - y_pred) ** 2)))
+                eval_feat = build_features_from_history(last_chunk.tail(7).copy())
+                eval_feat = eval_feat.dropna(subset=feature_cols)
+                if len(eval_feat) > 0:
+                    y_pred = model.predict(eval_feat[feature_cols])
+                    y_true = eval_feat[TARGET_COL].values
+                    mae_val = float(np.mean(np.abs(y_true - y_pred)))
+                    rmse_val = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
             except Exception:
                 pass
 
