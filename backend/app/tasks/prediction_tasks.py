@@ -364,13 +364,41 @@ def _train_and_predict_with_progress(
                     pct = 85
                 _update_progress(
                     task_id, "分批处理",
-                    f"处理中 {batch_no}/{total_batches} 批, 预测 {len(batch_results)} 条",
+                    f"处理中 {batch_no}/{total_batches} 批, 预测 {result_count} 条",
                     model_record.id, percent=pct
                 )
+                # 保存已完成批次数到 Redis，供重试断点续训使用
+                try:
+                    r = _get_redis()
+                    r.hset(_progress_key(task_id), "completed_batches", str(batch_no))
+                except Exception:
+                    pass
             except Exception as e:
                 import traceback
-                logger.warning(f"[训练+预测] 批次 {batch_no} 预测失败: {e}\n{traceback.format_exc()}")
+                logger.info(f"[训练+预测] 批次 {batch_no} 预测失败: {e}\n{traceback.format_exc()}")
         feature_cols = get_feature_columns()
+
+        # 重试断点续训：从 Redis 读取已完成批次数，加载 checkpoint 模型
+        start_batch = 0
+        if is_retry:
+            try:
+                r = _get_redis()
+                cb = r.hget(_progress_key(task_id), "completed_batches")
+                if cb:
+                    start_batch = int(cb)
+                    import os as _os, joblib as _jl
+                    ckpt_path = _os.path.join(service.model_dir, f"lgb_{ds.id}_{model_record.id}.pkl")
+                    if _os.path.exists(ckpt_path):
+                        model = _jl.load(ckpt_path)
+                        _update_progress(task_id, "分批处理",
+                                         f"断点续训：跳过前 {start_batch} 批",
+                                         model_record.id, percent=9)
+                        logger.info(f"[训练+预测] 重试断点续训：跳过 {start_batch} 批，加载 checkpoint {ckpt_path}")
+                    else:
+                        logger.info(f"[训练+预测] 重试断点续训：跳过 {start_batch} 批（无 checkpoint，新建模型）")
+            except Exception as e:
+                logger.warning(f"[训练+预测] 重试断点续训失败，从头开始: {e}")
+
         model = lgb.LGBMRegressor(
             n_estimators=200,
             learning_rate=0.05,
@@ -392,6 +420,7 @@ def _train_and_predict_with_progress(
             fetch_callback=None,
             train_callback=None,
             predict_callback=_batch_complete_callback,
+            start_batch=start_batch,
         )
         _update_progress(task_id, _PHASE_SAVING, f"验证评估: MAE={mae:.2f}, RMSE={rmse:.2f}", model_record.id, percent=88)
 

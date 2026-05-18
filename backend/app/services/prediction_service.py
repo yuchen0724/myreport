@@ -104,7 +104,8 @@ class PredictionService:
                                       batch_unit: int = 10,
                                       fetch_callback: callable = None,
                                       train_callback: callable = None,
-                                      predict_callback: callable = None) -> tuple:
+                                      predict_callback: callable = None,
+                                      start_batch: int = 0) -> tuple:
         """按 (group_id, store_code, matnr) 分组分批拉取增量训练
 
         先查询所有分组的行数，然后将多个完整分组合并为一个批次（≈BATCH_SIZE 行），
@@ -116,6 +117,7 @@ class PredictionService:
             fetch_callback: 每批数据拉取完成后回调(batch_no, total_batches, rows_count)
             train_callback: 每批训练完成后回调(batch_no, total_batches, rows_count)
             predict_callback: 每批训练完成后回调(chunk_df, batch_no, total_batches) 用于即时预测
+            start_batch: 从第几批开始（跳过之前已完成的批次），用于超时重试断点续训
 
         Returns:
             tuple: (model, feature_cols, total_trained_rows, train_start, train_end,
@@ -188,6 +190,11 @@ class PredictionService:
 
         for batch_groups in batches:
             batch_no += 1
+            # 超时重试时跳过已完成的批次
+            if start_batch > 0 and batch_no <= start_batch:
+                if train_callback:
+                    train_callback(batch_no, total_batches, 0)
+                continue
 
             # 每个分批通过独立的子查询 JOIN 确认分组匹配，不用 OR 或 IN
             batch_values = " UNION ALL ".join(
