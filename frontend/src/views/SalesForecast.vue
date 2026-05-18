@@ -230,9 +230,11 @@ export default {
         ])
         const tasks = Array.isArray(tasksRes) ? tasksRes : (tasksRes.data || [])
         const forecasts = Array.isArray(forecastRes) ? forecastRes : (forecastRes.data || [])
+        console.log('[loadHistory] tasksRaw:', JSON.parse(JSON.stringify(tasksRes)).slice(0, 2))
+        console.log('[loadHistory] tasks:', tasks.length, 'forecasts:', forecasts.length)
         // 排除运行中的任务（status="training"），只显示已完成的
         all = [...tasks.filter(t => t.status !== 'training'), ...forecasts]
-      } catch { /* silent */ }
+      } catch (e) { console.error('[loadHistory] error:', e) }
 
       // 按 task_id 合并：同时有训练（metrics）和预测（result_count）记录时合并为一条
       const merged = new Map()
@@ -252,6 +254,7 @@ export default {
       taskHistory.value = [...merged.values()]
         .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
         .slice(0, 20)
+      console.log('[loadHistory] taskHistory:', taskHistory.value.length, JSON.parse(JSON.stringify(taskHistory.value.slice(0, 2))))
     }
 
     // 统一轮询
@@ -449,7 +452,7 @@ export default {
 
     return {
       form, dataSources, trainAndPredictLoading, loading, resultMsg, taskProgress,
-      taskProgresses, taskHistory,
+      taskProgresses, taskHistory, historyColumns,
       handleTrainAndPredict, handleStopTask,
       handleDeleteProgress, handleDeleteHistory, onDataSourceChange,
     }
