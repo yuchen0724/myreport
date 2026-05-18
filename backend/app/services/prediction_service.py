@@ -58,6 +58,8 @@ class PredictionService:
         end_date = date.today()
         start_date = end_date - timedelta(days=days)
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
+        # 如果 table_name 是子查询（如 (SELECT * FROM ...)），加别名满足 MySQL 要求
+        table = f"{table} src" if table_name else table
         
         # 先获取总天数作为批次数量
         total_pages = (end_date - start_date).days
@@ -130,6 +132,8 @@ class PredictionService:
         test_split_date = end_date - timedelta(days=30)  # 最后 30 天为测试集
         train_end_date = test_split_date
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
+        # 如果 table_name 是子查询（如 (SELECT * FROM ...)），加别名满足 MySQL 要求
+        table = f"{table} src" if table_name else table
 
         # 0. 快速获取最近活跃分组列表：取前一天峰值排前 N 的分组
         #    25.7亿行数据，GROUP BY 全表不可行，改为最近一天优先取高频分组
@@ -196,18 +200,18 @@ class PredictionService:
 
             sql = f"""\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
-                    t.dt, t.group_id, t.store_code, t.matnr, t.{TARGET_COL}
-                FROM {table} t
+                    src.dt, src.group_id, src.store_code, src.matnr, src.{TARGET_COL}
+                FROM {table}
                 JOIN {top_groups_subquery}
-                  ON t.group_id = top_g.group_id
-                 AND t.store_code = top_g.store_code
-                 AND t.matnr = top_g.matnr
-                WHERE t.dt >= '{start_date.strftime('%Y%m%d')}' AND t.dt < '{train_end_date.strftime('%Y%m%d')}'
-                  AND t.exclude_flag != 1
-                  AND (t.service_flag != 1 OR t.service_flag IS NULL)
-                  AND (t.shopping_bag_flag != 1 OR t.shopping_bag_flag IS NULL)
+                  ON src.group_id = top_g.group_id
+                 AND src.store_code = top_g.store_code
+                 AND src.matnr = top_g.matnr
+                WHERE src.dt >= '{start_date.strftime('%Y%m%d')}' AND src.dt < '{train_end_date.strftime('%Y%m%d')}'
+                  AND src.exclude_flag != 1
+                  AND (src.service_flag != 1 OR src.service_flag IS NULL)
+                  AND (src.shopping_bag_flag != 1 OR src.shopping_bag_flag IS NULL)
                   AND ({where_groups})
-                ORDER BY t.store_code, t.matnr, t.dt
+                ORDER BY src.store_code, src.matnr, src.dt
             """
             logger.info(f"[训练] 分批批次 batch={batch_no}/{total_batches}, 该批分组数={len(batch_groups)}, SQL: {sql.replace(chr(10), ' ').strip()}")
 
@@ -280,17 +284,17 @@ class PredictionService:
             # 用 JOIN 子查询替代 OR 拼接，避免超长 SQL
             test_sql = f"""\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
-                    t.dt, t.group_id, t.store_code, t.matnr, t.{TARGET_COL}
-                FROM {table} t
+                    src.dt, src.group_id, src.store_code, src.matnr, src.{TARGET_COL}
+                FROM {table}
                 JOIN {top_groups_subquery}
-                  ON t.group_id = top_g.group_id
-                 AND t.store_code = top_g.store_code
-                 AND t.matnr = top_g.matnr
-                WHERE t.dt >= '{start_date.strftime('%Y%m%d')}' AND t.dt < '{end_date.strftime('%Y%m%d')}'
-                  AND t.exclude_flag != 1
-                  AND (t.service_flag != 1 OR t.service_flag IS NULL)
-                  AND (t.shopping_bag_flag != 1 OR t.shopping_bag_flag IS NULL)
-                ORDER BY t.store_code, t.matnr, t.dt
+                  ON src.group_id = top_g.group_id
+                 AND src.store_code = top_g.store_code
+                 AND src.matnr = top_g.matnr
+                WHERE src.dt >= '{start_date.strftime('%Y%m%d')}' AND src.dt < '{end_date.strftime('%Y%m%d')}'
+                  AND src.exclude_flag != 1
+                  AND (src.service_flag != 1 OR src.service_flag IS NULL)
+                  AND (src.shopping_bag_flag != 1 OR src.shopping_bag_flag IS NULL)
+                ORDER BY src.store_code, src.matnr, src.dt
             """
             logger.info("[评估] 查询测试集数据（含历史范围供特征工程）...")
             test_rows, test_cols = execute_query(ds, test_sql)
