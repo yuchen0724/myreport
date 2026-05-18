@@ -530,7 +530,7 @@ def train_prediction_model_async(
             "status": "running",
             "percent": "0",
             "phase": "重试中",
-            "detail": f"即将重试({self.request.retries + 1}/3)",
+            "detail": f"即将重试({self.request.retries + 1}/{self.max_retries + 1})",
         })
         r.expire(key, _PROGRESS_TTL)
         if self.request.retries >= self.max_retries:
@@ -662,7 +662,7 @@ def train_and_predict_prediction_async(
                 "status": "running",
                 "percent": "0",
                 "phase": "重试中",
-                "detail": f"即将重试({self.request.retries + 1}/3)",
+                "detail":                f"即将重试({self.request.retries + 1}/{self.max_retries + 1})",
             })
             r.expire(key, _PROGRESS_TTL)
         raise self.retry(exc=e, countdown=300)
