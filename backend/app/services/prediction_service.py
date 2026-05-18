@@ -127,7 +127,7 @@ class PredictionService:
 
         end_date = date.today()
         start_date = end_date - timedelta(days=days)
-        test_split_date = end_date - timedelta(days=7)  # 最后 7 天为测试集
+        test_split_date = end_date - timedelta(days=30)  # 最后 30 天为测试集
         train_end_date = test_split_date
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
 
