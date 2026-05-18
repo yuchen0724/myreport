@@ -499,7 +499,7 @@ class PredictionService:
                         store_code=store_code,
                         matnr=matnr_val,
                         forecast_date=future_dt,
-                        predicted_value=round(float(pred), 2),
+                        predicted_value=round(max(float(pred), 0), 2),
                     ))
 
                     if i < forecast_days - 1:
@@ -608,7 +608,7 @@ class PredictionService:
                         store_code=store_code,
                         matnr=matnr_val,
                         forecast_date=forecast_date,
-                        predicted_value=round(float(pred), 2),
+                        predicted_value=round(max(float(pred), 0), 2),
                     ))
 
                     if i < forecast_days - 1:
