@@ -311,6 +311,38 @@ def _soft_delete_model(model, db):
     db.commit()
 
 
+def _hard_delete_model(model, db):
+    """硬删除模型记录及关联的预测历史"""
+    if model is None:
+        return
+    # 清理预测历史
+    try:
+        db.query(ForecastHistory).filter(
+            ForecastHistory.model_id == model.id
+        ).delete()
+    except Exception:
+        pass
+    if model.task_id:
+        try:
+            db.query(ForecastHistory).filter(
+                ForecastHistory.task_id == model.task_id
+            ).delete()
+        except Exception:
+            pass
+    # 清理模型
+    db.delete(model)
+    db.commit()
+
+    # 清理 Redis 进度
+    try:
+        from app.tasks.prediction_tasks import _get_redis, _progress_key
+        r = _get_redis()
+        if r and model.task_id:
+            r.delete(_progress_key(model.task_id))
+    except Exception:
+        pass
+
+
 @router.delete("/history/{model_id}", response_model=dict)
 def delete_model_history(
     model_id: int,
@@ -325,26 +357,7 @@ def delete_model_history(
     if not model:
         raise HTTPException(status_code=404, detail="记录不存在或无权操作")
 
-    # 清理预测历史
-    db.query(ForecastHistory).filter(
-        ForecastHistory.model_id == model_id
-    ).delete()
-    if model.task_id:
-        db.query(ForecastHistory).filter(
-            ForecastHistory.task_id == model.task_id
-        ).delete()
-    # 清理模型
-    db.delete(model)
-    db.commit()
-
-    # 清理 Redis 进度
-    try:
-        from app.tasks.prediction_tasks import _get_redis, _progress_key
-        r = _get_redis()
-        if r and model.task_id:
-            r.delete(_progress_key(model.task_id))
-    except Exception:
-        pass
+    _hard_delete_model(model, db)
 
     return {"status": "deleted"}
 
@@ -363,22 +376,7 @@ def delete_train_history(
         raise HTTPException(status_code=404, detail="训练记录不存在或无权操作")
     if model.status in ("training",):
         raise HTTPException(status_code=400, detail="正在训练中的任务不能删除，请先停止")
-    _soft_delete_model(model, db)
-    # 同时清理关联的预测历史记录（按 model_id 和 task_id 双维度确保清理干净）
-    try:
-        db.query(ForecastHistory).filter(
-            ForecastHistory.model_id == model_id
-        ).delete()
-    except Exception:
-        pass
-    try:
-        if model.task_id:
-            db.query(ForecastHistory).filter(
-                ForecastHistory.task_id == model.task_id
-            ).delete()
-        db.commit()
-    except Exception:
-        pass
+    _hard_delete_model(model, db)
     return {"status": "deleted"}
 
 
@@ -401,7 +399,7 @@ def delete_train_history_by_task(
     if model:
         if model.status in ("training",):
             raise HTTPException(status_code=400, detail="正在训练中的任务不能删除，请先停止")
-        _soft_delete_model(model, db)
+        _hard_delete_model(model, db)
 
     # 始终清理关联的预测历史记录
     try:
