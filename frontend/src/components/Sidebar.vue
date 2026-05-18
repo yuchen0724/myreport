@@ -164,6 +164,15 @@ export default {
 <style scoped>
 .sidebar {
   height: 100%;
+  overflow-y: auto;
+}
+
+.sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
 }
 
 .el-menu {

@@ -166,37 +166,26 @@ import { trainAndPredict, getTrainStatus, getPredictStatus, getMyTrainTasks, sto
 import { getDataSourceList } from '@/api/data_source'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import StaticTableEnhancer from '@/components/StaticTableEnhancer.vue'
+import { useFormPersistence } from '@/composables/useFormPersistence'
 
 export default {
   name: 'SalesForecast',
   components: { Refresh, StaticTableEnhancer },
   setup() {
-    const STORAGE_KEY = 'sales_forecast_form'
+    const { loadStored, saveToStorage } = useFormPersistence('sales_forecast_form', {
+      dataSourceId: null,
+      trainDays: 365,
+      forecastDays: 30,
+      tableName: '',
+      batchSize: 200,
+      batchUnit: 10,
+    })
 
-    // 从 localStorage 恢复表单状态，不重置用户选择
-    function loadStoredForm() {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY)
-        if (saved) {
-          const parsed = JSON.parse(saved)
-          return {
-            dataSourceId: parsed.dataSourceId ?? null,
-            trainDays: parsed.trainDays ?? 365,
-            forecastDays: parsed.forecastDays ?? 30,
-            tableName: parsed.tableName ?? '',
-            batchSize: parsed.batchSize ?? 200,
-            batchUnit: parsed.batchUnit ?? 10,
-          }
-        }
-      } catch { /* 忽略 */ }
-      return { dataSourceId: null, trainDays: 365, forecastDays: 30, tableName: '', batchSize: 200, batchUnit: 10 }
-    }
-
-    const form = ref(loadStoredForm())
+    const form = ref(loadStored())
 
     // 表单值变化时自动保存到 localStorage
     watch(form, () => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(form.value))
+      saveToStorage(form.value)
     }, { deep: true })
     const dataSources = ref([])
     const trainAndPredictLoading = ref(false)

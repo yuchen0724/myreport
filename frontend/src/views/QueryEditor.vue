@@ -54,12 +54,13 @@
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getDataSourceList } from '@/api/data_source'
 import { executeSQL } from '@/api/query'
 import { exportExcel } from '@/api/report'
 import EnhancedTable from '@/components/EnhancedTable.vue'
+import { useFormPersistence } from '@/composables/useFormPersistence'
 
 export default {
   name: 'QueryEditor',
@@ -67,10 +68,14 @@ export default {
   setup() {
     const loading = ref(false)
     const dataSources = ref([])
-    const queryForm = ref({
+
+    const { loadStored, saveToStorage } = useFormPersistence('query_editor_form', {
       data_source_id: null,
       sql: ''
     })
+    const queryForm = ref(loadStored())
+    // 保存表单
+    const saveForm = () => saveToStorage(queryForm.value)
     const result = ref(null)
 
     // 将索引数组 rows 转换为对象数组
@@ -142,6 +147,9 @@ export default {
     onMounted(() => {
       loadDataSources()
     })
+    
+    // 自动持久化
+    watch(queryForm, saveForm, { deep: true })
 
     return {
       loading,

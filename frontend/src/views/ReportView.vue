@@ -183,6 +183,7 @@ import { executeQuery } from '@/api/query'
 import { exportExcel, exportPDF } from '@/api/report'
 import TableToolbar from '@/components/TableToolbar.vue'
 import { useTableStorage } from '@/composables/useTableStorage'
+import { useFormPersistence } from '@/composables/useFormPersistence'
 import Sortable from 'sortablejs'
 
 const route = useRoute()
@@ -198,6 +199,13 @@ const pageSize = ref(20)
 const params = reactive({})
 const templateParams = ref([])
 const nextCursor = ref(null)
+
+// 报表参数持久化
+const reportId = computed(() => route.params.id || 'default')
+const { loadStored, saveToStorage } = useFormPersistence(`report_params_${reportId.value}`, {})
+function saveParams() {
+  saveToStorage({ ...params })
+}
 
 // 表格增强
 const searchText = ref('')
@@ -371,8 +379,14 @@ const loadMenuInfo = async () => {
     templateInfo.value = res.template
     if (templateInfo.value?.config?.params) {
       templateParams.value = templateInfo.value.config.params
+      // 尝试恢复存储的参数
+      const storedParams = loadStored()
       templateParams.value.forEach(p => {
-        if (p.default) params[p.name] = p.default
+        if (storedParams && Object.prototype.hasOwnProperty.call(storedParams, p.name)) {
+          params[p.name] = storedParams[p.name]
+        } else if (p.default) {
+          params[p.name] = p.default
+        }
       })
     }
   } catch (error) {
@@ -501,6 +515,9 @@ const handleExport = async (format) => {
 watch(() => route.params.id, (newId) => {
   if (newId) loadMenuInfo()
 })
+
+// 参数自动持久化
+watch(params, saveParams, { deep: true })
 
 onMounted(() => {
   if (route.params.id) loadMenuInfo()

@@ -202,6 +202,25 @@ import { getDataSourceList } from '@/api/data_source'
 import ChartRenderer from '@/components/ChartRenderer.vue'
 import { formatSQL } from '@/utils/sqlFormat'
 import EnhancedTable from '@/components/EnhancedTable.vue'
+import { useFormPersistence } from '@/composables/useFormPersistence'
+
+// 表单持久化
+const { loadStored, saveToStorage } = useFormPersistence('nl2sql_form', {
+  data_source_id: null,
+  question: '',
+  group_id: null,
+  chartType: 'bar',
+  chartColorTheme: 'blue',
+  chartHeight: '350px',
+  fieldMapping_xAxis: '',
+  fieldMapping_yAxis: ''
+})
+const stored = loadStored()
+const form = ref({
+  data_source_id: stored.data_source_id,
+  question: stored.question,
+  group_id: stored.group_id
+})
 
 // 将索引数组 rows 转换为对象数组
 const nl2sqlTableData = computed(() => {
@@ -212,12 +231,6 @@ const nl2sqlTableData = computed(() => {
     cols.forEach((col, i) => { obj[col] = row[i] })
     return obj
   })
-})
-
-const form = ref({
-  data_source_id: null,
-  question: '',
-  group_id: null
 })
 
 // 多轮对话上下文
@@ -238,13 +251,13 @@ const loading = ref(false)
 const recommendedChart = ref(null)  // LLM 推荐的图表配置
 
 // 图表相关
-const chartType = ref('bar')
+const chartType = ref(stored.chartType)
 const chartData = ref([])
-const chartColorTheme = ref('blue')
-const chartHeight = ref('350px')
+const chartColorTheme = ref(stored.chartColorTheme)
+const chartHeight = ref(stored.chartHeight)
 
 // 字段映射（用户可手动选择 X/Y 轴对应的列）
-const fieldMapping = ref({ xAxis: '', yAxis: '' })
+const fieldMapping = ref({ xAxis: stored.fieldMapping_xAxis, yAxis: stored.fieldMapping_yAxis })
 
 // 根据字段映射生成图表配置
 const chartConfig = computed(() => {
@@ -444,6 +457,29 @@ const rebuildChartFromFields = () => {
 onMounted(async () => {
   await loadDataSources()
 })
+
+// 表单自动持久化
+watch(form, (val) => saveToStorage(val), { deep: true })
+watch([chartType, chartColorTheme, chartHeight], () => {
+  saveToStorage({
+    ...form.value,
+    chartType: chartType.value,
+    chartColorTheme: chartColorTheme.value,
+    chartHeight: chartHeight.value,
+    fieldMapping_xAxis: fieldMapping.value.xAxis,
+    fieldMapping_yAxis: fieldMapping.value.yAxis
+  })
+})
+watch(fieldMapping, () => {
+  saveToStorage({
+    ...form.value,
+    chartType: chartType.value,
+    chartColorTheme: chartColorTheme.value,
+    chartHeight: chartHeight.value,
+    fieldMapping_xAxis: fieldMapping.value.xAxis,
+    fieldMapping_yAxis: fieldMapping.value.yAxis
+  })
+}, { deep: true })
 
 watch(() => form.value.data_source_id, () => {
   const dsId = form.value.data_source_id

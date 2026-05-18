@@ -5,10 +5,10 @@
         <span>预测结果查询</span>
       </template>
 
-      <el-form :inline="true" label-width="90px">
+      <el-form :model="filters" label-width="90px">
         <el-row :gutter="16" style="width: 100%">
           <el-col :span="8">
-            <el-form-item label="数据源">
+            <el-form-item label="数据源" prop="dataSourceId">
               <el-select
                 v-model="filters.dataSourceId"
                 placeholder="请选择数据源"
@@ -27,7 +27,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="模型">
+            <el-form-item label="模型" prop="modelId">
               <el-select
                 v-model="filters.modelId"
                 placeholder="全部模型"
@@ -45,7 +45,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="门店编码">
+            <el-form-item label="门店编码" prop="storeCode">
               <el-input
                 v-model="filters.storeCode"
                 placeholder="输入门店编码"
@@ -57,7 +57,7 @@
 
         <el-row :gutter="16" style="width: 100%">
           <el-col :span="8">
-            <el-form-item label="商品编码">
+            <el-form-item label="商品编码" prop="matnr">
               <el-input
                 v-model="filters.matnr"
                 placeholder="输入商品编码"
@@ -66,7 +66,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="预测日期">
+            <el-form-item label="预测日期" prop="dateRange">
               <el-date-picker
                 v-model="filters.dateRange"
                 type="daterange"
@@ -79,7 +79,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="4">
-            <el-form-item label="排序">
+            <el-form-item label="排序" prop="sortBy">
               <el-select v-model="filters.sortBy" style="width: 100%">
                 <el-option label="预测日期" value="forecast_date" />
                 <el-option label="预测值" value="predicted_value" />
@@ -89,7 +89,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="4">
-            <el-form-item label="方向">
+            <el-form-item label="方向" prop="sortOrder">
               <el-select v-model="filters.sortOrder" style="width: 100%">
                 <el-option label="升序" value="asc" />
                 <el-option label="降序" value="desc" />
@@ -143,9 +143,18 @@
         table-id="forecast-result"
         :show-toolbar="true"
         :summarizable="false"
-        :enable-expand="false"
+        :enable-expand="true"
         :searchable="true"
         :max-height="500"
+        :column-labels="{
+          id: 'ID',
+          store_code: '门店编码',
+          matnr: '商品编码',
+          forecast_date: '预测日期',
+          predicted_value: '预测值',
+          lower_bound: '置信下限',
+          upper_bound: '置信上限',
+        }"
       >
         <template #cell-predicted_value="{ row }">
           {{ row.predicted_value.toFixed(2) }}
@@ -181,6 +190,17 @@ import { getDataSourceList } from '@/api/data_source'
 import { getForecast, getMyTrainTasks, exportForecastExcel } from '@/api/prediction'
 import * as echarts from 'echarts'
 import EnhancedTable from '@/components/EnhancedTable.vue'
+import { useFormPersistence } from '@/composables/useFormPersistence'
+
+const { loadStored, saveToStorage } = useFormPersistence('forecast_result_filters', {
+  dataSourceId: null,
+  modelId: null,
+  storeCode: '',
+  matnr: '',
+  dateRange: null,
+  sortBy: 'forecast_date',
+  sortOrder: 'asc',
+})
 
 const dataSources = ref([])
 const models = ref([])
@@ -190,15 +210,10 @@ const forecastData = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
-const filters = reactive({
-  dataSourceId: null,
-  modelId: null,
-  storeCode: '',
-  matnr: '',
-  dateRange: null,
-  sortBy: 'forecast_date',
-  sortOrder: 'asc',
-})
+const filters = reactive(loadStored())
+
+// 表单值变化时自动保存
+watch(filters, () => saveToStorage(filters), { deep: true })
 
 const hasData = computed(() => forecastData.value.length > 0)
 
@@ -291,13 +306,16 @@ function handleSearch() {
 }
 
 function handleReset() {
-  filters.dataSourceId = null
-  filters.modelId = null
-  filters.storeCode = ''
-  filters.matnr = ''
-  filters.dateRange = null
-  filters.sortBy = 'forecast_date'
-  filters.sortOrder = 'asc'
+  const defaults = {
+    dataSourceId: null,
+    modelId: null,
+    storeCode: '',
+    matnr: '',
+    dateRange: null,
+    sortBy: 'forecast_date',
+    sortOrder: 'asc',
+  }
+  Object.assign(filters, defaults)
   page.value = 1
   pageSize.value = 20
   forecastData.value = []
@@ -618,6 +636,10 @@ watch(chartMode, () => {
 
 onMounted(() => {
   loadDataSources()
+  // 如果有持久化的数据源，自动加载对应的模型列表
+  if (filters.dataSourceId) {
+    loadModels()
+  }
   resizeHandler = () => {
     if (chartInstance) chartInstance.resize()
   }

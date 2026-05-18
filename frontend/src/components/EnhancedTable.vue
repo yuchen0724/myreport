@@ -34,9 +34,14 @@
       <el-table-column v-if="enableExpand && dynamicColumns.length > expandThreshold" type="expand">
         <template #default="{ row }">
           <div class="expand-detail">
-            <el-descriptions :column="2" border size="small">
-              <el-descriptions-item v-for="(val, key) in row" :key="key" :label="key">
-                {{ val !== null && val !== undefined ? val : '-' }}
+              <el-descriptions :column="2" border size="small" style="max-width: 800px">
+                <el-descriptions-item v-for="col in derivedColumns" :key="col" :label="expandLabel(col)" :span="1">
+                  <template v-if="col === 'predicted_value' || col === 'lower_bound' || col === 'upper_bound'">
+                    {{ row[col] != null ? Number(row[col]).toFixed(2) : '-' }}
+                </template>
+                <template v-else>
+                  {{ row[col] !== null && row[col] !== undefined ? row[col] : '-' }}
+                </template>
               </el-descriptions-item>
             </el-descriptions>
           </div>
@@ -111,18 +116,51 @@ const props = defineProps({
   maxHeight: { type: [Number, String], default: 500 },
   height: { type: [Number, String], default: undefined },
   tableId: { type: String, default: 'default' },
+  columnLabels: { type: Object, default: () => ({}) },
 })
 
 const emit = defineEmits(['re-query'])
 
 const storage = useTableStorage(props.tableId)
 
+// 行展开时字段名→中文映射
+const FIELD_LABEL_MAP = {
+  id: 'ID',
+  store_code: '门店编码',
+  matnr: '商品编码',
+  forecast_date: '预测日期',
+  predicted_value: '预测值',
+  lower_bound: '置信下限',
+  upper_bound: '置信上限',
+  created_at: '创建时间',
+  updated_at: '更新时间',
+  deleted_at: '删除时间',
+  status: '状态',
+  model_id: '模型ID',
+  task_id: '任务ID',
+  data_source_id: '数据源ID',
+  data_source_name: '数据源',
+  error_message: '错误信息',
+  result_count: '结果数量',
+  forecast_days: '预测天数',
+  sorted_date: '日期',
+  store_name: '门店名称',
+  matnr_name: '商品名称',
+}
+
+function expandLabel(key) {
+  return props.columnLabels[key] || FIELD_LABEL_MAP[key] || key
+}
+
 // 列名推导：优先 props.columns，其次从 data[0] 自动推导
 const derivedColumns = computed(() => {
   if (props.columns && props.columns.length > 0) return props.columns
   if (props.data && props.data.length > 0) {
-    return Object.keys(props.data[0])
+    const keys = Object.keys(props.data[0])
+    console.log('[EnhancedTable] derivedColumns from data:', keys)
+    return keys
   }
+  console.log('[EnhancedTable] derivedColumns: empty, data.length=', props.data?.length, 'columns.length=', props.columns?.length)
   return []
 })
 
