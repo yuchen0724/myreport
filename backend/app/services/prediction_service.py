@@ -156,7 +156,7 @@ class PredictionService:
         logger.info(f"[训练] 活跃分组数={len(all_groups)}")
 
         # 每 N 个分组合并为一个批次，减少 DB 写入次数和模型 fit 调用
-        BATCH_GROUP_SIZE = batch_unit
+        BATCH_GROUP_SIZE = min(batch_unit, 200)  # 上限 200，防止单批过大导致 Doris 超时
         logger.info(f"[训练] batch_unit={batch_unit}, BATCH_GROUP_SIZE={BATCH_GROUP_SIZE}")
         batches = [all_groups[i:i+BATCH_GROUP_SIZE] for i in range(0, len(all_groups), BATCH_GROUP_SIZE)]
         total_batches = len(batches)

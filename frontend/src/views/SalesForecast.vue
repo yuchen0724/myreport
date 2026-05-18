@@ -27,7 +27,7 @@
             <el-input-number v-model="form.batchSize" :min="50" :max="1000" :step="50" />
           </el-form-item>
           <el-form-item label="每批分组数">
-            <el-input-number v-model="form.batchUnit" :min="1" :max="50" :step="1" />
+            <el-input-number v-model="form.batchUnit" :min="1" :max="200" :step="1" />
           </el-form-item>
         </div>
         <!-- 第二行：查询语句（独占双行宽度） -->
