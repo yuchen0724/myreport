@@ -148,24 +148,15 @@
         :searchable="true"
         :max-height="500"
       >
-        <el-table-column prop="store_code" label="门店编码" width="120" show-overflow-tooltip />
-        <el-table-column prop="matnr" label="商品编码" width="160" show-overflow-tooltip />
-        <el-table-column prop="forecast_date" label="预测日期" width="130" />
-        <el-table-column prop="predicted_value" label="预测值" width="140">
-          <template #default="{ row }">
-            {{ row.predicted_value.toFixed(2) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="lower_bound" label="下限" width="140">
-          <template #default="{ row }">
-            {{ row.lower_bound != null ? row.lower_bound.toFixed(2) : '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="upper_bound" label="上限" width="140">
-          <template #default="{ row }">
-            {{ row.upper_bound != null ? row.upper_bound.toFixed(2) : '-' }}
-          </template>
-        </el-table-column>
+        <template #cell-predicted_value="{ row }">
+          {{ row.predicted_value.toFixed(2) }}
+        </template>
+        <template #cell-lower_bound="{ row }">
+          {{ row.lower_bound != null ? row.lower_bound.toFixed(2) : '-' }}
+        </template>
+        <template #cell-upper_bound="{ row }">
+          {{ row.upper_bound != null ? row.upper_bound.toFixed(2) : '-' }}
+        </template>
       </EnhancedTable>
 
       <div class="pagination-wrapper" v-if="total > 0">
