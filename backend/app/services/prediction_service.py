@@ -172,14 +172,13 @@ class PredictionService:
         for batch_groups in batches:
             batch_no += 1
 
-            # 构造当前批次 SQL：用 IN 匹配所有分组
-            # 分批用 OR 条件 (group_id=a AND store_code='b' AND matnr='c') OR ...
-            group_conditions = []
-            for gid, scode, mnr in batch_groups:
-                group_conditions.append(
-                    f"(group_id={gid} AND store_code='{scode}' AND matnr='{mnr}')"
-                )
-            where_groups = " OR ".join(group_conditions)
+            # 构造当前批次 SQL：用元组 IN 匹配所有分组
+            # WHERE (group_id, store_code, matnr) IN ((1,'a','x'), ...) 比 OR 拼接更简洁高效
+            group_tuples = ", ".join(
+                f"({gid}, '{scode}', '{mnr}')"
+                for gid, scode, mnr in batch_groups
+            )
+            where_groups = f"(group_id, store_code, matnr) IN ({group_tuples})"
 
             sql = f"""\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
