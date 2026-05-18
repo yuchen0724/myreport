@@ -133,12 +133,26 @@ class PredictionService:
 
         # 0. 快速获取最近活跃分组列表：取前一天峰值排前 N 的分组
         #    25.7亿行数据，GROUP BY 全表不可行，改为最近一天优先取高频分组
+        #    活跃分组子查询会被训练 SQL 和测试 SQL 共用（JOIN 方式），避免拼 IN/OR 长条件
         latest_day = date.today() - timedelta(days=1)
+        top_groups_dt = latest_day.strftime('%Y%m%d')
+        top_groups_subquery = f"""(
+            SELECT group_id, store_code, matnr
+            FROM {table}
+            WHERE dt >= '{top_groups_dt}'
+              AND exclude_flag != 1
+              AND (service_flag != 1 OR service_flag IS NULL)
+              AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
+            GROUP BY group_id, store_code, matnr
+            ORDER BY COUNT(*) DESC
+            LIMIT {batch_size}
+        ) top_g"""
+
         group_count_sql = f"""\
             SELECT /*+ SET_VAR(query_timeout=120) */
                 group_id, store_code, matnr, COUNT(*) as cnt
             FROM {table}
-            WHERE dt >= '{latest_day.strftime('%Y%m%d')}'
+            WHERE dt >= '{top_groups_dt}'
               AND exclude_flag != 1
               AND (service_flag != 1 OR service_flag IS NULL)
               AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
@@ -182,14 +196,18 @@ class PredictionService:
 
             sql = f"""\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
-                    dt, group_id, store_code, matnr, {TARGET_COL}
-                FROM {table}
-                WHERE dt >= '{start_date.strftime('%Y%m%d')}' AND dt < '{train_end_date.strftime('%Y%m%d')}'
-                  AND exclude_flag != 1
-                  AND (service_flag != 1 OR service_flag IS NULL)
-                  AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
+                    a.dt, a.group_id, a.store_code, a.matnr, a.{TARGET_COL}
+                FROM {table} a
+                JOIN {top_groups_subquery}
+                  ON a.group_id = top_g.group_id
+                 AND a.store_code = top_g.store_code
+                 AND a.matnr = top_g.matnr
+                WHERE a.dt >= '{start_date.strftime('%Y%m%d')}' AND a.dt < '{train_end_date.strftime('%Y%m%d')}'
+                  AND a.exclude_flag != 1
+                  AND (a.service_flag != 1 OR a.service_flag IS NULL)
+                  AND (a.shopping_bag_flag != 1 OR a.shopping_bag_flag IS NULL)
                   AND ({where_groups})
-                ORDER BY store_code, matnr, dt
+                ORDER BY a.store_code, a.matnr, a.dt
             """
             logger.info(f"[训练] 分批批次 batch={batch_no}/{total_batches}, 该批分组数={len(batch_groups)}, SQL: {sql.replace(chr(10), ' ').strip()}")
 
@@ -259,22 +277,20 @@ class PredictionService:
         test_sample_count = 0
         try:
             # 查询所有活跃分组的历史数据（含训练范围，供特征工程生成 lag 特征）
-            test_conditions = []
-            for gid, scode, mnr in all_groups:
-                test_conditions.append(
-                    f"(group_id={gid} AND store_code='{scode}' AND matnr='{mnr}')"
-                )
-            where_test = " OR ".join(test_conditions)
+            # 用 JOIN 子查询替代 OR 拼接，避免超长 SQL
             test_sql = f"""\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
-                    dt, group_id, store_code, matnr, {TARGET_COL}
-                FROM {table}
-                WHERE dt >= '{start_date.strftime('%Y%m%d')}' AND dt < '{end_date.strftime('%Y%m%d')}'
-                  AND exclude_flag != 1
-                  AND (service_flag != 1 OR service_flag IS NULL)
-                  AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
-                  AND ({where_test})
-                ORDER BY store_code, matnr, dt
+                    a.dt, a.group_id, a.store_code, a.matnr, a.{TARGET_COL}
+                FROM {table} a
+                JOIN {top_groups_subquery}
+                  ON a.group_id = top_g.group_id
+                 AND a.store_code = top_g.store_code
+                 AND a.matnr = top_g.matnr
+                WHERE a.dt >= '{start_date.strftime('%Y%m%d')}' AND a.dt < '{end_date.strftime('%Y%m%d')}'
+                  AND a.exclude_flag != 1
+                  AND (a.service_flag != 1 OR a.service_flag IS NULL)
+                  AND (a.shopping_bag_flag != 1 OR a.shopping_bag_flag IS NULL)
+                ORDER BY a.store_code, a.matnr, a.dt
             """
             logger.info("[评估] 查询测试集数据（含历史范围供特征工程）...")
             test_rows, test_cols = execute_query(ds, test_sql)
