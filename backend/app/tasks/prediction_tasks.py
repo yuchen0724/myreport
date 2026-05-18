@@ -280,12 +280,17 @@ def _train_and_predict_with_progress(
     user_id: Optional[int] = None,
     batch_size: Optional[int] = None,
     batch_unit: Optional[int] = None,
+    is_retry: bool = False,
 ) -> tuple:
     """带进度汇报的训练+预测三阶段流水线
 
     阶段1: 拉取+训练 (0-55%)
     阶段2: 销售预测 (55-95%)
     阶段3: 完成 (100%)
+
+    Args:
+        is_retry: 是否为 Celery 重试调用。重试时复用已有的 DB 模型记录，
+                  不会创建新记录，避免残留 state。
 
     Returns:
         (model_id, result_count) — 模型ID和预测结果条数
@@ -300,15 +305,36 @@ def _train_and_predict_with_progress(
         if not ds:
             raise ValueError(f"数据源 {data_source_id} 不存在")
 
-        # 1. 创建模型记录
-        model_record = service.model_repo.create(
-            data_source_id=data_source_id,
-            model_type="lightgbm",
-            status="training",
-            task_id=task_id,
-            created_by=user_id,
-        )
-        _update_progress(task_id, "准备数据", f"查询活跃分组，数据源={data_source_id}", model_record.id, percent=3)
+        # 重试时复用已有 DB 记录，不创建新记录
+        if is_retry:
+            model_record = db.query(PredictionModel).filter(
+                PredictionModel.task_id == task_id
+            ).first()
+            if not model_record:
+                # 极端情况找不到时才创建新记录
+                model_record = service.model_repo.create(
+                    data_source_id=data_source_id,
+                    model_type="lightgbm",
+                    status="training",
+                    task_id=task_id,
+                    created_by=user_id,
+                )
+            else:
+                _update_progress(task_id, "准备数据",
+                                 f"重试中，复用模型记录 id={model_record.id}",
+                                 model_record.id, percent=3)
+        else:
+            # 首次执行：创建模型记录
+            model_record = service.model_repo.create(
+                data_source_id=data_source_id,
+                model_type="lightgbm",
+                status="training",
+                task_id=task_id,
+                created_by=user_id,
+            )
+            _update_progress(task_id, "准备数据",
+                             f"查询活跃分组，数据源={data_source_id}",
+                             model_record.id, percent=3)
 
         result_count = 0
 
@@ -575,6 +601,7 @@ def train_and_predict_prediction_async(
             user_id=user_id,
             batch_size=batch_size,
             batch_unit=batch_unit,
+            is_retry=self.request.retries > 0,
         )
         return {"model_id": model_id, "result_count": result_count, "status": "success"}
     except Exception as e:
