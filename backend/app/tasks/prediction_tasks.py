@@ -556,7 +556,7 @@ def train_prediction_model_async(
         raise self.retry(exc=e, countdown=300)
 
 
-@celery_app.task(bind=True, max_retries=1, soft_time_limit=600, time_limit=900)
+@celery_app.task(bind=True, max_retries=1, soft_time_limit=300, time_limit=600)
 def train_and_predict_prediction_async(
     self,
     data_source_id: int,
