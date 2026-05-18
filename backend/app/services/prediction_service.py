@@ -254,9 +254,12 @@ class PredictionService:
             raise ValueError("训练数据不足（无有效特征行）")
 
         # 评估：用所有分组的测试集数据（最后 7 天）
+        # 注意：测试 SQL 需要从 start_date 起查，确保 build_features_from_history
+        # 能生成 lag_28 等特征，然后只过滤 dt >= test_split_date 的样本来评估
         mae_val, rmse_val = 0.0, 0.0
+        test_sample_count = 0
         try:
-            # 查询所有活跃分组的测试数据
+            # 查询所有活跃分组的历史数据（含训练范围，供特征工程生成 lag 特征）
             test_conditions = []
             for gid, scode, mnr in all_groups:
                 test_conditions.append(
@@ -267,27 +270,32 @@ class PredictionService:
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
                     dt, group_id, store_code, matnr, {TARGET_COL}
                 FROM {table}
-                WHERE dt >= '{test_split_date.strftime('%Y%m%d')}' AND dt < '{end_date.strftime('%Y%m%d')}'
+                WHERE dt >= '{start_date.strftime('%Y%m%d')}' AND dt < '{end_date.strftime('%Y%m%d')}'
                   AND exclude_flag != 1
                   AND (service_flag != 1 OR service_flag IS NULL)
                   AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
                   AND ({where_test})
                 ORDER BY store_code, matnr, dt
             """
-            logger.info("[评估] 查询测试集数据...")
+            logger.info("[评估] 查询测试集数据（含历史范围供特征工程）...")
             test_rows, test_cols = execute_query(ds, test_sql)
             if test_rows:
                 test_df = pd.DataFrame(test_rows, columns=test_cols)
                 test_df[TARGET_COL] = pd.to_numeric(test_df[TARGET_COL], errors="coerce").fillna(0)
                 test_df[TARGET_COL] = test_df[TARGET_COL] / 100.0
-                test_feat = build_features_from_history(test_df)
-                test_feat = test_feat.dropna(subset=feature_cols)
-                if len(test_feat) > 0:
+                test_all_feat = build_features_from_history(test_df)
+                test_feat = test_all_feat.dropna(subset=feature_cols)
+                # 只过滤测试时间段的行进行评估
+                test_feat = test_feat[
+                    (test_feat["dt"] >= test_split_date) & (test_feat["dt"] < end_date)
+                ]
+                test_sample_count = len(test_feat)
+                if test_sample_count > 0:
                     y_pred = model.predict(test_feat[feature_cols])
                     y_true = test_feat[TARGET_COL].values
                     mae_val = float(np.mean(np.abs(y_true - y_pred)))
                     rmse_val = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
-                    logger.info(f"[评估] 测试集 MAE={mae_val:.4f}, RMSE={rmse_val:.4f}, 样本数={len(test_feat)}")
+                    logger.info(f"[评估] 测试集 MAE={mae_val:.4f}, RMSE={rmse_val:.4f}, 样本数={test_sample_count}")
         except Exception as e:
             logger.warning(f"[评估] 测试集评估失败: {e}")
 
