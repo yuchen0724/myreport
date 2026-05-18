@@ -127,6 +127,8 @@ class PredictionService:
 
         end_date = date.today()
         start_date = end_date - timedelta(days=days)
+        test_split_date = end_date - timedelta(days=7)  # 最后 7 天为测试集
+        train_end_date = test_split_date
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
 
         # 0. 快速获取最近活跃分组列表：取前一天峰值排前 N 的分组
@@ -183,7 +185,7 @@ class PredictionService:
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
                     dt, group_id, store_code, matnr, {TARGET_COL}
                 FROM {table}
-                WHERE dt >= '{start_date.strftime('%Y%m%d')}' AND dt < '{end_date.strftime('%Y%m%d')}'
+                WHERE dt >= '{start_date.strftime('%Y%m%d')}' AND dt < '{train_end_date.strftime('%Y%m%d')}'
                   AND exclude_flag != 1
                   AND (service_flag != 1 OR service_flag IS NULL)
                   AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
@@ -251,20 +253,43 @@ class PredictionService:
         if total_trained_rows == 0:
             raise ValueError("训练数据不足（无有效特征行）")
 
-        # 评估：用最后一批数据
+        # 评估：用所有分组的测试集数据（最后 7 天）
         mae_val, rmse_val = 0.0, 0.0
-        last_chunk = locals().get("chunk_df")
-        if last_chunk is not None and len(last_chunk) > 0:
-            try:
-                eval_feat = build_features_from_history(last_chunk.tail(7).copy())
-                eval_feat = eval_feat.dropna(subset=feature_cols)
-                if len(eval_feat) > 0:
-                    y_pred = model.predict(eval_feat[feature_cols])
-                    y_true = eval_feat[TARGET_COL].values
+        try:
+            # 查询所有活跃分组的测试数据
+            test_conditions = []
+            for gid, scode, mnr in all_groups:
+                test_conditions.append(
+                    f"(group_id={gid} AND store_code='{scode}' AND matnr='{mnr}')"
+                )
+            where_test = " OR ".join(test_conditions)
+            test_sql = f"""\
+                SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
+                    dt, group_id, store_code, matnr, {TARGET_COL}
+                FROM {table}
+                WHERE dt >= '{test_split_date.strftime('%Y%m%d')}' AND dt < '{end_date.strftime('%Y%m%d')}'
+                  AND exclude_flag != 1
+                  AND (service_flag != 1 OR service_flag IS NULL)
+                  AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
+                  AND ({where_test})
+                ORDER BY store_code, matnr, dt
+            """
+            logger.info("[评估] 查询测试集数据...")
+            test_rows, test_cols = execute_query(ds, test_sql)
+            if test_rows:
+                test_df = pd.DataFrame(test_rows, columns=test_cols)
+                test_df[TARGET_COL] = pd.to_numeric(test_df[TARGET_COL], errors="coerce").fillna(0)
+                test_df[TARGET_COL] = test_df[TARGET_COL] / 100.0
+                test_feat = build_features_from_history(test_df)
+                test_feat = test_feat.dropna(subset=feature_cols)
+                if len(test_feat) > 0:
+                    y_pred = model.predict(test_feat[feature_cols])
+                    y_true = test_feat[TARGET_COL].values
                     mae_val = float(np.mean(np.abs(y_true - y_pred)))
                     rmse_val = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
-            except Exception:
-                pass
+                    logger.info(f"[评估] 测试集 MAE={mae_val:.4f}, RMSE={rmse_val:.4f}, 样本数={len(test_feat)}")
+        except Exception as e:
+            logger.warning(f"[评估] 测试集评估失败: {e}")
 
         return (model, feature_cols, total_trained_rows, train_start, train_end, mae_val, rmse_val, "", batch_no)
 
