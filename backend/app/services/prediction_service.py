@@ -1,6 +1,7 @@
 """销售预测服务 - LightGBM 训练与推理"""
 
 import os
+import signal
 import warnings
 import logging
 import numpy as np
@@ -190,43 +191,62 @@ class PredictionService:
                 ORDER BY store_code, matnr, dt
             """
             logger.info(f"[训练] 分批批次 batch={batch_no}/{total_batches}, 该批分组数={len(batch_groups)}, SQL: {sql.replace(chr(10), ' ').strip()}")
-            rows, cols = execute_query(ds, sql)
-            if not rows:
-                logger.info(f"[训练] 批次 {batch_no} 无数据，跳过")
+
+            # 单批超时保护：超时则跳过该批，不打断整个任务
+            batch_timeout = get_settings().prediction_task_batch_timeout
+            _batch_ok = True
+            def _timeout_handler(signum, frame):
+                raise TimeoutError(f"批次 {batch_no} 超时 ({batch_timeout}s)")
+
+            old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+            signal.alarm(batch_timeout)
+            _skip_batch = False
+            try:
+                rows, cols = execute_query(ds, sql)
+                if not rows:
+                    logger.info(f"[训练] 批次 {batch_no} 无数据，跳过")
+                    _skip_batch = True
+
+                if not _skip_batch:
+                    chunk_df = pd.DataFrame(rows, columns=cols)
+                    chunk_df[TARGET_COL] = pd.to_numeric(chunk_df[TARGET_COL], errors="coerce").fillna(0)
+                    chunk_df[TARGET_COL] = chunk_df[TARGET_COL] / 100.0
+
+                    if fetch_callback:
+                        fetch_callback(batch_no, total_batches, len(rows))
+
+                    # 特征工程
+                    feat = build_features_from_history(chunk_df)
+                    feat = feat.dropna(subset=feature_cols)
+
+                    if len(feat) > 0:
+                        # 增量训练
+                        X = feat[feature_cols].values
+                        y = feat[TARGET_COL].values
+
+                        if first_fit:
+                            model.fit(X, y)
+                            first_fit = False
+                        else:
+                            model.fit(X, y, init_model=model)
+
+                        total_trained_rows += len(feat)
+
+                        if train_callback:
+                            train_callback(batch_no, total_batches, len(feat))
+
+                        # 每批训练完成后立即回调预测（不缓存全量数据）
+                        if predict_callback:
+                            predict_callback(chunk_df, batch_no, total_batches)
+            except TimeoutError as e:
+                logger.warning(f"[训练] 批次 {batch_no}/{total_batches} 超时({batch_timeout}s)，跳过该批")
+                _skip_batch = True
+            finally:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old_handler)
+
+            if _skip_batch:
                 continue
-
-            chunk_df = pd.DataFrame(rows, columns=cols)
-            chunk_df[TARGET_COL] = pd.to_numeric(chunk_df[TARGET_COL], errors="coerce").fillna(0)
-            chunk_df[TARGET_COL] = chunk_df[TARGET_COL] / 100.0
-
-            if fetch_callback:
-                fetch_callback(batch_no, total_batches, len(rows))
-
-            # 特征工程
-            feat = build_features_from_history(chunk_df)
-            feat = feat.dropna(subset=feature_cols)
-
-            if len(feat) == 0:
-                continue
-
-            # 增量训练
-            X = feat[feature_cols].values
-            y = feat[TARGET_COL].values
-
-            if first_fit:
-                model.fit(X, y)
-                first_fit = False
-            else:
-                model.fit(X, y, init_model=model)
-
-            total_trained_rows += len(feat)
-
-            if train_callback:
-                train_callback(batch_no, total_batches, len(feat))
-
-            # 每批训练完成后立即回调预测（不缓存全量数据）
-            if predict_callback:
-                predict_callback(chunk_df, batch_no, total_batches)
 
         if total_trained_rows == 0:
             raise ValueError("训练数据不足（无有效特征行）")

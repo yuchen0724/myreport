@@ -82,8 +82,9 @@ class Settings(BaseSettings):
 
     # Prediction Celery task 参数
     prediction_task_max_retries: int = 1
-    prediction_task_soft_time_limit: int = 300
-    prediction_task_time_limit: int = 600
+    prediction_task_soft_time_limit: int = 1200
+    prediction_task_time_limit: int = 1800
+    prediction_task_batch_timeout: int = 120  # 单批超时（秒），超时则跳过该批
 
     @field_validator("database_url", "secret_key")
     @classmethod
