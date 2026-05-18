@@ -189,13 +189,14 @@ class PredictionService:
         for batch_groups in batches:
             batch_no += 1
 
-            # 构造当前批次 SQL
-            group_conditions = []
-            for gid, scode, mnr in batch_groups:
-                group_conditions.append(
-                    f"(src.group_id={gid} AND src.store_code='{scode}' AND src.matnr='{mnr}')"
-                )
-            where_groups = " OR ".join(group_conditions)
+            # 每个分批通过独立的子查询 JOIN 确认分组匹配，不用 OR 或 IN
+            batch_values = " UNION ALL ".join(
+                f"SELECT {gid} AS group_id, '{scode}' AS store_code, '{mnr}' AS matnr"
+                for gid, scode, mnr in batch_groups
+            )
+            batch_subquery = f"""(
+                {batch_values}
+            ) batch_g"""
 
             sql = f"""{cte_prefix}\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
@@ -205,11 +206,14 @@ class PredictionService:
                   ON src.group_id = top_g.group_id
                  AND src.store_code = top_g.store_code
                  AND src.matnr = top_g.matnr
+                JOIN {batch_subquery}
+                  ON src.group_id = batch_g.group_id
+                 AND src.store_code = batch_g.store_code
+                 AND src.matnr = batch_g.matnr
                 WHERE src.dt >= '{start_date.strftime('%Y%m%d')}' AND src.dt < '{train_end_date.strftime('%Y%m%d')}'
                   AND src.exclude_flag != 1
                   AND (src.service_flag != 1 OR src.service_flag IS NULL)
                   AND (src.shopping_bag_flag != 1 OR src.shopping_bag_flag IS NULL)
-                  AND ({where_groups})
                 ORDER BY src.store_code, src.matnr, src.dt
             """
             logger.info(f"[训练] 分批批次 batch={batch_no}/{total_batches}, 该批分组数={len(batch_groups)}, SQL: {sql.replace(chr(10), ' ').strip()}")
