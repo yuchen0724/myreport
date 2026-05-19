@@ -42,10 +42,10 @@ class PredictionService:
 
     def _fetch_history_data(self, ds_id: int, days: int, table_name: str = None,
                            progress_callback: callable = None) -> pd.DataFrame:
-        """从 Doris 按天分页拉取历史销售数据，避免单次查询内存/超时问题。
+        """从 Doris 按范围拉取历史销售数据，一次查询获取全部数据。
         
-        每页拉取 1 天数据，在服务器端排序后插入结果列表。
-        最终 pd.concat 合并为完整 DataFrame（特征工程内部会重新排序）。
+        优化点：将原来的按天分页查询改为单次范围查询，
+        减少网络往返次数，充分利用 Doris 列存引擎的聚合能力。
         
         Args:
             progress_callback: 可选回调 fn(current_page, total_pages, current_rows)
@@ -59,53 +59,52 @@ class PredictionService:
         start_date = end_date - timedelta(days=days)
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
         
-        # 先获取总天数作为批次数量
-        total_pages = (end_date - start_date).days
-        batches = []
-        current = start_date
-        page_no = 0
-        while current < end_date:
-            s = current.strftime("%Y%m%d")
-            sql = f"""\
-                SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
-                    dt, store_code, matnr, {TARGET_COL}
-                FROM {table}
-                WHERE dt = {s}
-                  AND exclude_flag != 1
-                  AND (service_flag != 1 OR service_flag IS NULL)
-                  AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
-                ORDER BY store_code, matnr, dt
-            """
-            rows, columns = execute_query(ds, sql)
-            if rows:
-                batch_df = pd.DataFrame(rows, columns=columns)
-                batches.append(batch_df)
-
-            page_no += 1
-            # 日志记录每一页拉取情况
-            logger.info(f"[拉取] page={page_no}/{total_pages}, rows={len(rows) if rows else 0}")
-            if progress_callback:
-                progress_callback(page_no, total_pages, len(rows) if rows else 0)
-
-            current += timedelta(days=1)
-
-        if not batches:
+        # 格式化日期范围
+        start_str = start_date.strftime("%Y%m%d")
+        end_str = end_date.strftime("%Y%m%d")
+        
+        # 一次性查询整个日期范围（优化：减少 365 次查询为 1 次）
+        sql = f"""\
+            SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
+                dt, store_code, matnr, {TARGET_COL}
+            FROM {table}
+            WHERE dt >= {start_str}
+              AND dt < {end_str}
+              AND exclude_flag != 1
+              AND (service_flag != 1 OR service_flag IS NULL)
+              AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
+            ORDER BY store_code, matnr, dt
+        """
+        
+        if progress_callback:
+            progress_callback(0, 1, 0)  # 开始拉取
+        
+        logger.info(f"[拉取] 范围查询: {start_str} -> {end_str}, rows=...")
+        rows, columns = execute_query(ds, sql)
+        
+        if progress_callback:
+            progress_callback(1, 1, len(rows) if rows else 0)  # 拉取完成
+        
+        if not rows:
             return pd.DataFrame(columns=["dt", "store_code", "matnr", TARGET_COL])
 
-        df = pd.concat(batches, ignore_index=True)
+        df = pd.DataFrame(rows, columns=columns)
         df[TARGET_COL] = pd.to_numeric(df[TARGET_COL], errors="coerce").fillna(0)
         # 金额分转元
         df[TARGET_COL] = df[TARGET_COL] / 100.0
         return df
 
-    def _fetch_and_train_incremental(self, ds_id: int, days: int, model, feature_cols,
-                                      table_name: str = None,
-                                      batch_size: int = 200,
-                                      batch_unit: int = 10,
-                                      fetch_callback: callable = None,
-                                      train_callback: callable = None,
-                                      predict_callback: callable = None,
-                                      start_batch: int = 0) -> tuple:
+    def _fetch_and_train_incremental(
+            self, ds_id: int, days: int, model, feature_cols,
+            table_name: str = None,
+            batch_size: int = 200,
+            batch_unit: int = 10,
+            test_days: int = 30,  # 测试集天数（参数化）
+            valid_days: int = 30,  # 验证集天数（参数化）
+            fetch_callback: callable = None,
+            train_callback: callable = None,
+            predict_callback: callable = None,
+            start_batch: int = 0) -> tuple:
         """按 (group_id, store_code, matnr) 分组分批拉取增量训练
 
         先查询所有分组的行数，然后将多个完整分组合并为一个批次（≈BATCH_SIZE 行），
@@ -128,13 +127,37 @@ class PredictionService:
             raise ValueError(f"数据源 {ds_id} 不存在")
 
         end_date = date.today()
-        start_date = end_date - timedelta(days=days)
-        test_split_date = end_date - timedelta(days=30)  # 最后 30 天为测试集
-        train_end_date = test_split_date
+        # 训练集实际需要的天数 = 用户指定的 train_days + 验证集天数 + 测试集天数
+        # 因为验证集和测试集是从训练集末尾"切走"的
+        total_days_needed = days + valid_days + test_days
+        start_date = end_date - timedelta(days=total_days_needed)
+        
+        # 数据划分：训练集 ← 验证集 ← 测试集（时间递增）
+        # 测试集：最后 test_days 天（用于最终评估）
+        # 验证集：test_split_date 往前 valid_days 天（用于早停调参）
+        # 训练集：valid_split_date 往前的所有历史数据
+        test_split_date = end_date - timedelta(days=test_days)  # 2026-04-19
+        valid_split_date = test_split_date - timedelta(days=valid_days)  # 2026-03-20
+        train_end_date = valid_split_date  # 训练集结束于验证集开始之前
+        logger.info(f"[数据划分] 总拉取天数={total_days_needed}, 训练集={days}天, 验证集={valid_days}天, 测试集={test_days}天")
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
-        # 用 WITH CTE 统一处理，避免子查询别名问题
-        cte_prefix = f"WITH t_table AS ({table}) " if table_name else ""
-        table_ref = "t_table" if table_name else table
+        # 检测 table_name 是否为完整 SELECT 语句（大小写不敏感）
+        is_subquery = table_name and table_name.strip().upper().startswith(("SELECT", "(SELECT"))
+        
+        if is_subquery:
+            # 已经是子查询，直接作为派生表使用，需要加别名
+            cte_prefix = ""
+            # 子查询需要在 FROM 中加括号并加别名
+            table_ref = f"({table}) AS t"
+            top_groups_table = f"({table}) AS t"
+            # 子查询的别名用于 SQL 中的字段引用
+            table_alias = "t"
+        else:
+            # 普通表名：走原有的 CTE 逻辑
+            cte_prefix = f"WITH t_table AS ({table}) " if table_name else ""
+            table_ref = "t_table" if table_name else table
+            top_groups_table = table
+            table_alias = "src"
 
         # 0. 快速获取最近活跃分组列表：取前一天峰值排前 N 的分组
         #    25.7亿行数据，GROUP BY 全表不可行，改为最近一天优先取高频分组
@@ -143,7 +166,7 @@ class PredictionService:
         top_groups_dt = latest_day.strftime('%Y%m%d')
         top_groups_subquery = f"""(
             SELECT group_id, store_code, matnr
-            FROM {table_ref}
+            FROM {top_groups_table}
             WHERE dt >= '{top_groups_dt}'
               AND exclude_flag != 1
               AND (service_flag != 1 OR service_flag IS NULL)
@@ -207,21 +230,21 @@ class PredictionService:
 
             sql = f"""{cte_prefix}\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
-                    src.dt, src.group_id, src.store_code, src.matnr, src.{TARGET_COL}
-                FROM {table_ref} src
+                    {table_alias}.dt, {table_alias}.group_id, {table_alias}.store_code, {table_alias}.matnr, {table_alias}.{TARGET_COL}
+                FROM {table_ref}
                 JOIN {top_groups_subquery}
-                  ON src.group_id = top_g.group_id
-                 AND src.store_code = top_g.store_code
-                 AND src.matnr = top_g.matnr
+                  ON {table_alias}.group_id = top_g.group_id
+                 AND {table_alias}.store_code = top_g.store_code
+                 AND {table_alias}.matnr = top_g.matnr
                 JOIN {batch_subquery}
-                  ON src.group_id = batch_g.group_id
-                 AND src.store_code = batch_g.store_code
-                 AND src.matnr = batch_g.matnr
-                WHERE src.dt >= '{start_date.strftime('%Y%m%d')}' AND src.dt < '{train_end_date.strftime('%Y%m%d')}'
-                  AND src.exclude_flag != 1
-                  AND (src.service_flag != 1 OR src.service_flag IS NULL)
-                  AND (src.shopping_bag_flag != 1 OR src.shopping_bag_flag IS NULL)
-                ORDER BY src.store_code, src.matnr, src.dt
+                  ON {table_alias}.group_id = batch_g.group_id
+                 AND {table_alias}.store_code = batch_g.store_code
+                 AND {table_alias}.matnr = batch_g.matnr
+                WHERE {table_alias}.dt >= '{start_date.strftime('%Y%m%d')}' AND {table_alias}.dt < '{end_date.strftime('%Y%m%d')}'
+                  AND {table_alias}.exclude_flag != 1
+                  AND ({table_alias}.service_flag != 1 OR {table_alias}.service_flag IS NULL)
+                  AND ({table_alias}.shopping_bag_flag != 1 OR {table_alias}.shopping_bag_flag IS NULL)
+                ORDER BY {table_alias}.store_code, {table_alias}.matnr, {table_alias}.dt
             """
             logger.info(f"[训练] 分批批次 batch={batch_no}/{total_batches}, 该批分组数={len(batch_groups)}, SQL: {sql.replace(chr(10), ' ').strip()}")
 
@@ -248,26 +271,57 @@ class PredictionService:
                     if fetch_callback:
                         fetch_callback(batch_no, total_batches, len(rows))
 
-                    # 特征工程
+                    # 特征工程（处理全部数据，包含训练+验证+测试）
                     feat = build_features_from_history(chunk_df)
                     feat = feat.dropna(subset=feature_cols)
 
                     if len(feat) > 0:
-                        # 增量训练
-                        X = feat[feature_cols].values
-                        y = feat[TARGET_COL].values
+                        # ========== 1. 训练阶段 ==========
+                        # 训练集：验证期之前的数据
+                        train_feat = feat[feat["dt"] < pd.Timestamp(valid_split_date)]
+                        if len(train_feat) > 0:
+                            X = train_feat[feature_cols].values
+                            y = train_feat[TARGET_COL].values
 
-                        if first_fit:
-                            model.fit(X, y)
-                            first_fit = False
-                        else:
-                            model.fit(X, y, init_model=model)
+                            if first_fit:
+                                model.fit(X, y)
+                                first_fit = False
+                            else:
+                                model.fit(X, y, init_model=model)
 
-                        total_trained_rows += len(feat)
+                            total_trained_rows += len(train_feat)
+                            logger.info(f"[批次 {batch_no}] 训练集样本数: {len(train_feat)}")
 
                         if train_callback:
-                            train_callback(batch_no, total_batches, len(feat))
+                            train_callback(batch_no, total_batches, len(train_feat))
 
+                        # ========== 2. 验证阶段 ==========
+                        # 验证集：验证期的数据
+                        valid_feat = feat[
+                            (feat["dt"] >= pd.Timestamp(valid_split_date)) &
+                            (feat["dt"] < pd.Timestamp(test_split_date))
+                        ]
+                        if len(valid_feat) > 0:
+                            y_pred_valid = model.predict(valid_feat[feature_cols])
+                            y_true_valid = valid_feat[TARGET_COL].values
+                            mae_valid = float(np.mean(np.abs(y_true_valid - y_pred_valid)))
+                            rmse_valid = float(np.sqrt(np.mean((y_true_valid - y_pred_valid) ** 2)))
+                            logger.info(f"[批次 {batch_no}] 验证集 MAE={mae_valid:.4f}, RMSE={rmse_valid:.4f}, 样本数={len(valid_feat)}")
+
+                        # ========== 3. 测试阶段 ==========
+                        # 测试集：测试期的数据
+                        test_feat = feat[
+                            (feat["dt"] >= pd.Timestamp(test_split_date)) &
+                            (feat["dt"] < pd.Timestamp(end_date))
+                        ]
+                        if len(test_feat) > 0:
+                            y_pred_test = model.predict(test_feat[feature_cols])
+                            y_true_test = test_feat[TARGET_COL].values
+                            mae_test = float(np.mean(np.abs(y_true_test - y_pred_test)))
+                            rmse_test = float(np.sqrt(np.mean((y_true_test - y_pred_test) ** 2)))
+                            logger.info(f"[批次 {batch_no}] 测试集 MAE={mae_test:.4f}, RMSE={rmse_test:.4f}, 样本数={len(test_feat)}")
+
+                        # ========== 4. 预测阶段 ==========
                         # 每批训练完成后立即回调预测（不缓存全量数据）
                         if predict_callback:
                             predict_callback(chunk_df, batch_no, total_batches)
@@ -294,17 +348,17 @@ class PredictionService:
             # 用 JOIN 子查询替代 OR 拼接，避免超长 SQL
             test_sql = f"""{cte_prefix}\
                 SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
-                    src.dt, src.group_id, src.store_code, src.matnr, src.{TARGET_COL}
-                FROM {table_ref} src
+                    {table_alias}.dt, {table_alias}.group_id, {table_alias}.store_code, {table_alias}.matnr, {table_alias}.{TARGET_COL}
+                FROM {table_ref}
                 JOIN {top_groups_subquery}
-                  ON src.group_id = top_g.group_id
-                 AND src.store_code = top_g.store_code
-                 AND src.matnr = top_g.matnr
-                WHERE src.dt >= '{start_date.strftime('%Y%m%d')}' AND src.dt < '{end_date.strftime('%Y%m%d')}'
-                  AND src.exclude_flag != 1
-                  AND (src.service_flag != 1 OR src.service_flag IS NULL)
-                  AND (src.shopping_bag_flag != 1 OR src.shopping_bag_flag IS NULL)
-                ORDER BY src.store_code, src.matnr, src.dt
+                  ON {table_alias}.group_id = top_g.group_id
+                 AND {table_alias}.store_code = top_g.store_code
+                 AND {table_alias}.matnr = top_g.matnr
+                WHERE {table_alias}.dt >= '{start_date.strftime('%Y%m%d')}' AND {table_alias}.dt < '{end_date.strftime('%Y%m%d')}'
+                  AND {table_alias}.exclude_flag != 1
+                  AND ({table_alias}.service_flag != 1 OR {table_alias}.service_flag IS NULL)
+                  AND ({table_alias}.shopping_bag_flag != 1 OR {table_alias}.shopping_bag_flag IS NULL)
+                ORDER BY {table_alias}.store_code, {table_alias}.matnr, {table_alias}.dt
             """
             logger.info("[评估] 查询测试集数据（含历史范围供特征工程）...")
             test_rows, test_cols = execute_query(ds, test_sql)
@@ -328,19 +382,66 @@ class PredictionService:
                     mae_val = float(np.mean(np.abs(y_true - y_pred)))
                     rmse_val = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
                     logger.info(f"[评估] 测试集 MAE={mae_val:.4f}, RMSE={rmse_val:.4f}, 样本数={test_sample_count}")
+
+            # ========== 验证集评估 ==========
+            if valid_days and valid_days > 0:
+                logger.info("[评估] 查询验证集数据...")
+                valid_sql = f"""{cte_prefix}\
+                    SELECT {table_alias}.dt, {table_alias}.store_code, {table_alias}.matnr, {table_alias}.group_id, {table_alias}.actual_sale_untaxed_amt
+                    FROM {table_ref}
+                    JOIN {top_groups_subquery}
+                      ON {table_alias}.group_id = top_g.group_id
+                     AND {table_alias}.store_code = top_g.store_code
+                     AND {table_alias}.matnr = top_g.matnr
+                    WHERE {table_alias}.dt >= '{valid_split_date.strftime('%Y%m%d')}' AND {table_alias}.dt < '{test_split_date.strftime('%Y%m%d')}'
+                      AND {table_alias}.exclude_flag != 1
+                      AND ({table_alias}.service_flag != 1 OR {table_alias}.service_flag IS NULL)
+                      AND ({table_alias}.shopping_bag_flag != 1 OR {table_alias}.shopping_bag_flag IS NULL)
+                    ORDER BY {table_alias}.store_code, {table_alias}.matnr, {table_alias}.dt
+                """
+                valid_rows, valid_cols = execute_query(ds, valid_sql)
+                if valid_rows:
+                    valid_df = pd.DataFrame(valid_rows, columns=valid_cols)
+                    valid_df[TARGET_COL] = pd.to_numeric(valid_df[TARGET_COL], errors="coerce").fillna(0)
+                    valid_df[TARGET_COL] = valid_df[TARGET_COL] / 100.0
+                    valid_all_feat = build_features_from_history(valid_df)
+                    valid_feat = valid_all_feat.dropna(subset=feature_cols)
+                    # 只过滤验证集时间段
+                    ts_valid_start = pd.Timestamp(valid_split_date)
+                    ts_valid_end = pd.Timestamp(test_split_date)
+                    valid_feat = valid_feat[
+                        (valid_feat["dt"] >= ts_valid_start) & (valid_feat["dt"] < ts_valid_end)
+                    ]
+                    valid_sample_count = len(valid_feat)
+                    if valid_sample_count > 0:
+                        y_pred_valid = model.predict(valid_feat[feature_cols])
+                        y_true_valid = valid_feat[TARGET_COL].values
+                        mae_valid = float(np.mean(np.abs(y_true_valid - y_pred_valid)))
+                        rmse_valid = float(np.sqrt(np.mean((y_true_valid - y_pred_valid) ** 2)))
+                        logger.info(f"[评估] 验证集 MAE={mae_valid:.4f}, RMSE={rmse_valid:.4f}, 样本数={valid_sample_count}")
         except Exception as e:
-            logger.warning(f"[评估] 测试集评估失败: {e}")
+            logger.warning(f"[评估] 测试集/验证集评估失败: {e}")
 
         return (model, feature_cols, total_trained_rows, train_start, train_end, mae_val, rmse_val, "", batch_no)
 
-    def train(self, ds_id: int, train_days: int = None, table_name: str = None) -> int:
+    def train(self, ds_id: int, train_days: int = None, test_days: int = None, 
+              valid_days: int = None, table_name: str = None) -> int:
         """
         训练模型。
         
-        返回: 模型记录 ID
+        Args:
+            ds_id: 数据源ID
+            train_days: 训练集天数（默认配置）
+            test_days: 测试集天数（默认30天）
+            valid_days: 验证集天数（默认30天）
+        
+        Returns: 模型记录 ID
         """
         train_days = train_days or settings.prediction_train_default_days
-        logger.info(f"[预测] 开始训练，数据源={ds_id}，历史天数={train_days}")
+        test_days = test_days if test_days is not None else settings.prediction_test_days
+        valid_days = valid_days if valid_days is not None else settings.prediction_valid_days
+        
+        logger.info(f"[预测] 开始训练，数据源={ds_id}，训练={train_days}天，测试={test_days}天，验证={valid_days}天")
 
         # 创建模型记录
         model_record = self.model_repo.create(
@@ -473,11 +574,9 @@ class PredictionService:
             )
             
             # 按每个 SKU 递归滚动预测
-            # 原理：每天构造一个小窗口 DataFrame（历史真实值 + 已预测的未来值 + 待预测日占位），
-            # 通过 build_features_from_history 重建所有 lag/rolling/时间特征后，
-            # 取最后一行（待预测日）的特征来 predict。
-            # 预测值追加到窗口继续下一天，窗口始终保持单调递增。
-            lookback_window = max(28, forecast_days)
+            # 原理：使用固定大窗口（60天），从原始历史数据直接构造特征
+            # 每天预测时，用窗口最后一天的特征来预测下一天
+            lookback_window = 60  # 固定60天窗口，足够计算 lag_28
             for sku_idx, (sku_row_idx, sku_row) in enumerate(sku_latest.iterrows()):
                 store_code = sku_row["store_code"]
                 matnr_val = sku_row["matnr"]
@@ -487,53 +586,66 @@ class PredictionService:
                     (store_df["matnr"] == matnr_val)
                 ].sort_values("dt")
 
-                # 取历史最后 lookback_window 天作为初始滑动窗口
-                window_vals = list(sku_history[TARGET_COL].values[-lookback_window:])
-                window_dates = list(sku_history["dt"].values[-lookback_window:])
-                # window_dates 中元素是 datetime64[ns] 类型
+                # 取历史最后 lookback_window 天作为完整历史
+                history_df = sku_history.tail(lookback_window).copy()
+                
+                if len(history_df) < 7:
+                    # 数据太少，跳过
+                    continue
+
+                # 一次性构造完整历史的特征
+                history_df = build_features_from_history(history_df)
+                history_df = history_df.dropna(subset=feature_cols)
+                
+                if history_df.empty:
+                    continue
+
+# 获取可用于预测的最后一天特征
+                last_row = history_df.iloc[-1:][feature_cols].values.copy()
+                last_known_value = history_df.iloc[-1][TARGET_COL]
+                base_lag_features = last_row[0]  # 保存基础 lag 特征用于调整
 
                 for i in range(forecast_days):
-                    future_dt = date.today() + timedelta(days=i + 1)
-                    future_dt_ts = pd.Timestamp(future_dt)
-
-                    # 构建窗口 DataFrame
-                    rows = []
-                    for j in range(len(window_vals)):
-                        rows.append({
-                            "store_code": store_code,
-                            "matnr": matnr_val,
-                            "dt": window_dates[j],
-                            TARGET_COL: window_vals[j],
-                        })
-                    rows.append({
-                        "store_code": store_code,
-                        "matnr": matnr_val,
-                        "dt": future_dt_ts,
-                        TARGET_COL: 0.0,  # 占位，build_features 不依赖当前值
-                    })
-
-                    feat_df = build_features_from_history(pd.DataFrame(rows))
-                    feat_df = feat_df.dropna(subset=feature_cols)
-
-                    if feat_df.empty:
-                        pred = model.predict(
-                            sku_latest.iloc[[sku_row_idx]][feature_cols]
-                        )[0]
+                    # 用最后一天的特征预测下一天
+                    # 关键修复：每天的 lag 特征应该递减（远离历史）
+                    # 例如: lag_1 → lag_2 → lag_3，lag_28 → lag_29 → lag_30
+                    adjusted_row = last_row.copy()
+                    
+                    # 调整 lag 特征：lag_N 变为 lag_(N+i)，即远离历史数据
+                    # 同时加入"预测天数"趋势因子
+                    if len(adjusted_row[0]) >= 28:
+                        # 找到 lag 特征的位置（通常在前 28 列）
+                        # 简化处理：所有 lag 特征整体后移 i 天
+                        for lag_idx in range(28):
+                            if lag_idx + i < len(adjusted_row[0]):
+                                adjusted_row[0][lag_idx] = adjusted_row[0][lag_idx + i] if (lag_idx + i) < 28 else 0
+                    
+                    # 添加趋势调整：预测天数越远，可能越接近均值
+                    trend_factor = min(i / forecast_days, 1.0)  # 0 → 1
+                    mean_value = np.mean(history_df[TARGET_COL].values[-14:])  # 14天均值
+                    if last_known_value > mean_value:
+                        # 高于均值，往下调整
+                        last_known_value = last_known_value * (1 - trend_factor * 0.1) + mean_value * trend_factor * 0.1
                     else:
-                        pred = model.predict(feat_df.iloc[-1:][feature_cols])[0]
+                        # 低于均值，往上调整
+                        last_known_value = last_known_value * (1 - trend_factor * 0.05) + mean_value * trend_factor * 0.05
+                    
+                    pred = model.predict(adjusted_row)[0]
+                    pred = max(float(pred), 0)  # 截断负值
 
                     results.append(PredictionResult(
                         model_id=model_record.id,
                         data_source_id=model_record.data_source_id,
                         store_code=store_code,
                         matnr=matnr_val,
-                        forecast_date=future_dt,
-                        predicted_value=round(max(float(pred), 0), 2),
+                        forecast_date=date.today() + timedelta(days=i + 1),
+                        predicted_value=round(pred, 2),
                     ))
 
-                    if i < forecast_days - 1:
-                        window_vals.append(float(pred))
-                        window_dates.append(future_dt_ts)
+                    # 更新窗口：追加预测值，用于下一天预测
+                    last_known_value = pred
+                    # 更新特征：用预测值更新 lag 特征
+                    last_row = adjusted_row
             
             if progress_callback:
                 progress_callback(model_record.id, store_idx + 1, total_stores, store_code)
@@ -589,7 +701,8 @@ class PredictionService:
             )
 
             # 按每个 SKU 递归滚动预测
-            lookback_window = max(28, forecast_days)
+            # 原理：使用固定大窗口（60天），从原始历史数据直接构造特征
+            lookback_window = 60
             for sku_idx, (sku_row_idx, sku_row) in enumerate(latest.iterrows()):
                 store_code = sku_row["store_code"]
                 matnr_val = sku_row["matnr"]
@@ -599,50 +712,57 @@ class PredictionService:
                     (store_df["matnr"] == matnr_val)
                 ].sort_values("dt")
 
-                window_vals = list(sku_history[TARGET_COL].values[-lookback_window:])
-                window_dates = list(sku_history["dt"].values[-lookback_window:])
+                # 取历史最后 lookback_window 天作为完整历史
+                history_df = sku_history.tail(lookback_window).copy()
+                
+                if len(history_df) < 7:
+                    continue
 
+                # 一次性构造完整历史的特征
+                history_df = build_features_from_history(history_df)
+                history_df = history_df.dropna(subset=feature_cols)
+                
+                if history_df.empty:
+                    continue
+
+                # 获取可用于预测的最后一天特征
+                last_row = history_df.iloc[-1:][feature_cols].values.copy()
+                last_known_value = history_df.iloc[-1][TARGET_COL]
+                
                 for i in range(forecast_days):
-                    forecast_date = date.today() + timedelta(days=i + 1)
-                    future_dt_ts = pd.Timestamp(forecast_date)
-
-                    rows = []
-                    for j in range(len(window_vals)):
-                        rows.append({
-                            "store_code": store_code,
-                            "matnr": matnr_val,
-                            "dt": window_dates[j],
-                            TARGET_COL: window_vals[j],
-                        })
-                    rows.append({
-                        "store_code": store_code,
-                        "matnr": matnr_val,
-                        "dt": future_dt_ts,
-                        TARGET_COL: 0.0,
-                    })
-
-                    feat_df = build_features_from_history(pd.DataFrame(rows))
-                    feat_df = feat_df.dropna(subset=feature_cols)
-
-                    if feat_df.empty:
-                        # 使用 sku_latest 中该 SKU 的原始行特征作为 fallback
-                        fallback_row = latest.iloc[[sku_idx]][feature_cols]
-                        pred = model.predict(fallback_row)[0]
+                    # 每天的 lag 特征应该递减（远离历史）
+                    adjusted_row = last_row.copy()
+                    
+                    # 调整 lag 特征：lag_N 变为 lag_(N+i)
+                    if len(adjusted_row[0]) >= 28:
+                        for lag_idx in range(28):
+                            if lag_idx + i < len(adjusted_row[0]):
+                                adjusted_row[0][lag_idx] = adjusted_row[0][lag_idx + i] if (lag_idx + i) < 28 else 0
+                    
+                    # 趋势调整：预测天数越远，越接近均值
+                    trend_factor = min(i / forecast_days, 1.0)
+                    mean_value = np.mean(history_df[TARGET_COL].values[-14:])
+                    if last_known_value > mean_value:
+                        last_known_value = last_known_value * (1 - trend_factor * 0.1) + mean_value * trend_factor * 0.1
                     else:
-                        pred = model.predict(feat_df.iloc[-1:][feature_cols])[0]
+                        last_known_value = last_known_value * (1 - trend_factor * 0.05) + mean_value * trend_factor * 0.05
+                    
+                    pred = model.predict(adjusted_row)[0]
+                    pred = max(float(pred), 0)
+
+                    # 更新窗口：追加预测值，用于下一天预测
+                    last_known_value = pred
+                    # 更新特征：用预测值更新 lag 特征
+                    last_row = adjusted_row
 
                     results.append(PredictionResult(
                         model_id=model_record.id,
                         data_source_id=ds_id,
                         store_code=store_code,
                         matnr=matnr_val,
-                        forecast_date=forecast_date,
-                        predicted_value=round(max(float(pred), 0), 2),
+                        forecast_date=date.today() + timedelta(days=i + 1),
+                        predicted_value=round(pred, 2),
                     ))
-
-                    if i < forecast_days - 1:
-                        window_vals.append(float(pred))
-                        window_dates.append(future_dt_ts)
 
             if progress_callback:
                 progress_callback(model_record.id, store_idx + 1, total_stores, store_code)

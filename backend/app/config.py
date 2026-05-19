@@ -78,6 +78,8 @@ class Settings(BaseSettings):
     prediction_train_default_days: int = 365
     prediction_forecast_days: int = 30
     prediction_min_history_days: int = 90
+    prediction_test_days: int = 30  # 测试集天数
+    prediction_valid_days: int = 30  # 验证集天数
     prediction_retrain_cron: str = "0 2 * * *"  # 每天凌晨2点重训练
 
     # Prediction Celery task 参数

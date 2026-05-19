@@ -6,6 +6,8 @@ from datetime import date
 class TrainRequest(BaseModel):
     data_source_id: int = Field(..., description="数据源ID")
     train_days: Optional[int] = Field(None, description="训练用历史天数，默认使用配置值")
+    test_days: Optional[int] = Field(None, description="测试集天数，默认30天")
+    valid_days: Optional[int] = Field(None, description="验证集天数，默认30天")
     table_name: Optional[str] = Field(
         None,
         description="销售数据表名（完整名称，如 retail_analysis.ads_cockpit_fd_store_ware_d）"
@@ -93,6 +95,8 @@ class TaskStatusResponse(BaseModel):
 class TrainAndPredictRequest(BaseModel):
     data_source_id: int = Field(..., description="数据源ID")
     train_days: Optional[int] = Field(None, description="训练用历史天数，默认365")
+    test_days: Optional[int] = Field(None, description="测试集天数，默认30")
+    valid_days: Optional[int] = Field(None, description="验证集天数，默认30")
     forecast_days: Optional[int] = Field(None, description="预测天数，默认30")
     table_name: Optional[str] = Field(
         None,

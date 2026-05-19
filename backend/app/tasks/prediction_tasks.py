@@ -3,6 +3,7 @@
 import json
 import logging
 import lightgbm as lgb
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from celery.exceptions import Ignore
 from app.celery_app import celery_app
@@ -87,13 +88,13 @@ def _update_progress(task_id: str, phase: str, detail: str = "", model_id: int =
 
 
 @celery_app.task(bind=True, max_retries=2, soft_time_limit=600)
-def train_prediction_model(self, data_source_id: int, train_days: int = 365):
+def train_prediction_model(self, data_source_id: int, train_days: int = 365, test_days: int = 30, valid_days: int = 30):
     """定时训练预测模型"""
-    logger.info(f"[Celery] 开始训练预测模型: data_source_id={data_source_id}")
+    logger.info(f"[Celery] 开始训练预测模型: data_source_id={data_source_id}, test_days={test_days}, valid_days={valid_days}")
     db = SessionLocal()
     try:
         service = PredictionService(db)
-        model_id = service.train(data_source_id, train_days)
+        model_id = service.train(data_source_id, train_days=train_days, test_days=test_days, valid_days=valid_days)
         logger.info(f"[Celery] 训练完成: model_id={model_id}")
         return {"model_id": model_id, "status": "success"}
     except Exception as e:
@@ -107,7 +108,9 @@ def _train_with_progress(
     task_id: str,
     data_source_id: int,
     train_days: int,
-    table_name: Optional[str],
+    test_days: int = 30,
+    valid_days: int = 30,
+    table_name: Optional[str] = None,
     user_id: Optional[int] = None,
     is_retry: bool = False,
 ) -> int:
@@ -122,7 +125,11 @@ def _train_with_progress(
 
     try:
         service = PredictionService(db)
-        train_kwargs = {"train_days": train_days}
+        train_kwargs = {
+            "train_days": train_days,
+            "test_days": test_days,
+            "valid_days": valid_days,
+        }
 
         if table_name:
             train_kwargs["table_name"] = table_name
@@ -204,6 +211,8 @@ def _train_with_progress(
         model, _, total_rows, train_start, train_end, mae, rmse, _, batch_count = service._fetch_and_train_incremental(
             ds.id, train_days, model, feature_cols,
             table_name=table_name,
+            test_days=test_days,
+            valid_days=valid_days,
             fetch_callback=_fetch_callback,
             train_callback=_train_callback,
         )
@@ -231,7 +240,7 @@ def _train_with_progress(
                 "rmse": rmse,
                 "batch_count": batch_count,
             },
-            trained_at=datetime.utcnow(),
+            trained_at=datetime.now(timezone(timedelta(hours=8))),
         )
 
         # 训练成功：写入最终状态到 Redis
@@ -282,8 +291,10 @@ def _train_and_predict_with_progress(
     task_id: str,
     data_source_id: int,
     train_days: int,
-    forecast_days: int,
-    table_name: Optional[str],
+    test_days: int = 30,
+    valid_days: int = 30,
+    forecast_days: int = 30,
+    table_name: Optional[str] = None,
     user_id: Optional[int] = None,
     batch_size: Optional[int] = None,
     batch_unit: Optional[int] = None,
@@ -415,6 +426,8 @@ def _train_and_predict_with_progress(
         model, _, total_rows, train_start, train_end, mae, rmse, _, batch_count = service._fetch_and_train_incremental(
             ds.id, train_days, model, feature_cols,
             table_name=table_name,
+            test_days=test_days,
+            valid_days=valid_days,
             batch_size=batch_size or 200,
             batch_unit=batch_unit or 10,
             fetch_callback=None,
@@ -446,7 +459,7 @@ def _train_and_predict_with_progress(
                 "rmse": rmse,
                 "batch_count": batch_count,
             },
-            trained_at=datetime.utcnow(),
+            trained_at=datetime.now(timezone(timedelta(hours=8))),
         )
 
         _update_progress(task_id, _PHASE_SAVING, "保存完成", model_record.id, percent=95)
@@ -509,6 +522,8 @@ def train_prediction_model_async(
     self,
     data_source_id: int,
     train_days: Optional[int] = None,
+    test_days: Optional[int] = None,
+    valid_days: Optional[int] = None,
     table_name: Optional[str] = None,
     target_field: Optional[str] = None,
     date_field: Optional[str] = None,
@@ -542,7 +557,12 @@ def train_prediction_model_async(
 
     try:
         model_id = _train_with_progress(
-            task_id, data_source_id, train_days or 365, table_name, user_id=user_id,
+            task_id, data_source_id, 
+            train_days=train_days or 365,
+            test_days=test_days or 30,
+            valid_days=valid_days or 30,
+            table_name=table_name, 
+            user_id=user_id,
             is_retry=self.request.retries > 0,
         )
         return {"model_id": model_id, "status": "success"}
@@ -597,6 +617,8 @@ def train_and_predict_prediction_async(
     self,
     data_source_id: int,
     train_days: Optional[int] = None,
+    test_days: Optional[int] = None,
+    valid_days: Optional[int] = None,
     forecast_days: Optional[int] = None,
     table_name: Optional[str] = None,
     user_id: Optional[int] = None,
@@ -631,9 +653,11 @@ def train_and_predict_prediction_async(
     try:
         model_id, result_count = _train_and_predict_with_progress(
             task_id, data_source_id,
-            train_days or 365,
-            forecast_days or 30,
-            table_name,
+            train_days=train_days or 365,
+            test_days=test_days or 30,
+            valid_days=valid_days or 30,
+            forecast_days=forecast_days or 30,
+            table_name=table_name,
             user_id=user_id,
             batch_size=batch_size,
             batch_unit=batch_unit,

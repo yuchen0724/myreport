@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, Query
-from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, Response, Query, Body
+from datetime import datetime, date, timezone, timedelta
+from typing import Optional
 import logging
 from sqlalchemy.orm import Session
 from app.core.auth_deps import get_current_user
@@ -34,6 +35,8 @@ def train_model(
         task = train_prediction_model_async.delay(
             data_source_id=req.data_source_id,
             train_days=req.train_days,
+            test_days=req.test_days,
+            valid_days=req.valid_days,
             table_name=req.table_name,
             target_field=req.target_field,
             date_field=req.date_field,
@@ -106,13 +109,15 @@ def train_and_predict(
     from app.tasks.prediction_tasks import train_and_predict_prediction_async
     logger.info(
         f"训练+预测提交: data_source_id={req.data_source_id}, "
-        f"train_days={req.train_days}, forecast_days={req.forecast_days}, "
-        f"batch_size={req.batch_size}, batch_unit={req.batch_unit}"
+        f"train_days={req.train_days}, test_days={req.test_days}, valid_days={req.valid_days}, "
+        f"forecast_days={req.forecast_days}, batch_size={req.batch_size}, batch_unit={req.batch_unit}"
     )
     try:
         task = train_and_predict_prediction_async.delay(
             data_source_id=req.data_source_id,
             train_days=req.train_days,
+            test_days=req.test_days,
+            valid_days=req.valid_days,
             forecast_days=req.forecast_days,
             table_name=req.table_name,
             user_id=user_id,
@@ -201,10 +206,13 @@ def get_my_train_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     with_progress: bool = True,
+    status: Optional[str] = Query(None, description="过滤状态: ready, running, failed, completed"),
+    data_source_id: Optional[int] = Query(None, description="过滤数据源"),
 ):
     """查询当前用户的训练任务
 
     所有"运行中"状态从 Redis 读取，数据库只做历史归档。
+    支持 status 和 data_source_id 参数过滤。
     """
     user_id = current_user.id
     repo = PredictionModelRepository(db)
@@ -301,13 +309,21 @@ def get_my_train_tasks(
         else:
             item["progress"] = None
         result.append(item)
+    
+    # 后端过滤：status 和 data_source_id
+    if status:
+        result = [r for r in result if r.get("status") == status]
+    if data_source_id is not None:
+        result = [r for r in result if r.get("data_source_id") == data_source_id]
+    
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return result
 
 
 def _soft_delete_model(model, db):
     """软删除模型记录"""
-    model.deleted_at = datetime.utcnow()
+    from datetime import timezone, timedelta
+    model.deleted_at = datetime.now(timezone(timedelta(hours=8)))
     db.commit()
 
 
@@ -485,9 +501,16 @@ def get_forecast(
     return ForecastListResponse(items=items, total=total)
 
 
-@router.get("/forecast/export")
+@router.post("/forecast/export")
 def export_forecast(
-    req: ForecastExportQuery = Depends(),
+    data_source_id: int = Body(...),
+    model_id: Optional[int] = Body(None),
+    store_code: Optional[str] = Body(None),
+    matnr: Optional[str] = Body(None),
+    start_date: Optional[date] = Body(None),
+    end_date: Optional[date] = Body(None),
+    sort_by: Optional[str] = Body("forecast_date"),
+    sort_order: Optional[str] = Body("asc"),
     db: Session = Depends(get_db),
 ):
     """导出预测结果为 Excel（同步，适用于万级数据量）"""
@@ -497,9 +520,9 @@ def export_forecast(
 
     repo = PredictionResultRepository(db)
     results = repo.get_forecast(
-        req.data_source_id, req.model_id, req.store_code, req.matnr,
-        req.start_date, req.end_date,
-        req.sort_by or "forecast_date", req.sort_order or "asc",
+        data_source_id, model_id, store_code, matnr,
+        start_date, end_date,
+        sort_by or "forecast_date", sort_order or "asc",
         limit=100000, offset=0,
     )
 
@@ -521,7 +544,7 @@ def export_forecast(
         df.to_excel(writer, index=False, sheet_name="预测结果")
     output.seek(0)
 
-    filename = f"预测结果_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"预测结果_{datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d_%H%M%S')}.xlsx"
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
