@@ -574,9 +574,8 @@ class PredictionService:
             )
             
             # 按每个 SKU 递归滚动预测
-            # 原理：使用固定大窗口（60天），从原始历史数据直接构造特征
-            # 每天预测时，用窗口最后一天的特征来预测下一天
-            lookback_window = 60  # 固定60天窗口，足够计算 lag_28
+            # 原理：维护历史+预测值的 DataFrame，每次追加预测行后重新计算特征
+            lookback_window = 60
             for sku_idx, (sku_row_idx, sku_row) in enumerate(sku_latest.iterrows()):
                 store_code = sku_row["store_code"]
                 matnr_val = sku_row["matnr"]
@@ -586,70 +585,65 @@ class PredictionService:
                     (store_df["matnr"] == matnr_val)
                 ].sort_values("dt")
 
-                # 取历史最后 lookback_window 天作为完整历史
-                history_df = sku_history.tail(lookback_window).copy()
-                
-                if len(history_df) < 7:
-                    # 数据太少，跳过
+                # 取历史最后 lookback_window 天的原始数据（未构造特征）
+                base_cols = ["dt", "store_code", "matnr", TARGET_COL]
+                history_raw = sku_history[base_cols].tail(lookback_window).copy()
+
+                if len(history_raw) < 7:
                     continue
 
-                # 一次性构造完整历史的特征
-                history_df = build_features_from_history(history_df)
-                history_df = history_df.dropna(subset=feature_cols)
-                
-                if history_df.empty:
+                # 先构造一次特征，确认能产出有效���
+                history_feat = build_features_from_history(history_raw.copy())
+                history_feat = history_feat.dropna(subset=feature_cols)
+
+                if history_feat.empty:
                     continue
 
-# 获取可用于预测的最后一天特征
-                last_row = history_df.iloc[-1:][feature_cols].values.copy()
-                last_known_value = history_df.iloc[-1][TARGET_COL]
-                base_lag_features = last_row[0]  # 保存基础 lag 特征用于调整
+                # 获取最后一天的日期，用于推算未来日期
+                last_date = pd.to_datetime(history_raw["dt"].iloc[-1], format="%Y%m%d", errors="coerce")
 
                 for i in range(forecast_days):
-                    # 用最后一天的特征预测下一天
-                    # 关键修复：每天的 lag 特征应该递减（远离历史）
-                    # 例如: lag_1 → lag_2 → lag_3，lag_28 → lag_29 → lag_30
-                    adjusted_row = last_row.copy()
-                    
-                    # 调整 lag 特征：lag_N 变为 lag_(N+i)，即远离历史数据
-                    # 同时加入"预测天数"趋势因子
-                    if len(adjusted_row[0]) >= 28:
-                        # 找到 lag 特征的位置（通常在前 28 列）
-                        # 简化处理：所有 lag 特征整体后移 i 天
-                        for lag_idx in range(28):
-                            if lag_idx + i < len(adjusted_row[0]):
-                                adjusted_row[0][lag_idx] = adjusted_row[0][lag_idx + i] if (lag_idx + i) < 28 else 0
-                    
-                    # 添加趋势调整：预测天数越远，可能越接近均值
-                    trend_factor = min(i / forecast_days, 1.0)  # 0 → 1
-                    mean_value = np.mean(history_df[TARGET_COL].values[-14:])  # 14天均值
-                    if last_known_value > mean_value:
-                        # 高于均值，往下调整
-                        last_known_value = last_known_value * (1 - trend_factor * 0.1) + mean_value * trend_factor * 0.1
-                    else:
-                        # 低于均值，往上调整
-                        last_known_value = last_known_value * (1 - trend_factor * 0.05) + mean_value * trend_factor * 0.05
-                    
-                    pred = model.predict(adjusted_row)[0]
-                    pred = max(float(pred), 0)  # 截断负值
+                    # 构造当前历史的完整特征
+                    current_feat = build_features_from_history(history_raw.copy())
+                    current_feat = current_feat.dropna(subset=feature_cols)
+
+                    if current_feat.empty:
+                        break
+
+                    # 取最后一天的特征行用于预测（保持 DataFrame 格式，保留特征名）
+                    row_df = current_feat.iloc[-1:][feature_cols]
+
+                    pred = model.predict(row_df)[0]
+                    pred = max(float(pred), 0)
+
+                    # 计算预测日期
+                    forecast_date = last_date + timedelta(days=i + 1)
+                    forecast_dt_str = forecast_date.strftime("%Y%m%d")
 
                     results.append(PredictionResult(
                         model_id=model_record.id,
                         data_source_id=model_record.data_source_id,
                         store_code=store_code,
                         matnr=matnr_val,
-                        forecast_date=date.today() + timedelta(days=i + 1),
+                        forecast_date=forecast_date.date(),
                         predicted_value=round(pred, 2),
                     ))
 
-                    # 更新窗口：追加预测值，用于下一天预测
-                    last_known_value = pred
-                    # 更新特征：用预测值更新 lag 特征
-                    last_row = adjusted_row
-            
+                    # 将预测值追加到历史 DataFrame，下次循环重新计算所有特征
+                    new_row = pd.DataFrame([{
+                        "dt": forecast_dt_str,
+                        "store_code": store_code,
+                        "matnr": matnr_val,
+                        TARGET_COL: pred,
+                    }])
+                    history_raw = pd.concat([history_raw, new_row], ignore_index=True)
+                    # 保持窗口大小
+                    if len(history_raw) > lookback_window:
+                        history_raw = history_raw.iloc[-lookback_window:].reset_index(drop=True)
+
             if progress_callback:
                 progress_callback(model_record.id, store_idx + 1, total_stores, store_code)
-        
+
         return results
 
     def predict(self, ds_id: int, forecast_days: int = None, table_name: str = None,
@@ -701,7 +695,7 @@ class PredictionService:
             )
 
             # 按每个 SKU 递归滚动预测
-            # 原理：使用固定大窗口（60天），从原始历史数据直接构造特征
+            # 原理：维护历史+预测值的 DataFrame，每次追加预测行后重新计算特征
             lookback_window = 60
             for sku_idx, (sku_row_idx, sku_row) in enumerate(latest.iterrows()):
                 store_code = sku_row["store_code"]
@@ -712,57 +706,62 @@ class PredictionService:
                     (store_df["matnr"] == matnr_val)
                 ].sort_values("dt")
 
-                # 取历史最后 lookback_window 天作为完整历史
-                history_df = sku_history.tail(lookback_window).copy()
-                
-                if len(history_df) < 7:
+                # 取历史最后 lookback_window 天的原始数据（未构造特征）
+                # 保留 dt, store_code, matnr, TARGET_COL 四列用于滚动追加
+                base_cols = ["dt", "store_code", "matnr", TARGET_COL]
+                history_raw = sku_history[base_cols].tail(lookback_window).copy()
+
+                if len(history_raw) < 7:
                     continue
 
-                # 一次性构造完整历史的特征
-                history_df = build_features_from_history(history_df)
-                history_df = history_df.dropna(subset=feature_cols)
-                
-                if history_df.empty:
+                # 先构造一次特征，确认能产出有效行
+                history_feat = build_features_from_history(history_raw.copy())
+                history_feat = history_feat.dropna(subset=feature_cols)
+
+                if history_feat.empty:
                     continue
 
-                # 获取可用于预测的最后一天特征
-                last_row = history_df.iloc[-1:][feature_cols].values.copy()
-                last_known_value = history_df.iloc[-1][TARGET_COL]
-                
+                # 获取最后一天的日期，用于推算未来日期
+                last_date = pd.to_datetime(history_raw["dt"].iloc[-1], format="%Y%m%d", errors="coerce")
+
                 for i in range(forecast_days):
-                    # 每天的 lag 特征应该递减（远离历史）
-                    adjusted_row = last_row.copy()
-                    
-                    # 调整 lag 特征：lag_N 变为 lag_(N+i)
-                    if len(adjusted_row[0]) >= 28:
-                        for lag_idx in range(28):
-                            if lag_idx + i < len(adjusted_row[0]):
-                                adjusted_row[0][lag_idx] = adjusted_row[0][lag_idx + i] if (lag_idx + i) < 28 else 0
-                    
-                    # 趋势调整：预测天数越远，越接近均值
-                    trend_factor = min(i / forecast_days, 1.0)
-                    mean_value = np.mean(history_df[TARGET_COL].values[-14:])
-                    if last_known_value > mean_value:
-                        last_known_value = last_known_value * (1 - trend_factor * 0.1) + mean_value * trend_factor * 0.1
-                    else:
-                        last_known_value = last_known_value * (1 - trend_factor * 0.05) + mean_value * trend_factor * 0.05
-                    
-                    pred = model.predict(adjusted_row)[0]
+                    # 构造当前历史的完整特征
+                    current_feat = build_features_from_history(history_raw.copy())
+                    current_feat = current_feat.dropna(subset=feature_cols)
+
+                    if current_feat.empty:
+                        break
+
+                    # 取最后一天的特征行用于预测（保持 DataFrame 格式，保留特征名）
+                    row_df = current_feat.iloc[-1:][feature_cols]
+
+                    pred = model.predict(row_df)[0]
                     pred = max(float(pred), 0)
 
-                    # 更新窗口：追加预测值，用于下一天预测
-                    last_known_value = pred
-                    # 更新特征：用预测值更新 lag 特征
-                    last_row = adjusted_row
+                    # 计算预测日期
+                    forecast_date = last_date + timedelta(days=i + 1)
+                    forecast_dt_str = forecast_date.strftime("%Y%m%d")
 
                     results.append(PredictionResult(
                         model_id=model_record.id,
                         data_source_id=ds_id,
                         store_code=store_code,
                         matnr=matnr_val,
-                        forecast_date=date.today() + timedelta(days=i + 1),
+                        forecast_date=forecast_date.date(),
                         predicted_value=round(pred, 2),
                     ))
+
+                    # 将预测值追加到历史 DataFrame，下次循环重新计算所有特征
+                    new_row = pd.DataFrame([{
+                        "dt": forecast_dt_str,
+                        "store_code": store_code,
+                        "matnr": matnr_val,
+                        TARGET_COL: pred,
+                    }])
+                    history_raw = pd.concat([history_raw, new_row], ignore_index=True)
+                    # 保持窗口大小：只保留最近 lookback_window 行
+                    if len(history_raw) > lookback_window:
+                        history_raw = history_raw.iloc[-lookback_window:].reset_index(drop=True)
 
             if progress_callback:
                 progress_callback(model_record.id, store_idx + 1, total_stores, store_code)
