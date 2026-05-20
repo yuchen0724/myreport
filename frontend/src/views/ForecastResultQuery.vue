@@ -336,8 +336,8 @@ async function loadModels() {
   try {
     const res = await getMyTrainTasks(false)
     const list = Array.isArray(res) ? res : (res.data || [])
-    models.value = list.filter(m => m.status === 'ready' && m.data_source_id === filters.dataSourceId)
-    if (filters.modelId && !models.value.some(m => m.model_id === filters.modelId)) {
+    models.value = list.filter(m => m.status === 'ready' && Number(m.data_source_id) === Number(filters.dataSourceId))
+    if (filters.modelId && !models.value.some(m => Number(m.model_id) === Number(filters.modelId))) {
       filters.modelId = null
     }
   } catch {
@@ -352,13 +352,13 @@ function onDataSourceChange() {
 
 function buildParams() {
   const params = {
-    data_source_id: filters.dataSourceId,
+    data_source_id: Number(filters.dataSourceId),
     page: page.value,
     page_size: pageSize.value,
     sort_by: filters.sortBy,
     sort_order: filters.sortOrder,
   }
-  if (filters.modelId) params.model_id = filters.modelId
+  if (filters.modelId) params.model_id = Number(filters.modelId)
   if (filters.storeCode) params.store_code = filters.storeCode.trim()
   if (filters.matnr) params.matnr = filters.matnr.trim()
   if (filters.dateRange && filters.dateRange.length === 2) {
@@ -790,11 +790,11 @@ async function handleExport() {
   exporting.value = true
   try {
     const params = {
-      data_source_id: filters.dataSourceId,
+      data_source_id: Number(filters.dataSourceId),
       sort_by: filters.sortBy,
       sort_order: filters.sortOrder,
     }
-    if (filters.modelId) params.model_id = filters.modelId
+    if (filters.modelId) params.model_id = Number(filters.modelId)
     if (filters.storeCode) params.store_code = filters.storeCode.trim()
     if (filters.matnr) params.matnr = filters.matnr.trim()
     if (filters.dateRange && filters.dateRange.length === 2) {
