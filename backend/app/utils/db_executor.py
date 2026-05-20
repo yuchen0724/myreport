@@ -65,16 +65,20 @@ def execute_query(ds, sql: str) -> tuple:
     """
     from sqlalchemy.exc import OperationalError
     import time
+    from urllib.parse import quote_plus
 
     password = decrypt_password(ds.password_encrypted)
     ds_type = ds.type.upper() if ds.type else "DORIS"
 
+    # URL 编码密码中的特殊字符
+    encoded_password = quote_plus(password)
+
     if ds_type == "POSTGRESQL":
-        conn_url = f"postgresql://{ds.username}:***@{ds.host}:{ds.port}/{ds.database}"
+        conn_url = f"postgresql://{ds.username}:{encoded_password}@{ds.host}:{ds.port}/{ds.database}"
     elif ds_type in ("MYSQL", "DORIS"):
-        conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
+        conn_url = f"mysql+pymysql://{ds.username}:{encoded_password}@{ds.host}:{ds.port}/{ds.database}"
     elif ds_type == "HIVE":
-        conn_url = f"hive://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
+        conn_url = f"hive://{ds.username}:{encoded_password}@{ds.host}:{ds.port}/{ds.database}"
     else:
         raise ValueError(f"不支持的数据源类型: {ds.type}")
 

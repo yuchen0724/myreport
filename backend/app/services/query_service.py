@@ -182,8 +182,10 @@ class QueryService:
         QUERY_TIMEOUT = 30
         
         # 构建连接 URL（统一使用 ds_type）
+        from urllib.parse import quote_plus
         ds_type = ds.type.upper() if ds.type else ""
         password = decrypt_password(ds.password_encrypted)
+        encoded_password = quote_plus(password)
         
 # SOCKS5 代理处理
         original_socket = None
@@ -202,7 +204,7 @@ class QueryService:
         connect_args = {}
         
         if ds_type == "MYSQL":
-            conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
+            conn_url = f"mysql+pymysql://{ds.username}:{encoded_password}@{ds.host}:{ds.port}/{ds.database}"
             engine = create_engine(
                 conn_url,
                 poolclass=QueuePool,
@@ -213,7 +215,7 @@ class QueryService:
                 connect_args=connect_args,
             )
         elif ds_type == "POSTGRESQL":
-            conn_url = f"postgresql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
+            conn_url = f"postgresql://{ds.username}:{encoded_password}@{ds.host}:{ds.port}/{ds.database}"
             engine = create_engine(
                 conn_url,
                 poolclass=QueuePool,
@@ -224,7 +226,7 @@ class QueryService:
             )
         elif ds_type == "DORIS":
             # Doris 使用 MySQL 协议
-            conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
+            conn_url = f"mysql+pymysql://{ds.username}:{encoded_password}@{ds.host}:{ds.port}/{ds.database}"
             engine = create_engine(
                 conn_url,
                 poolclass=QueuePool,
@@ -323,19 +325,30 @@ class QueryService:
                         cursor = cursor  # 直接使用参数传入的 cursor
                         cursor_where = ""
                         cursor_key = None
+                        query_params = {}  # 初始化参数化查询参数
                         
                         if cursor:
                             # 游标分页：WHERE (col1, col2) > (val1, val2)
+                            # 安全修复：列名必须来自 ORDER BY 白名单，值使用参数化查询
                             cursor_parts = [c.strip() for c in cursor.split(',')]
                             where_parts = []
+                            query_params = {}  # 参数化查询参数
                             for i, col in enumerate(order_cols):
                                 if i < len(cursor_parts):
-                                    # 处理数值和字符串
                                     val = cursor_parts[i]
-                                    if val.isdigit():
-                                        where_parts.append(f"{col} > {val}")
+                                    param_name = f"cursor_{i}"
+                                    # 检查是否为有效列名（防御）
+                                    if not col.isidentifier():
+                                        raise ValueError(f"无效的排序列名: {col}")
+                                    # 根据值类型决定比较方式：数值无引号，字符���有引号
+                                    if val and val.lstrip('-').replace('.', '', 1).isdigit():
+                                        # 数值类型
+                                        where_parts.append(f"{col} > :{param_name}")
+                                        query_params[param_name] = float(val) if '.' in val else int(val)
                                     else:
-                                        where_parts.append(f"{col} > '{val}'")
+                                        # 字符串类型，使用参数化查询
+                                        where_parts.append(f"{col} > :{param_name}")
+                                        query_params[param_name] = val
                             if where_parts:
                                 cursor_where = " WHERE " + " AND ".join(where_parts)
                             
@@ -372,6 +385,9 @@ class QueryService:
                                 filtered_params[placeholder] = params[placeholder]
                             else:
                                 filtered_params[placeholder] = ''
+                        # 合并游标参数（如果有）
+                        if 'query_params' in dir() and query_params:
+                            filtered_params.update(query_params)
                         result = conn.execute(text(converted_sql), filtered_params)
                     elif has_placeholders:
                         # SQL 有占位符但没传参数，使用空字符串

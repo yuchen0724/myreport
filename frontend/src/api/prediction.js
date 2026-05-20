@@ -47,14 +47,18 @@ export function deleteTrainHistoryByTask(taskId) {
 
 export function getReadyModels(dataSourceId) {
   return request.get('/prediction/train/tasks', {
-    params: { with_progress: false, _t: Date.now() },
+    params: { 
+      status: 'ready',  // 后端过滤：只返回 ready 状态
+      data_source_id: dataSourceId,  // 后端过滤：只返回指定数据源
+      with_progress: false, 
+      _t: Date.now() 
+    },
   }).then(res => {
-    // 从 task 列表中筛选出 ready 且匹配数据源的
+    // 后端已过滤，前端只需简单返回
     const list = Array.isArray(res) ? res : (res.data || [])
-    return list.filter(m => m.status === 'ready' && m.data_source_id === dataSourceId)
+    return list
   })
 }
-
 export function getForecastHistory(params) {
   return request.get('/prediction/forecast/history', { params })
 }
@@ -68,13 +72,15 @@ export function deleteForecastProgress(taskId) {
 }
 
 export function exportForecastExcel(params) {
-  return request.get('/prediction/forecast/export', { params, responseType: 'blob' })
+  return request.post('/prediction/forecast/export', params, { responseType: 'blob' })
 }
 
-export function trainAndPredict(dataSourceId, trainDays, forecastDays, tableName, batchSize, batchUnit) {
+export function trainAndPredict(dataSourceId, trainDays, forecastDays, tableName, batchSize, batchUnit, testDays, validDays) {
   return request.post('/prediction/train-and-predict', {
     data_source_id: dataSourceId,
     train_days: trainDays || null,
+    test_days: testDays || null,
+    valid_days: validDays || null,
     forecast_days: forecastDays || null,
     table_name: tableName || null,
     batch_size: batchSize || null,

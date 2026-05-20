@@ -20,6 +20,12 @@
           <el-form-item label="训练天数">
             <el-input-number v-model="form.trainDays" :min="30" :max="730" :step="30" />
           </el-form-item>
+          <el-form-item label="测试天数">
+            <el-input-number v-model="form.testDays" :min="7" :max="90" :step="7" />
+          </el-form-item>
+          <el-form-item label="验证天数">
+            <el-input-number v-model="form.validDays" :min="0" :max="90" :step="7" />
+          </el-form-item>
           <el-form-item label="预测天数">
             <el-input-number v-model="form.forecastDays" :min="7" :max="365" :step="7" />
           </el-form-item>
@@ -175,6 +181,8 @@ export default {
     const { loadStored, saveToStorage } = useFormPersistence('sales_forecast_form', {
       dataSourceId: null,
       trainDays: 365,
+      testDays: 30,
+      validDays: 30,
       forecastDays: 30,
       tableName: '',
       batchSize: 200,
@@ -391,7 +399,7 @@ export default {
         const tableName = form.value.tableName.trim() || null
         const batchSize = form.value.batchSize || null
         const batchUnit = form.value.batchUnit || null
-        const res = await trainAndPredict(form.value.dataSourceId, form.value.trainDays, form.value.forecastDays, tableName, batchSize, batchUnit)
+        const res = await trainAndPredict(form.value.dataSourceId, form.value.trainDays, form.value.forecastDays, tableName, batchSize, batchUnit, form.value.testDays, form.value.validDays)
         const taskId = res.task_id || (res.data && res.data.task_id)
         if (!taskId) { resultMsg.value = '任务提交失败'; return }
         const ds = dataSources.value.find(d => d.id === form.value.dataSourceId)

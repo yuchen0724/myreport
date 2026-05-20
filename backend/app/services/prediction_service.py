@@ -55,11 +55,11 @@ class PredictionService:
             ds = self.ds_repo.get_by_id(ds_id)
             if not ds:
                 return {}
-            # 按 (store_code, matnr) 批量查询
-            pairs_str = ", ".join(
-                [f"('{sc}', '{mn}')" for sc, mn in pairs]
+            # Doris 不支持 (col1, col2) IN (...) 元组语法，用 OR 拼接
+            ors = " OR ".join(
+                [f"(store_code = '{sc}' AND matnr = '{mn}')" for sc, mn in pairs]
             )
-            sql = f"SELECT store_code, matnr, ware_name FROM ads_fd_dim_store_ware WHERE (store_code, matnr) IN ({pairs_str})"
+            sql = f"SELECT store_code, matnr, ware_name FROM ads_fd_dim_store_ware WHERE {ors}"
             rows, cols = execute_query(ds, sql)
             name_map = {}
             for row in rows:

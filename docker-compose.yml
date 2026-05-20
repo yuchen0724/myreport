@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: report_db
       POSTGRES_USER: report_user
-      POSTGRES_PASSWORD: report_password
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-report_password}
     ports:
       - "5432:5432"
     volumes:
@@ -43,10 +43,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://report_user:report_password@postgres:5432/report_db
+      - DATABASE_URL=postgresql://report_user:${DB_PASSWORD:-report_password}@postgres:5432/report_db
       - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=change-this-secret-key-in-production
-      - PASSWORD_ENCRYPTION_KEY=change-this-encryption-key-in-production
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-key-in-production}
+      - PASSWORD_ENCRYPTION_KEY=${PASSWORD_ENCRYPTION_KEY:-change-this-encryption-key-in-production}
       - DEBUG=false
     depends_on:
       postgres:

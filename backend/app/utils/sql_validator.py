@@ -18,14 +18,13 @@ class SQLValidator:
         "USER", "CURRENT_USER", "LOAD_CONCATENATED_FILE", "READFILE"
     ]
 
-    # 常见注入模式（排除合法的 UNION/WITH 用法）
+    # 常见注入模式（排除合法的注释用法）
     INJECTION_PATTERNS = [
         r"OR\s+1\s*=\s*1",           # OR 1=1 永真式
         r"OR\s+'[^']*'\s*=\s*'[^']*'",  # OR \'\'=\'\' 永真式
         r"OR\s+\d+\s*=\s*\d+",        # OR 1=1 数字
-        r"-\s*-$",                    # 行尾注释注入
+        r"--\s*\w+",                 # 行尾注释注入（-- 后有内容）
         r"#\s*\w+",                  # MySQL 注释注入
-        r"/\*.*\*/",                 # 注释块注入
         r"EXEC\s*\(",                 # 存储过程注入
         r"0x[0-9a-fA-F]+",           # 十六进制编码注入
         r";\s*DROP",                  # 多语句 DROP

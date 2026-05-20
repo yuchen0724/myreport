@@ -172,26 +172,31 @@ const derivedColumns = computed(() => {
 // 列显隐状态
 const columnVisibility = ref([])
 
-// 动态列列表（取显隐过滤 + 持久化顺序）
-const dynamicColumns = computed(() => {
-  const all = derivedColumns.value
-  if (!all || all.length === 0) return []
-
-  // 第一次：用所有列初始化 visibility
-  if (columnVisibility.value.length !== all.length) {
+// watch 初始化：当 derivedColumns 变化时更新 visibility（避免在 computed 内 mutation）
+watch(derivedColumns, (all) => {
+  if (!all || all.length === 0) {
+    columnVisibility.value = []
+    return
+  }
+  const prev = columnVisibility.value
+  // 列数变了或列内容变了，需要重新初始化
+  if (prev.length !== all.length || !all.every(c => prev.includes(c))) {
     const saved = storage.loadColumnOrder()
     if (saved && saved.length > 0) {
       const valid = saved.filter(c => all.includes(c))
       if (valid.length > 0) {
         columnVisibility.value = valid
-        return valid
+        return
       }
     }
     columnVisibility.value = [...all]
-    return [...all]
   }
+}, { immediate: true })
 
-  // 后续：按 visibility 顺序显示
+// 动态列列表（取显隐过滤 + 持久化顺序）—— 纯 computed，无副作用
+const dynamicColumns = computed(() => {
+  const all = derivedColumns.value
+  if (!all || all.length === 0) return []
   return columnVisibility.value.filter(c => all.includes(c))
 })
 
