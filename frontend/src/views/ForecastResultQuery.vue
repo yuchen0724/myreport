@@ -262,7 +262,7 @@ const hasData = computed(() => forecastData.value.length > 0)
 const chartRef = ref(null)
 const chartMode = ref('line')
 const showStats = ref(true)
-const isChartMode = computed(() => chartRef.value !== null && forecastData.value.length > 0)
+const isChartMode = computed(() => forecastData.value.length > 0)
 
 // 统计数据
 const stats = computed(() => {
