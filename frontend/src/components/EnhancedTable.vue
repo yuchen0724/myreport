@@ -185,7 +185,8 @@ watch(derivedColumns, (all) => {
     if (saved && saved.length > 0) {
       const valid = saved.filter(c => all.includes(c))
       if (valid.length > 0) {
-        columnVisibility.value = valid
+        // 保留 saved 顺序，追加新列
+        columnVisibility.value = [...valid, ...all.filter(c => !valid.includes(c))]
         return
       }
     }
