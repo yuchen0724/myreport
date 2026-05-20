@@ -559,7 +559,7 @@ def export_forecast(
         df.to_excel(writer, index=False, sheet_name="预测结果")
     output.seek(0)
 
-    filename = f"预测结果_{datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"forecast_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

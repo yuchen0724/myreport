@@ -3,7 +3,7 @@
     <!-- 工具栏 -->
     <div v-if="showToolbar && dynamicColumns.length > 0" class="table-toolbar">
       <TableToolbar
-        :all-columns="dynamicColumns"
+        :all-columns="labeledColumns"
         v-model="columnVisibility"
         v-model:search-text="searchText"
         :enable-expand="enableExpandFn"
@@ -194,12 +194,27 @@ watch(derivedColumns, (all) => {
   }
 }, { immediate: true })
 
+// columnVisibility 变化时持久化列顺序
+watch(columnVisibility, (val) => {
+  if (val && val.length > 0) {
+    storage.saveColumnOrder(val)
+  }
+}, { deep: true })
+
 // 动态列列表（取显隐过滤 + 持久化顺序）—— 纯 computed，无副作用
 const dynamicColumns = computed(() => {
   const all = derivedColumns.value
   if (!all || all.length === 0) return []
   return columnVisibility.value.filter(c => all.includes(c))
 })
+
+// 带 label 的列，传给 TableToolbar 做列展示/排序
+const labeledColumns = computed(() =>
+  derivedColumns.value.map(c => ({
+    key: c,
+    label: getColumnLabel(c),
+  }))
+)
 
 // 搜索
 const searchText = ref('')
