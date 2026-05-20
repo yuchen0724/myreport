@@ -122,13 +122,54 @@
       <template #header>
         <div class="card-header">
           <span>预测趋势图</span>
-          <el-radio-group v-model="chartMode" size="small">
-            <el-radio-button value="line">折线图</el-radio-button>
-            <el-radio-button value="area">面积图</el-radio-button>
-          </el-radio-group>
+          <div class="chart-controls">
+            <el-radio-group v-model="chartMode" size="small">
+              <el-radio-button value="line">折线图</el-radio-button>
+              <el-radio-button value="area">面积图</el-radio-button>
+              <el-radio-button value="bar">柱状图</el-radio-button>
+              <el-radio-button value="kline">K线图</el-radio-button>
+              <el-radio-button value="heatmap">热力图</el-radio-button>
+            </el-radio-group>
+            <el-checkbox v-model="showStats" v-if="chartMode !== 'heatmap'" style="margin-left: 12px">
+              显示统计线
+            </el-checkbox>
+          </div>
         </div>
       </template>
       <div ref="chartRef" class="forecast-chart" />
+    </el-card>
+
+    <!-- 统计摘要 -->
+    <el-card v-if="hasData" style="margin-top: 16px" v-show="chartMode !== 'heatmap'">
+      <template #header>
+        <span>统计摘要</span>
+      </template>
+      <el-row :gutter="16">
+        <el-col :span="6">
+          <div class="stat-item">
+            <div class="stat-label">数据点</div>
+            <div class="stat-value">{{ total }}</div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="stat-item">
+            <div class="stat-label">预测均值</div>
+            <div class="stat-value">{{ stats.avg.toFixed(2) }}</div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="stat-item">
+            <div class="stat-label">预测总和</div>
+            <div class="stat-value">{{ formatNumber(stats.sum) }}</div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="stat-item">
+            <div class="stat-label">置信区间覆盖率</div>
+            <div class="stat-value">{{ stats.confidenceRate }}%</div>
+          </div>
+        </el-col>
+      </el-row>
     </el-card>
 
     <el-card style="margin-top: 16px">
@@ -220,13 +261,62 @@ const hasData = computed(() => forecastData.value.length > 0)
 // 图表相关
 const chartRef = ref(null)
 const chartMode = ref('line')
+const showStats = ref(true)
 const isChartMode = computed(() => chartRef.value !== null && forecastData.value.length > 0)
+
+// 统计数据
+const stats = computed(() => {
+  const data = forecastData.value
+  if (!data.length) return { avg: 0, sum: 0, max: 0, min: 0, confidenceRate: 0 }
+  
+  const values = data.map(r => r.predicted_value)
+  const sum = values.reduce((a, b) => a + b, 0)
+  const avg = sum / values.length
+  const max = Math.max(...values)
+  const min = Math.min(...values)
+  
+  // 置信区间覆盖率
+  const withConfidence = data.filter(r => r.lower_bound != null && r.upper_bound != null)
+  const rate = withConfidence.length > 0 ? Math.round((withConfidence.length / data.length) * 100) : 0
+  
+  return { avg, sum, max, min, confidenceRate: rate }
+})
+
+function formatNumber(num) {
+  if (num >= 10000) return (num / 10000).toFixed(1) + 'w'
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'k'
+  return num.toFixed(0)
+}
 let chartInstance = null
 let resizeHandler = null
 
 function formatDate(iso) {
   if (!iso) return ''
-  return iso.slice(0, 16).replace('T', ' ')
+  
+  // 检测时区类型
+  const isUTC = iso.endsWith('Z')
+  const isCST = iso.includes('+08:00')
+  
+  if (isCST) {
+    // 已经是 CST 时区，直接提取日期时间
+    return iso.slice(0, 16).replace('T', ' ')
+  } else if (isUTC) {
+    // UTC 时间，转换为 CST (+8小时)
+    const d = new Date(iso)
+    const local = new Date(d.getTime() + 8 * 60 * 60 * 1000)
+    const pad = n => String(n).padStart(2, '0')
+    return `${local.getFullYear()}-${pad(local.getMonth()+1)}-${pad(local.getDate())} ${pad(local.getHours())}:${pad(local.getMinutes())}`
+  }
+  
+  // naive datetime（无时区信息）：假设是 CST，直接提取
+  // 格式如: 2026-05-19T07:07:09 或 2026-05-19 07:07:09
+  if (iso.includes('T')) {
+    return iso.slice(0, 16).replace('T', ' ')
+  } else if (iso.includes(' ')) {
+    return iso.slice(0, 16)
+  }
+  // 保守处理：原样返回
+  return iso
 }
 
 async function loadDataSources() {
@@ -358,6 +448,7 @@ function renderChart() {
 
   const keys = Object.keys(groups)
   const isSingle = keys.length === 1
+  const mode = chartMode.value
 
   // 颜色池
   const colorPalette = [
@@ -366,41 +457,198 @@ function renderChart() {
     '#ea7ccc', '#4a90d9',
   ]
 
-  const series = []
-  const legendData = []
+  // 所有分组的公共日期轴（取并集排序）
+  const allDates = [...new Set(data.map(r => r.forecast_date))].sort()
 
-  keys.forEach((key, idx) => {
+  // 预处理每个分组：排序后生成 date->value 映射
+  const groupData = keys.map((key, idx) => {
     const items = groups[key]
     const color = colorPalette[idx % colorPalette.length]
     const sorted = [...items].sort(
       (a, b) => a.forecast_date.localeCompare(b.forecast_date)
     )
+    const dateValueMap = {}
+    for (const r of sorted) {
+      dateValueMap[r.forecast_date] = r
+    }
+    const label = isSingle ? '预测值' : key
+    return { key, color, sorted, dateValueMap, label, idx }
+  })
+
+  // ========== 热力图 ==========
+  if (mode === 'heatmap') {
+    const heatData = []
+    const yLabels = keys
+    for (let yi = 0; yi < groupData.length; yi++) {
+      const { sorted } = groupData[yi]
+      for (const r of sorted) {
+        const xi = allDates.indexOf(r.forecast_date)
+        if (xi >= 0) heatData.push([xi, yi, r.predicted_value])
+      }
+    }
+    const allVals = heatData.map(d => d[2])
+    const option = {
+      tooltip: {
+        position: 'top',
+        formatter: (p) => {
+          const r = groupData[p.data[1]].dateValueMap[allDates[p.data[0]]]
+          return r
+            ? `${r.forecast_date}<br/>${keys[p.data[1]]}<br/>预测值: <b>${r.predicted_value.toFixed(2)}</b>`
+            : ''
+        },
+      },
+      grid: { left: 120, right: 40, top: 10, bottom: 60 },
+      xAxis: {
+        type: 'category',
+        data: allDates,
+        axisLabel: { rotate: 45, fontSize: 10 },
+        splitArea: { show: true },
+      },
+      yAxis: {
+        type: 'category',
+        data: yLabels,
+        axisLabel: { fontSize: 11 },
+        splitArea: { show: true },
+      },
+      visualMap: {
+        min: allVals.length ? Math.min(...allVals) : 0,
+        max: allVals.length ? Math.max(...allVals) : 1,
+        calculable: true,
+        orient: 'horizontal',
+        left: 'center',
+        bottom: 0,
+        inRange: { color: ['#313695', '#4575b4', '#74add1', '#abd9e9', '#fee090', '#fdae61', '#f46d43', '#d73027'] },
+      },
+      dataZoom: allDates.length > 30 ? [{ type: 'slider', start: 0, end: 100, bottom: 30, height: 20 }] : undefined,
+      series: [{
+        type: 'heatmap',
+        data: heatData,
+        label: { show: allDates.length <= 15 && keys.length <= 8, fontSize: 10, formatter: (p) => p.data[2].toFixed(1) },
+        emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.3)' } },
+      }],
+    }
+    if (!chartInstance) chartInstance = echarts.init(chartRef.value)
+    chartInstance.setOption(option, true)
+    chartInstance.resize()
+    return
+  }
+
+  // ========== K线图 ==========
+  if (mode === 'kline') {
+    const series = []
+    const legendData = []
+    // K线需要 open/close/high/low，我们用预测值模拟：
+    // open=前一天值, close=当天值, high=max(open,close)+波动, low=min(open,close)-波动
+    groupData.forEach(({ key, color, sorted, label }) => {
+      const klineData = []
+      for (let i = 0; i < sorted.length; i++) {
+        const val = sorted[i].predicted_value
+        const prev = i > 0 ? sorted[i - 1].predicted_value : val
+        const open = prev
+        const close = val
+        const spread = Math.abs(close - open) * 0.5 + Math.max(Math.abs(val) * 0.02, 0.5)
+        const high = Math.max(open, close) + spread
+        const low = Math.min(open, close) - spread
+        klineData.push([open, close, low, high])
+      }
+      series.push({
+        name: label,
+        type: 'candlestick',
+        data: klineData,
+        itemStyle: { color: '#ef5350', color0: '#26a69a', borderColor: '#ef5350', borderColor0: '#26a69a' },
+      })
+      legendData.push(label)
+    })
+    const option = {
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'cross' },
+        formatter: (params) => {
+          if (!Array.isArray(params)) return ''
+          const p = params[0]
+          const idx = p.dataIndex
+          const d = allDates[idx] || ''
+          let html = `<div style="font-size:12px;color:#999">${d}</div>`
+          for (const s of params) {
+            const [open, close, low, high] = s.data
+            html += `<div>${s.seriesName}<br/>开:${open.toFixed(2)} 收:${close.toFixed(2)}<br/>低:${low.toFixed(2)} 高:${high.toFixed(2)}</div>`
+          }
+          return html
+        },
+      },
+      legend: { data: legendData, bottom: 0, textStyle: { fontSize: 12 } },
+      grid: { left: 60, right: 30, top: 20, bottom: 50 },
+      xAxis: {
+        type: 'category',
+        data: allDates,
+        axisLabel: { rotate: 45, fontSize: 11 },
+        splitLine: { show: false },
+      },
+      yAxis: {
+        type: 'value',
+        name: '预测值',
+        scale: true,
+        axisLabel: { fontSize: 11, formatter: (v) => v >= 10000 ? (v / 10000).toFixed(1) + 'w' : v.toFixed(0) },
+        splitLine: { lineStyle: { type: 'dashed', color: '#eee' } },
+      },
+      dataZoom: allDates.length > 15 ? [
+        { type: 'inside', start: 0, end: 100 },
+        { type: 'slider', start: 0, end: 100, height: 24, bottom: 50 },
+      ] : undefined,
+      series,
+    }
+    if (!chartInstance) chartInstance = echarts.init(chartRef.value)
+    chartInstance.setOption(option, true)
+    chartInstance.resize()
+    return
+  }
+
+  // ========== 折线 / 面积 / 柱状 ==========
+  const series = []
+  const legendData = []
+  const markLines = []
+
+  // 统计线数据
+  if (showStats.value && data.length > 0) {
+    const vals = data.map(r => r.predicted_value)
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length
+    const sortedVals = [...vals].sort((a, b) => a - b)
+    const median = sortedVals.length % 2 === 0
+      ? (sortedVals[sortedVals.length / 2 - 1] + sortedVals[sortedVals.length / 2]) / 2
+      : sortedVals[Math.floor(sortedVals.length / 2)]
+    markLines.push(
+      { name: '均值', yAxis: avg, lineStyle: { color: '#ee6666', type: 'dashed', width: 1.5 }, label: { formatter: `均值: ${avg.toFixed(2)}`, position: 'insideEndTop' } },
+      { name: '中位数', yAxis: median, lineStyle: { color: '#fac858', type: 'dashed', width: 1.5 }, label: { formatter: `中位: ${median.toFixed(2)}`, position: 'insideEndTop' } },
+    )
+  }
+
+  groupData.forEach(({ key, color, sorted, label }) => {
     const dates = sorted.map(r => r.forecast_date)
     const values = sorted.map(r => r.predicted_value)
 
-    const label = isSingle ? '预测值' : key
-
-    if (isSingle) {
-      // 单门店+单商品：折线 + 置信区间
-      const lower = sorted.map(r =>
-        r.lower_bound != null ? r.lower_bound : null
-      )
-      const upper = sorted.map(r =>
-        r.upper_bound != null ? r.upper_bound : null
-      )
-      const hasConfidence = lower.some(v => v != null)
+    if (mode === 'bar') {
+      series.push({
+        name: label,
+        type: 'bar',
+        data: values,
+        itemStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color },
+            { offset: 1, color: `${color}80` },
+          ]),
+          borderRadius: [2, 2, 0, 0],
+        },
+        barMaxWidth: 40,
+        markLine: isSingle && markLines.length ? { data: markLines, symbol: 'none' } : undefined,
+      })
+      legendData.push(label)
+    } else {
+      // line or area
+      const isArea = mode === 'area'
+      const hasConfidence = isSingle && sorted.some(r => r.lower_bound != null)
 
       if (hasConfidence) {
-        // 置信区间面积图
-        const confidenceArea = []
-        for (let i = 0; i < sorted.length; i++) {
-          confidenceArea.push([
-            dates[i],
-            upper[i] != null ? upper[i] : values[i],
-            lower[i] != null ? lower[i] : values[i],
-          ])
-        }
-
+        // 置信区间面积
         series.push({
           name: '置信区间',
           type: 'line',
@@ -415,40 +663,22 @@ function renderChart() {
               { offset: 1, color: `${color}10` },
             ]),
           },
-          tooltip: {
-            formatter: function (params) {
-              const idx = params.dataIndex
-              const item = sorted[idx]
-              return [
-                `<div style="font-size:12px;color:#999">${item.forecast_date}</div>`,
-                `<div>预测值: <b>${item.predicted_value.toFixed(2)}</b></div>`,
-                `<div>下限: ${item.lower_bound != null ? item.lower_bound.toFixed(2) : '-'}</div>`,
-                `<div>上限: ${item.upper_bound != null ? item.upper_bound.toFixed(2) : '-'}</div>`,
-              ].join('')
-            },
-          },
         })
-
-        // 上界轮廓线
+        // 上界
         series.push({
           name: '上界',
           type: 'line',
           data: sorted.map(r => r.upper_bound ?? r.predicted_value),
-          smooth: true,
-          symbol: 'none',
-          lineStyle: { color, width: 0 },
-          z: 0,
+          smooth: true, symbol: 'none',
+          lineStyle: { color, width: 0 }, z: 0,
         })
-
-        // 下界轮廓线
+        // 下界
         series.push({
           name: '下界',
           type: 'line',
           data: sorted.map(r => r.lower_bound ?? r.predicted_value),
-          smooth: true,
-          symbol: 'none',
-          lineStyle: { color, width: 0 },
-          z: 0,
+          smooth: true, symbol: 'none',
+          lineStyle: { color, width: 0 }, z: 0,
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
               { offset: 0, color: `${color}40` },
@@ -456,73 +686,35 @@ function renderChart() {
             ]),
           },
         })
-
-        // 预测值主线（覆盖在面积上）
-        series.push({
-          name: label,
-          type: 'line',
-          data: values,
-          smooth: true,
-          symbol: 'circle',
-          symbolSize: 6,
-          lineStyle: { color, width: 2 },
-          itemStyle: { color },
-          z: 2,
-          tooltip: {
-            formatter: function (params) {
-              const idx = params.dataIndex
-              const item = sorted[idx]
-              return [
-                `<div style="font-size:12px;color:#999">${item.forecast_date}</div>`,
-                `<div>${label}: <b>${item.predicted_value.toFixed(2)}</b></div>`,
-                `<div>下限: ${item.lower_bound != null ? item.lower_bound.toFixed(2) : '-'}</div>`,
-                `<div>上限: ${item.upper_bound != null ? item.upper_bound.toFixed(2) : '-'}</div>`,
-              ].join('')
-            },
-          },
-        })
-
-        legendData.push(label)
-      } else {
-        series.push({
-          name: label,
-          type: chartMode.value === 'area' ? 'line' : 'line',
-          data: values,
-          smooth: true,
-          symbol: 'circle',
-          symbolSize: 6,
-          lineStyle: { color, width: 2 },
-          itemStyle: { color },
-          areaStyle: chartMode.value === 'area' ? {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: `${color}40` },
-              { offset: 1, color: `${color}10` },
-            ]),
-          } : undefined,
-        })
-        legendData.push(label)
       }
-    } else {
-      // 多组合：多条折线
+
+      // 主线
       series.push({
         name: label,
         type: 'line',
         data: values,
         smooth: true,
         symbol: 'circle',
-        symbolSize: 5,
+        symbolSize: isSingle ? 6 : 4,
         lineStyle: { color, width: 2 },
         itemStyle: { color },
-        areaStyle: chartMode.value === 'area' ? {
+        areaStyle: isArea ? {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: `${color}30` },
-            { offset: 1, color: `${color}05` },
+            { offset: 0, color: `${color}40` },
+            { offset: 1, color: `${color}10` },
           ]),
         } : undefined,
+        z: 2,
+        markLine: isSingle && markLines.length && !hasConfidence ? { data: markLines, symbol: 'none' } : undefined,
       })
       legendData.push(label)
     }
   })
+
+  // 多分组时统计线放在第一个 series
+  if (markLines.length && !isSingle && series.length > 0) {
+    series[0].markLine = { data: markLines, symbol: 'none' }
+  }
 
   const option = {
     tooltip: {
@@ -538,14 +730,14 @@ function renderChart() {
       textStyle: { fontSize: 12 },
     },
     grid: {
-      left: 50,
+      left: 60,
       right: 30,
       top: 20,
-      bottom: 40,
+      bottom: 50,
     },
     xAxis: {
       type: 'category',
-      data: keys.length === 1 ? groups[keys[0]].map(r => r.forecast_date) : [],
+      data: isSingle ? groupData[0].sorted.map(r => r.forecast_date) : allDates,
       axisLabel: {
         rotate: 45,
         fontSize: 11,
@@ -562,7 +754,7 @@ function renderChart() {
       },
       splitLine: { lineStyle: { type: 'dashed', color: '#eee' } },
     },
-    dataZoom: keys.length > 20 ? [{
+    dataZoom: allDates.length > 20 ? [{
       type: 'inside',
       start: 0,
       end: 100,
@@ -627,8 +819,8 @@ async function handleExport() {
   }
 }
 
-// 图表模式切换时重新渲染
-watch(chartMode, () => {
+// 图表模式切换 / 统计线切换时重新渲染
+watch([chartMode, showStats], () => {
   if (forecastData.value.length > 0) {
     nextTick(() => renderChart())
   }
@@ -682,5 +874,22 @@ onBeforeUnmount(() => {
   margin-top: 16px;
   display: flex;
   justify-content: center;
+}
+
+.stat-item {
+  text-align: center;
+  padding: 12px 0;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  font-size: 22px;
+  font-weight: 600;
+  color: #303133;
 }
 </style>
