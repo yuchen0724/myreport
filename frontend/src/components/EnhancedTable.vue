@@ -53,7 +53,7 @@
         v-for="col in dynamicColumns"
         :key="col"
         :prop="col"
-        :label="col"
+        :label="columnLabels[col] || col"
         :width="storage.loadColumnWidth(col) || undefined"
         :fixed="storage.loadFixedColumn(col) || false"
         min-width="80"
