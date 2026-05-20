@@ -71,6 +71,7 @@ class ForecastItem(BaseModel):
     id: int
     store_code: str
     matnr: str
+    ware_name: Optional[str] = Field(None, description="商品名称")
     forecast_date: date
     predicted_value: float
     lower_bound: Optional[float] = None

@@ -191,6 +191,7 @@
           id: 'ID',
           store_code: '门店编码',
           matnr: '商品编码',
+          ware_name: '商品名称',
           forecast_date: '预测日期',
           predicted_value: '预测值',
           lower_bound: '置信下限',

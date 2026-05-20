@@ -40,6 +40,35 @@ class PredictionService:
         self.model_dir = settings.prediction_model_dir
         os.makedirs(self.model_dir, exist_ok=True)
 
+    def _lookup_ware_names(self, ds_id: int, pairs: list) -> dict:
+        """从 Doris 维度表批量查 ware_name，返回 (store_code, matnr) -> ware_name 字典
+
+        Args:
+            ds_id: 数据源 ID
+            pairs: [(store_code, matnr), ...]
+        Returns:
+            {(store_code, matnr): ware_name, ...}
+        """
+        if not pairs:
+            return {}
+        try:
+            ds = self.ds_repo.get_by_id(ds_id)
+            if not ds:
+                return {}
+            # 按 (store_code, matnr) 批量查询
+            pairs_str = ", ".join(
+                [f"('{sc}', '{mn}')" for sc, mn in pairs]
+            )
+            sql = f"SELECT store_code, matnr, ware_name FROM ads_fd_dim_store_ware WHERE (store_code, matnr) IN ({pairs_str})"
+            rows, cols = execute_query(ds, sql)
+            name_map = {}
+            for row in rows:
+                name_map[(row[0], row[1])] = row[2] if len(row) > 2 and row[2] else ""
+            return name_map
+        except Exception as e:
+            logger.warning(f"[预测] 查询商品名称失败: {e}")
+            return {}
+
     def _fetch_history_data(self, ds_id: int, days: int, table_name: str = None,
                            progress_callback: callable = None) -> pd.DataFrame:
         """从 Doris 按范围拉取历史销售数据，一次查询获取全部数据。
@@ -644,6 +673,13 @@ class PredictionService:
             if progress_callback:
                 progress_callback(model_record.id, store_idx + 1, total_stores, store_code)
 
+        # 批量查询商品名称
+        if results:
+            unique_pairs = list({(r.store_code, r.matnr) for r in results})
+            ware_name_map = self._lookup_ware_names(model_record.data_source_id, unique_pairs)
+            for r in results:
+                r.ware_name = ware_name_map.get((r.store_code, r.matnr), "")
+
         return results
 
     def predict(self, ds_id: int, forecast_days: int = None, table_name: str = None,
@@ -765,6 +801,13 @@ class PredictionService:
 
             if progress_callback:
                 progress_callback(model_record.id, store_idx + 1, total_stores, store_code)
+
+        # 批量查询商品名称
+        if results:
+            unique_pairs = list({(r.store_code, r.matnr) for r in results})
+            ware_name_map = self._lookup_ware_names(ds_id, unique_pairs)
+            for r in results:
+                r.ware_name = ware_name_map.get((r.store_code, r.matnr), "")
 
         count = self.result_repo.bulk_save(results)
         logger.info(f"[预测] 写入 {count} 条预测结果，模型 model_id={model_record.id}")

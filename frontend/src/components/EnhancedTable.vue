@@ -146,6 +146,7 @@ const FIELD_LABEL_MAP = {
   sorted_date: '日期',
   store_name: '门店名称',
   matnr_name: '商品名称',
+  ware_name: '商品名称',
 }
 
 function expandLabel(key) {

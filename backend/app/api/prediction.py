@@ -493,8 +493,22 @@ def get_forecast(
         req.sort_by or "forecast_date", req.sort_order or "asc",
         req.page_size, (req.page - 1) * req.page_size,
     )
+
+    # 已有预测结果可能没有 ware_name，查询时实时补填
+    need_fill = [r for r in results if not r.ware_name]
+    if need_fill:
+        from app.services.prediction_service import PredictionService
+        svc = PredictionService(db)
+        pairs = [(r.store_code, r.matnr) for r in need_fill]
+        unique_pairs = list({s: m for s, m in pairs})  # dedupe preserving last
+        unique_pairs = list(set(pairs))  # simple dedupe
+        name_map = svc._lookup_ware_names(req.data_source_id, unique_pairs)
+        for r in need_fill:
+            r.ware_name = name_map.get((r.store_code, r.matnr), "")
+
     items = [ForecastItem(
         id=r.id, store_code=r.store_code, matnr=r.matnr,
+        ware_name=r.ware_name,
         forecast_date=r.forecast_date, predicted_value=r.predicted_value,
         lower_bound=r.lower_bound, upper_bound=r.upper_bound,
     ) for r in results]
@@ -529,6 +543,7 @@ def export_forecast(
     data = [{
         "门店编码": r.store_code,
         "商品编码": r.matnr,
+        "商品名称": r.ware_name or "",
         "预测日期": r.forecast_date.isoformat(),
         "预测值": r.predicted_value,
         "下限": r.lower_bound if r.lower_bound is not None else "",
@@ -536,7 +551,7 @@ def export_forecast(
     } for r in results]
 
     if not data:
-        data = [{"门店编码": "", "商品编码": "", "预测日期": "", "预测值": "", "下限": "", "上限": ""}]
+        data = [{"门店编码": "", "商品编码": "", "商品名称": "", "预测日期": "", "预测值": "", "下限": "", "上限": ""}]
 
     df = pd.DataFrame(data)
     output = BytesIO()

@@ -33,6 +33,7 @@ class PredictionResult(Base):
     data_source_id = Column(Integer, nullable=False, comment="数据源ID")
     store_code = Column(String(32), nullable=False, comment="门店编码")
     matnr = Column(String(32), nullable=False, comment="商品编码")
+    ware_name = Column(String(500), nullable=True, comment="商品名称")
     forecast_date = Column(Date, nullable=False, comment="预测日期")
     predicted_value = Column(Float, nullable=False, comment="预测值（元）")
     lower_bound = Column(Float, nullable=True, comment="预测下限")
