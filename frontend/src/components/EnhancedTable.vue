@@ -53,7 +53,7 @@
         v-for="col in dynamicColumns"
         :key="col"
         :prop="col"
-        :label="columnLabels[col] || FIELD_LABEL_MAP[col] || col"
+        :label="getColumnLabel(col)"
         :width="storage.loadColumnWidth(col) || undefined"
         :fixed="storage.loadFixedColumn(col) || false"
         min-width="80"
@@ -149,6 +149,10 @@ const FIELD_LABEL_MAP = {
 }
 
 function expandLabel(key) {
+  return props.columnLabels[key] || FIELD_LABEL_MAP[key] || key
+}
+
+function getColumnLabel(key) {
   return props.columnLabels[key] || FIELD_LABEL_MAP[key] || key
 }
 
