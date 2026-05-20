@@ -62,7 +62,7 @@
       >
         <template #header>
           <div class="column-header-with-actions">
-            <span>{{ col }}</span>
+            <span>{{ getColumnLabel(col) }}</span>
             <el-dropdown trigger="click" size="small" @command="(cmd) => handleColumnAction(cmd, col)">
               <el-button size="small" circle :icon="MoreFilled" class="col-action-btn" />
               <template #dropdown>
