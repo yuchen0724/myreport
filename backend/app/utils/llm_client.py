@@ -128,7 +128,7 @@ class LLMClient:
         return (
             self.adapter == LLMAdapter.LANGCHAIN
             and self.provider == LLMProvider.OPENAI
-            and self.api_mode == "chat"
+            and self.api_mode in {"chat", "responses"}
         )
 
     def chat_structured(
@@ -140,7 +140,7 @@ class LLMClient:
         """
         调用 LLM 并按 Pydantic schema 返回结构化结果。
 
-        当前仅 LangChain OpenAI-compatible chat 模式支持。业务层应在失败时回退到 chat()。
+        当前仅 LangChain OpenAI-compatible chat/responses 模式支持。业务层应在失败时回退到 chat()。
         """
         if not self.supports_structured_output:
             raise LLMError(
@@ -196,9 +196,9 @@ class LLMClient:
                 f"LangChain adapter currently supports only openai provider, got: {self.provider}",
                 self.provider
             )
-        if self.api_mode != "chat":
+        if self.api_mode not in {"chat", "responses"}:
             raise LLMError(
-                f"LangChain adapter currently supports only chat api mode, got: {self.api_mode}",
+                f"LangChain adapter currently supports only chat/responses api mode, got: {self.api_mode}",
                 self.provider
             )
 
@@ -234,14 +234,19 @@ class LLMClient:
                 self.provider
             ) from e
 
-        return ChatOpenAI(
-            model=self.settings.llm_model or "gpt-3.5-turbo",
-            api_key=self.settings.llm_api_key,
-            base_url=self.settings.llm_api_base,
-            timeout=self.timeout,
-            max_retries=self.max_retries,
-            temperature=temperature,
-        )
+        kwargs = {
+            "model": self.settings.llm_model or "gpt-3.5-turbo",
+            "api_key": self.settings.llm_api_key,
+            "base_url": self.settings.llm_api_base,
+            "timeout": self.timeout,
+            "max_retries": self.max_retries,
+            "temperature": temperature,
+        }
+        if self.api_mode == "responses":
+            kwargs["use_responses_api"] = True
+            kwargs["output_version"] = "responses/v1"
+
+        return ChatOpenAI(**kwargs)
 
     def _extract_langchain_content(self, response: Any) -> str:
         """提取 LangChain 响应文本"""

@@ -48,7 +48,7 @@ async def get_frontend_config(current_user_id: int = Depends(get_current_user_id
             nl2sql_structured_output_enabled=(
                 settings.llm_adapter == "langchain"
                 and settings.llm_provider == "openai"
-                and settings.llm_api_mode == "chat"
+                and settings.llm_api_mode in {"chat", "responses"}
             ),
             nl2sql_schema_retrieval_enabled=settings.nl2sql_schema_retrieval_enabled,
             nl2sql_schema_retrieval_min_chars=settings.nl2sql_schema_retrieval_min_chars,

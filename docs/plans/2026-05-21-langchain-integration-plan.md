@@ -72,7 +72,7 @@
 实现说明：
 
 - `GeneratedSQLResult` 和 `NL2SQLChartConfig` 作为内部结构化输出 schema。
-- `LLMClient.chat_structured()` 仅在 `LLM_ADAPTER=langchain`、`LLM_PROVIDER=openai`、`LLM_API_MODE=chat` 时启用。
+- `LLMClient.chat_structured()` 仅在 `LLM_ADAPTER=langchain`、`LLM_PROVIDER=openai`、`LLM_API_MODE=chat|responses` 时启用。
 - `NL2SQLService` 会优先调用结构化输出，异常时回退到原始 `chat()` 文本 JSON 解析。
 
 ### 阶段 3：缓存与 Prompt 治理

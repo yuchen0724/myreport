@@ -60,3 +60,27 @@ async def test_frontend_config_structured_output_requires_langchain_openai_chat(
 
     assert response.nl2sql_structured_output_enabled is False
     config_api._cached_config = None
+
+
+@pytest.mark.asyncio
+async def test_frontend_config_structured_output_supports_responses(monkeypatch):
+    config_api._cached_config = None
+    monkeypatch.setattr(
+        config_api,
+        "get_settings",
+        lambda: SimpleNamespace(
+            nl2sql_timeout=300,
+            llm_adapter="langchain",
+            llm_provider="openai",
+            llm_model="gpt-5.4-nano",
+            llm_api_mode="responses",
+            nl2sql_schema_retrieval_enabled=True,
+            nl2sql_schema_retrieval_min_chars=12000,
+            nl2sql_schema_retrieval_max_sections=8,
+        ),
+    )
+
+    response = await config_api.get_frontend_config(current_user_id=1)
+
+    assert response.nl2sql_structured_output_enabled is True
+    config_api._cached_config = None

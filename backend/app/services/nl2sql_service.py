@@ -209,7 +209,7 @@ class NL2SQLService:
         group_id: Optional[int] = None
     ) -> str:
         """执行前应用已有的 NL2SQL SQL 修复规则"""
-        sql = self._fix_sql_table_names(sql, data_source_id, group_id=group_id)
+        logger.info("[NL2SQL] 跳过 _fix_sql_table_names，表名修正由 LLM 负责")
         sql = self._fix_sql_aggregate_orderby(sql)
         sql = self._fix_dim_date_column(sql)
         return sql
@@ -1456,6 +1456,19 @@ class NL2SQLService:
         if cte_names:
             logger.info(f"[NL2SQL] ℹ️ 跳过 WITH 定义的 CTE: {cte_names}")
         
+        # 提取 FROM/JOIN 中显式声明的别名（避免后续把别名误当表名加库前缀）
+        alias_pattern = (
+            r'(?:FROM|JOIN)\s+'
+            r'[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?'
+            r'\s+(?:AS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)'
+        )
+        aliases = {
+            alias.upper()
+            for alias in re.findall(alias_pattern, sql, re.IGNORECASE)
+        }
+        if aliases:
+            logger.info(f"[NL2SQL] ℹ️ 检测到 SQL 表别名: {aliases}")
+
         # 匹配 FROM/JOIN 后的表名，支持两种格式：
         # 1. db.table_name (带库名)
         # 2. table_name (不带库名)
@@ -1486,11 +1499,16 @@ class NL2SQLService:
                          'DUAL'}
             if full_table.upper() in skip_words:
                 continue
+
+            # 跳过已定义的表别名（别名不是实际物理表，不能加库名前缀）
+            if full_table.upper() in aliases:
+                logger.info(f"[NL2SQL] ✓ 跳过表别名: {full_table}")
+                continue
             
             # 添加库名前缀
             fixed_name = f"{db_name}.{full_table}"
             fixed_sql = re.sub(
-                rf'(?:FROM|JOIN)\s+{full_table}\b',
+                rf'(?:FROM|JOIN)\s+{re.escape(full_table)}\b',
                 lambda m: m.group(0).replace(full_table, fixed_name),
                 fixed_sql,
                 flags=re.IGNORECASE

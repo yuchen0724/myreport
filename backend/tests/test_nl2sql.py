@@ -316,3 +316,84 @@ def test_try_repair_and_execute_sql_success(monkeypatch):
     assert response.query_result["rows"] == [[1]]
     assert "自动修复: 字段修复" in response.suggestions[0].explanation
     assert query_service.executed_sql == "SELECT good_col FROM DUAL"
+
+
+def test_fix_sql_table_names_skip_alias_name_prefixing():
+    """别名被误当表名时，不应再补库名前缀"""
+
+    class FakeDSRepo:
+        def get_by_id(self, data_source_id):
+            return SimpleNamespace(database="analytics")
+
+    service = NL2SQLService(query_service=object(), db=None)
+    service.ds_repo = FakeDSRepo()
+
+    sql = (
+        "SELECT s.store_code "
+        "FROM dim_store s "
+        "JOIN s ON s.store_code = s.store_code"
+    )
+    fixed = service._fix_sql_table_names(sql, data_source_id=1)
+
+    assert "FROM analytics.dim_store s" in fixed
+    assert "JOIN analytics.s" not in fixed
+    assert "JOIN s ON" in fixed
+
+
+def test_prepare_sql_for_execution_does_not_call_fix_table_names(monkeypatch):
+    """执行前预处理不再调用表名前缀修复。"""
+    service = NL2SQLService(query_service=object(), db=None)
+
+    monkeypatch.setattr(
+        service,
+        "_fix_sql_table_names",
+        lambda sql, data_source_id, group_id=None: (_ for _ in ()).throw(
+            AssertionError("_fix_sql_table_names should not be called")
+        ),
+    )
+
+    sql = "SELECT dt FROM dim_date"
+    fixed = service._prepare_sql_for_execution(sql, data_source_id=1, group_id=100)
+    assert fixed == sql
+
+
+def test_try_repair_and_execute_sql_skips_fix_table_names(monkeypatch):
+    """自动修复后重执行路径也不调用表名前缀修复。"""
+
+    class FakeQueryService:
+        def execute_sql(self, request, user_id):
+            return SimpleNamespace(
+                columns=["good_col"],
+                rows=[[1]],
+                total=1,
+                execution_time_ms=10,
+            )
+
+    service = NL2SQLService(query_service=FakeQueryService(), db=None)
+    monkeypatch.setattr(
+        service,
+        "_repair_sql_with_llm",
+        lambda **kwargs: ("SELECT dt FROM dim_date", 0.7, "字段修复", None),
+    )
+    monkeypatch.setattr(
+        service,
+        "_fix_sql_table_names",
+        lambda sql, data_source_id, group_id=None: (_ for _ in ()).throw(
+            AssertionError("_fix_sql_table_names should not be called")
+        ),
+    )
+
+    response = service._try_repair_and_execute_sql(
+        llm_client=object(),
+        question="查询字段",
+        failed_sql="SELECT bad_col FROM DUAL",
+        error_msg="Unknown column bad_col",
+        request=NL2SQLRequest(question="查询字段", data_source_id=1),
+        user_id=1,
+        original_confidence=0.5,
+        original_explanation="初始生成",
+        original_chart_config=None,
+    )
+
+    assert response is not None
+    assert response.selected_sql == "SELECT dt FROM dim_date"

@@ -126,6 +126,55 @@ def test_langchain_adapter_invokes_chat_model(monkeypatch):
     ]
 
 
+def test_langchain_adapter_invokes_responses_api(monkeypatch):
+    captured = {}
+
+    messages_module = ModuleType("langchain_core.messages")
+
+    class SystemMessage:
+        def __init__(self, content):
+            self.content = content
+
+    class HumanMessage:
+        def __init__(self, content):
+            self.content = content
+
+    class AIMessage:
+        def __init__(self, content):
+            self.content = content
+
+    messages_module.SystemMessage = SystemMessage
+    messages_module.HumanMessage = HumanMessage
+    messages_module.AIMessage = AIMessage
+
+    openai_module = ModuleType("langchain_openai")
+
+    class ChatOpenAI:
+        def __init__(self, **kwargs):
+            captured["init"] = kwargs
+
+        def invoke(self, messages):
+            captured["messages"] = messages
+            return SimpleNamespace(content="OK")
+
+    openai_module.ChatOpenAI = ChatOpenAI
+
+    monkeypatch.setitem(__import__("sys").modules, "langchain_core.messages", messages_module)
+    monkeypatch.setitem(__import__("sys").modules, "langchain_openai", openai_module)
+    monkeypatch.setattr(
+        "app.utils.llm_client.get_settings",
+        lambda: make_settings(adapter="langchain", provider="openai", api_mode="responses"),
+    )
+
+    client = LLMClient()
+    result = client.chat([{"role": "user", "content": "hi"}], temperature=0.0)
+
+    assert result == "OK"
+    assert client.supports_structured_output is True
+    assert captured["init"]["use_responses_api"] is True
+    assert captured["init"]["output_version"] == "responses/v1"
+
+
 def test_langchain_adapter_invokes_structured_output(monkeypatch):
     captured = {}
 

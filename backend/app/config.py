@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     debug: bool = True
 
     # Database
-    database_url: str = "sqlite:///./app.db"
+    database_url: str = "postgresql://zhou@localhost:5432/myreport"
 
     # Redis
     redis_host: str = "localhost"
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 1440
 
     # Encryption for data source passwords
-    password_encryption_key: str = ""
+    password_encryption_key: str = "VT5RFR5hLoJCohCgtlCvuqpSqt1ES3x0xWBDtmP_B9w="
 
     # CORS
     cors_origins: List[str] = ["http://localhost:5173"]
@@ -53,12 +53,12 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
 
     # LLM / NL2SQL
-    llm_adapter: str = "raw"  # raw, langchain
-    llm_provider: str = "openai"  # openai, azure, ollama, anthropic
-    llm_api_base: str = "https://api.openai.com/v1"
-    llm_api_key: str = ""
-    llm_model: str = "gpt-3.5-turbo"
-    llm_api_mode: str = "chat"  # chat (chat.completions) 或 responses (OpenAI Responses API)
+    llm_adapter: str = "langchain"  # raw, langchain
+    llm_provider: str = "azure"  # openai, azure, ollama, anthropic
+    llm_api_base: str = "https://ai-gateway.dmall.com/9/openai/v1"
+    llm_api_key: str = "738f78fc-8deb-4378-a755-26c2f8e888fb"
+    llm_model: str = "gpt-5.4-nano"
+    llm_api_mode: str = "responses"  # chat (chat.completions) 或 responses (OpenAI Responses API)
     
     # Azure OpenAI
     azure_openai_endpoint: Optional[str] = None
