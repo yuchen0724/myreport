@@ -3,13 +3,13 @@
 LLM 客户端封装
 支持多种 LLM 提供商: OpenAI, Azure OpenAI, Ollama, Anthropic
 """
-import json
 import logging
 import os
 import time
 from enum import Enum
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Type
 import httpx
+from pydantic import BaseModel
 from app.config import get_settings
 
 # 同时使用 logger 和 print，确保日志输出可见
@@ -30,6 +30,12 @@ class LLMProvider(str, Enum):
     ANTHROPIC = "anthropic"
 
 
+class LLMAdapter(str, Enum):
+    """LLM 调用适配器枚举"""
+    RAW = "raw"
+    LANGCHAIN = "langchain"
+
+
 class LLMError(Exception):
     """LLM 调用错误"""
     def __init__(self, message: str, provider: str = None, status_code: int = None):
@@ -45,12 +51,14 @@ class LLMClient:
     def __init__(self, provider: str = None):
         settings = get_settings()
         self.settings = settings
+        self.adapter = (getattr(settings, 'llm_adapter', 'raw') or 'raw').lower()
         self.provider = (provider or settings.llm_provider or "openai").lower()
         self.max_retries = settings.nl2sql_max_retries or 2
         self.timeout = settings.nl2sql_timeout or 300  # 从配置读取超时时间
         self.api_mode = getattr(settings, 'llm_api_mode', 'chat') or 'chat'  # chat 或 responses
         
         print(f"[LLM] ═════════ 初始化 LLM Client ═════════", flush=True)
+        print(f"[LLM] ├─ Adapter: {self.adapter}", flush=True)
         print(f"[LLM] ├─ Provider: {self.provider}", flush=True)
         print(f"[LLM] ├─ Model: {settings.llm_model or 'default'}", flush=True)
         print(f"[LLM] ├─ API Base: {settings.llm_api_base or 'default'}", flush=True)
@@ -90,7 +98,11 @@ class LLMClient:
         
         print(f"[LLM] └─ 开始调用 LLM...", flush=True)
         
-        if self.provider == LLMProvider.OPENAI:
+        if self.adapter == LLMAdapter.LANGCHAIN:
+            result = self._call_langchain(messages, temperature)
+        elif self.adapter != LLMAdapter.RAW:
+            raise LLMError(f"Unsupported LLM adapter: {self.adapter}", self.provider)
+        elif self.provider == LLMProvider.OPENAI:
             result = self._call_openai(messages, temperature)
         elif self.provider == LLMProvider.AZURE:
             result = self._call_azure(messages, temperature)
@@ -109,6 +121,144 @@ class LLMClient:
         print(f"[LLM] └─ 响应内容: {result_preview}", flush=True)
         
         return result
+
+    @property
+    def supports_structured_output(self) -> bool:
+        """当前配置是否支持结构化输出"""
+        return (
+            self.adapter == LLMAdapter.LANGCHAIN
+            and self.provider == LLMProvider.OPENAI
+            and self.api_mode == "chat"
+        )
+
+    def chat_structured(
+        self,
+        messages: List[Dict[str, str]],
+        response_model: Type[BaseModel],
+        temperature: float = 0.0
+    ) -> Dict[str, Any]:
+        """
+        调用 LLM 并按 Pydantic schema 返回结构化结果。
+
+        当前仅 LangChain OpenAI-compatible chat 模式支持。业务层应在失败时回退到 chat()。
+        """
+        if not self.supports_structured_output:
+            raise LLMError(
+                f"Structured output is not supported by adapter={self.adapter}, "
+                f"provider={self.provider}, api_mode={self.api_mode}",
+                self.provider
+            )
+
+        result = self._call_langchain_structured(messages, response_model, temperature)
+        if isinstance(result, BaseModel):
+            return result.model_dump()
+        if isinstance(result, dict):
+            return result
+        if hasattr(result, "model_dump"):
+            return result.model_dump()
+        raise LLMError(
+            f"LangChain structured output returned unsupported type: {type(result).__name__}",
+            self.provider
+        )
+
+    def _call_langchain(self, messages: List[Dict[str, str]], temperature: float) -> str:
+        """使用 LangChain 调用 OpenAI 兼容 Chat 模型"""
+        lc_messages = self._build_langchain_messages(messages)
+        model = self._build_langchain_chat_model(temperature)
+
+        try:
+            response = model.invoke(lc_messages)
+        except Exception as e:
+            raise LLMError(f"LangChain OpenAI API error: {str(e)}", self.provider) from e
+
+        return self._extract_langchain_content(response)
+
+    def _call_langchain_structured(
+        self,
+        messages: List[Dict[str, str]],
+        response_model: Type[BaseModel],
+        temperature: float
+    ) -> Any:
+        """使用 LangChain 结构化输出调用模型"""
+        lc_messages = self._build_langchain_messages(messages)
+        model = self._build_langchain_chat_model(temperature)
+
+        try:
+            structured_model = model.with_structured_output(response_model)
+            return structured_model.invoke(lc_messages)
+        except Exception as e:
+            raise LLMError(f"LangChain structured output error: {str(e)}", self.provider) from e
+
+    def _build_langchain_messages(self, messages: List[Dict[str, str]]) -> List[Any]:
+        """将 OpenAI 风格消息转换为 LangChain 消息对象"""
+        if self.provider != LLMProvider.OPENAI:
+            raise LLMError(
+                f"LangChain adapter currently supports only openai provider, got: {self.provider}",
+                self.provider
+            )
+        if self.api_mode != "chat":
+            raise LLMError(
+                f"LangChain adapter currently supports only chat api mode, got: {self.api_mode}",
+                self.provider
+            )
+
+        try:
+            from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+        except ImportError as e:
+            raise LLMError(
+                "LangChain adapter requires langchain-core. "
+                "Install backend requirements before enabling LLM_ADAPTER=langchain.",
+                self.provider
+            ) from e
+
+        lc_messages = []
+        for message in messages:
+            role = message.get("role", "user")
+            content = message.get("content", "")
+            if role == "system":
+                lc_messages.append(SystemMessage(content=content))
+            elif role == "assistant":
+                lc_messages.append(AIMessage(content=content))
+            else:
+                lc_messages.append(HumanMessage(content=content))
+        return lc_messages
+
+    def _build_langchain_chat_model(self, temperature: float) -> Any:
+        """构建 LangChain ChatOpenAI 模型"""
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as e:
+            raise LLMError(
+                "LangChain adapter requires langchain-core and langchain-openai. "
+                "Install backend requirements before enabling LLM_ADAPTER=langchain.",
+                self.provider
+            ) from e
+
+        return ChatOpenAI(
+            model=self.settings.llm_model or "gpt-3.5-turbo",
+            api_key=self.settings.llm_api_key,
+            base_url=self.settings.llm_api_base,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+            temperature=temperature,
+        )
+
+    def _extract_langchain_content(self, response: Any) -> str:
+        """提取 LangChain 响应文本"""
+        content = getattr(response, "content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    parts.append(str(item.get("text") or item.get("content") or ""))
+                else:
+                    parts.append(str(item))
+            return "".join(parts)
+        return str(content)
     
     def _call_openai(self, messages: List[Dict[str, str]], temperature: float) -> str:
         """调用 OpenAI 兼容 API（使用原生 httpx）

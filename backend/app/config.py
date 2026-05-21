@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
 
     # LLM / NL2SQL
+    llm_adapter: str = "raw"  # raw, langchain
     llm_provider: str = "openai"  # openai, azure, ollama, anthropic
     llm_api_base: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
@@ -71,6 +72,9 @@ class Settings(BaseSettings):
     nl2sql_max_retries: int = 2
     nl2sql_timeout: int = 300  # LLM 调用超时 5 分钟（可配置）
     nl2sql_cache_ttl: int = 3600  # 缓存 1 小时
+    nl2sql_schema_retrieval_enabled: bool = True
+    nl2sql_schema_retrieval_min_chars: int = 12000
+    nl2sql_schema_retrieval_max_sections: int = 8
 
     # Prediction (销售预测)
     prediction_enabled: bool = False

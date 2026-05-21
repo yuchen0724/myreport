@@ -1,6 +1,7 @@
 # backend/app/services/nl2sql_service.py
 # pyright: reportGeneralTypeIssues=false, reportArgumentType=false, reportOptionalMemberAccess=false
 import json
+import hashlib
 import logging
 import os
 import re
@@ -8,9 +9,11 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 
-from app.schemas.nl2sql import NL2SQLRequest, NL2SQLResponse, SQLSuggestion
+from app.config import get_settings
+from app.schemas.nl2sql import GeneratedSQLResult, NL2SQLRequest, NL2SQLResponse, SQLSuggestion
 from app.utils.nl2sql_rules import NL2SQLRuleEngine
 from app.utils.llm_client import LLMClient, LLMError, get_llm_client
+from app.utils.nl2sql_cache import get_nl2sql_cache
 from app.utils.sql_validator import SQLValidator
 from app.services.query_service import QueryService
 from app.schemas.query import SQLQueryRequest
@@ -18,6 +21,8 @@ from app.repositories.data_source_repository import DataSourceRepository
 from app.core.security import decrypt_password
 
 logger = logging.getLogger(__name__)
+
+NL2SQL_PROMPT_VERSION = "nl2sql-langchain-structured-v1"
 
 
 class NL2SQLService:
@@ -60,12 +65,14 @@ class NL2SQLService:
         confidence = 0.0
         explanation = ""
         used_llm = False
+        llm_client_for_repair = None
 
         # 1. 尝试使用 LLM 生成 SQL
         chart_config = None  # LLM 推荐的图表配置
         logger.info("[NL2SQL] 📌 步骤1: 尝试使用 LLM 生成 SQL...")
         try:
             llm_client = self._get_llm_client()
+            llm_client_for_repair = llm_client
             logger.info(f"[NL2SQL] ├─ LLM 客户端初始化完成, timeout={llm_client.timeout}")
             
             sql, confidence, explanation, chart_config = self._generate_sql_with_llm(
@@ -123,14 +130,7 @@ class NL2SQLService:
         # 5. 执行 SQL 查询
         logger.info("[NL2SQL] 📌 步骤4: 执行 SQL 查询...")
         
-        # 【新增】校验并修复 SQL 中的表名（确保带库名前缀）
-        sql = self._fix_sql_table_names(sql, request.data_source_id, group_id=request.group_id)
-        
-        # 【新增】自动修复聚合查询 + ORDER BY 但无 GROUP BY 的问题
-        sql = self._fix_sql_aggregate_orderby(sql)
-        
-        # 【新增】自动修复 dim_date 表中 dt 列引用为 date_id
-        sql = self._fix_dim_date_column(sql)
+        sql = self._prepare_sql_for_execution(sql, request.data_source_id, group_id=request.group_id)
         
         query_request = SQLQueryRequest(
             data_source_id=request.data_source_id,
@@ -171,6 +171,21 @@ class NL2SQLService:
             # 查询失败，返回建议但不返回结果
             error_msg = str(e) if str(e) else f"{type(e).__name__}"
             logger.error(f"[NL2SQL] ❌ 查询执行失败: {error_msg}")
+
+            if used_llm and llm_client_for_repair:
+                repaired = self._try_repair_and_execute_sql(
+                    llm_client=llm_client_for_repair,
+                    question=request.question,
+                    failed_sql=sql,
+                    error_msg=error_msg,
+                    request=request,
+                    user_id=user_id,
+                    original_confidence=confidence,
+                    original_explanation=explanation,
+                    original_chart_config=chart_config,
+                )
+                if repaired:
+                    return repaired
             
             suggestion = SQLSuggestion(
                 sql=sql,
@@ -186,6 +201,96 @@ class NL2SQLService:
                 execution_time_ms=None,
                 recommended_chart=chart_config
             )
+
+    def _prepare_sql_for_execution(
+        self,
+        sql: str,
+        data_source_id: int,
+        group_id: Optional[int] = None
+    ) -> str:
+        """执行前应用已有的 NL2SQL SQL 修复规则"""
+        sql = self._fix_sql_table_names(sql, data_source_id, group_id=group_id)
+        sql = self._fix_sql_aggregate_orderby(sql)
+        sql = self._fix_dim_date_column(sql)
+        return sql
+
+    def _try_repair_and_execute_sql(
+        self,
+        llm_client: LLMClient,
+        question: str,
+        failed_sql: str,
+        error_msg: str,
+        request: NL2SQLRequest,
+        user_id: int,
+        original_confidence: float,
+        original_explanation: str,
+        original_chart_config: Optional[Dict[str, Any]],
+    ) -> Optional[NL2SQLResponse]:
+        """查询执行失败后，尝试一次受控 SQL 修复并执行"""
+        logger.info("[NL2SQL] 📌 步骤5: 尝试 LLM 自动修复 SQL...")
+        try:
+            repaired_sql, repaired_confidence, repaired_explanation, repaired_chart_config = self._repair_sql_with_llm(
+                llm_client=llm_client,
+                question=question,
+                failed_sql=failed_sql,
+                error_msg=error_msg,
+                data_source_id=request.data_source_id,
+                group_id=request.group_id,
+                context=request.context,
+            )
+        except Exception as repair_error:
+            logger.warning(f"[NL2SQL] ⚠️ SQL 自动修复失败: {repair_error}")
+            return None
+
+        is_valid, validation_msg = SQLValidator.validate(repaired_sql)
+        if not is_valid:
+            logger.warning(f"[NL2SQL] ⚠️ 修复 SQL 未通过安全校验: {validation_msg}")
+            return None
+        logger.info("[NL2SQL] 修复 SQL 安全校验通过")
+
+        repaired_sql = self._prepare_sql_for_execution(
+            repaired_sql,
+            request.data_source_id,
+            group_id=request.group_id,
+        )
+        repaired_request = SQLQueryRequest(
+            data_source_id=request.data_source_id,
+            sql=repaired_sql,
+            params={},
+            skip_deep_pagination_check=True,
+        )
+
+        try:
+            result = self.query_service.execute_sql(repaired_request, user_id)
+        except Exception as execute_error:
+            logger.warning(f"[NL2SQL] ⚠️ 修复 SQL 执行仍失败: {execute_error}")
+            return None
+
+        explanation = (
+            f"{original_explanation}\n自动修复: {repaired_explanation}"
+            if original_explanation
+            else f"自动修复: {repaired_explanation}"
+        )
+        chart_config = repaired_chart_config or original_chart_config
+        suggestion = SQLSuggestion(
+            sql=repaired_sql,
+            confidence=repaired_confidence or original_confidence,
+            explanation=explanation,
+            chart_config=chart_config,
+        )
+
+        logger.info("[NL2SQL] ✅ 修复 SQL 执行成功")
+        return NL2SQLResponse(
+            suggestions=[suggestion],
+            selected_sql=repaired_sql,
+            query_result={
+                "columns": result.columns,
+                "rows": result.rows,
+                "total": result.total,
+            },
+            execution_time_ms=result.execution_time_ms,
+            recommended_chart=chart_config,
+        )
 
     def _generate_sql_with_llm(
         self, llm_client: LLMClient, question: str, data_source_id: int,
@@ -219,71 +324,29 @@ class NL2SQLService:
         # 1. 构建 schema prompt
         logger.info("[NL2SQL] ├─ 步骤1: 构建 Schema prompt...")
         schema_prompt = self.build_schema_prompt(data_source_id)
+        schema_prompt = self._select_relevant_schema_prompt(question, schema_prompt)
         logger.info(f"[NL2SQL] │   └─ Schema 长度: {len(schema_prompt)} 字符")
 
-# 2. 构建系统提示词
+        cache_context = self._build_generation_cache_context(
+            llm_client=llm_client,
+            group_id=group_id,
+            context=context,
+            schema_prompt=schema_prompt,
+        )
+        cached_generation = self._get_cached_generation(question, data_source_id, cache_context)
+        if cached_generation:
+            logger.info("[NL2SQL] ✅ 命中 NL2SQL 生成缓存")
+            print(f"[NL2SQL] │   └─ 命中 NL2SQL 生成缓存", flush=True)
+            return cached_generation
+
+        # 2. 构建系统提示词
         print(f"[NL2SQL] ├─ 步骤2: 构建系统提示词...", flush=True)
-        
-        # 使用 print 输出完整的 system prompt，方便调试
-        system_prompt = f"""你是一个数据分析专家，擅长将自然语言问题转换为 SQL 查询，并推荐合适的可视化图表。
-
-## 数据库类型
-当前数据源类型: **{db_type}**
-{db_limitations}
-
-## 数据源信息
-{schema_prompt}
-
-## 当前用户上下文
-- 当前用户集团ID：{'**' + str(group_id) + '**（已确认，该用户的查询应基于此集团的数据）' if group_id else '未知（未指定，按全局数据查询）'}
-
-## 规则
-1. 只生成 SELECT 查询，禁止生成 UPDATE/DELETE/DROP 等操作
-2. 【重要】所有表名必须带库名前缀，如 `库名.表名`（例如 `ads_cockpit_freedom.store_sales`），否则跨库查询会失败！
-3. 【关键】必须严格使用下方语义层文档中定义的字段名，**禁止使用文档中不存在的字段**！
-   - **【必须】在生成 SQL 前，必须逐一核对每个字段是否在该表的语义层文档中有定义**
-   - **【严重】禁止使用其他表的字段混到当前表中，即使字段名相同也不行！每个表有自己独立的字段列表**
-   - **【警告】文档中记录的字段可能与实际表结构有差异！如果 SQL 执行报错字段不存在，必须立即改用文档中明确存在的其他字段，禁止使用任何未经验证的字段！**
-   - 字段名必须完全匹配（如 `store_code` 不能写成 `store_name` 或 `store`）
-   - 如果需要的字段在文档中不存在，请在 explanation 中说明，并使用文档中存在的相似字段
-4. 条件要准确匹配问题中的语义
-5. 日期格式使用 YYYYMMDD（如 20260508）
-6. 【重要】必须包含 ORDER BY 子句以支持分页，没有 ORDER BY 会导致查询失败！如果查询是聚合查询（SUM/COUNT/AVG等），**ORDER BY 的列必须在 SELECT 中或 GROUP BY 子句中**，且必须包含 GROUP BY！
-7. 【重要】关于 group_id 和分表选择规则（ads_cockpit_fd_store_ware_d 系列表按集团分表）：
-   - 【核心规则】ads_cockpit_fd_store_ware_d 表是按集团分表的！！！不同集团的数据存不同后缀的表中。**必须根据「当前用户上下文」中的集团ID使用对应的分表名，不能使用无后缀的基础表名！**
-   - 【分表规则】分表后缀 = group_id，例如 group_id=812 时表名应为 ads_cockpit_fd_store_ware_d_812
-   - 已知分表映射：
-     - group_id=57362 → `ads_cockpit_fd_store_ware_d_57362`
-     - group_id=812 → `ads_cockpit_fd_store_ware_d_812`
-     - group_id=其他 → `ads_cockpit_fd_store_ware_d_其他`
-   - 【重要】基础表名 `ads_cockpit_fd_store_ware_d`（无后缀）是除已列举集团以外的其他集团数据，**不要使用它**，除非「当前用户上下文」明确说集团ID未知
-   - 【必须】如果「当前用户上下文」中给出了集团ID，必须在 SQL 中使用对应的分表名，并且在 WHERE 条件中添加 `group_id = xxx`
-   - 注意：此规则同样适用于同结构的 ads_fd_dim_store_ware 维度表
-8. 不要使用 SQL 注释（-- 或 /* */）
-9. 不要在 SQL 末尾添加分号
-10. 根据查询结果判断合适的图表类型：
-   - 柱状图(bar)：适合对比分类数据的大小
-   - 折线图(line)：适合展示趋势变化
-   - 饼图(pie)：适合展示占比关系
-   - 散点图(scatter)：适合展示相关性
-11. X轴选择维度/分类字段，Y轴选择数值/指标字段
-12. 【推荐】使用中文作为字段别名，例如 `SUM(sale_amt) AS `销售额``，方便非技术人员理解，注意用反引号包裹中文别名
-13. 【重要】金额和数量类指标必须保留2位小数，使用 `ROUND(字段, 2)` 或 `CAST(字段 AS DECIMAL(18,2))`
-
-## 输出格式
-请返回以下 JSON 格式（不要添加任何其他文字）：
-{{
-  "sql": "生成的 SQL 语句",
-  "confidence": 0.0-1.0,
-  "explanation": "SQL 生成逻辑的简要说明（必须说明使用了哪些字段，这些字段在文档中是否存在）",
-  "chart_config": {{
-    "chart_type": "bar|line|pie|scatter",
-    "x_axis": "X轴字段名（维度/分类）",
-    "y_axis": "Y轴字段名（数值/指标）",
-    "reason": "选择该图表配置的原因"
-  }}
-}}
-"""
+        system_prompt = self._build_system_prompt(
+            db_type=db_type,
+            db_limitations=db_limitations,
+            schema_prompt=schema_prompt,
+            group_id=group_id,
+        )
         print(f"[NL2SQL] │   └─ System prompt 长度: {len(system_prompt)} 字符", flush=True)
         print(f"[NL2SQL] │   └─ Schema preview: {schema_prompt[:200]}...", flush=True)
 
@@ -307,14 +370,26 @@ class NL2SQLService:
         print(f"[NL2SQL] │   ├─ Messages prepared", flush=True)
         
         print(f"[NL2SQL] │   └─ 正在等待 LLM 响应...", flush=True)
-        response = llm_client.chat(messages, temperature=0.0)
-        
-        print(f"[NL2SQL] │       └─ LLM 响应长度: {len(response)} 字符", flush=True)
-        print(f"[NL2SQL] │           └─ LLM 响应(前200字符): {response[:200]}...", flush=True)
+        result = None
+        if getattr(llm_client, "supports_structured_output", False):
+            try:
+                result = llm_client.chat_structured(messages, GeneratedSQLResult, temperature=0.0)
+                print(f"[NL2SQL] │       └─ LLM 结构化响应获取成功", flush=True)
+            except Exception as e:
+                logger.warning(f"[NL2SQL] 结构化输出失败，回退到文本解析: {e}")
+                print(f"[NL2SQL] │       └─ 结构化输出失败，回退到文本解析: {e}", flush=True)
 
-        # 4. 解析 JSON 响应
-        print(f"[NL2SQL] ├─ 步骤4: 解析 LLM JSON 响应", flush=True)
-        result = self._parse_llm_response(response)
+        if result is None:
+            response = llm_client.chat(messages, temperature=0.0)
+            
+            print(f"[NL2SQL] │       └─ LLM 响应长度: {len(response)} 字符", flush=True)
+            print(f"[NL2SQL] │           └─ LLM 响应(前200字符): {response[:200]}...", flush=True)
+
+            # 4. 解析 JSON 响应
+            print(f"[NL2SQL] ├─ 步骤4: 解析 LLM JSON 响应", flush=True)
+            result = self._parse_llm_response(response)
+        else:
+            print(f"[NL2SQL] ├─ 步骤4: 使用 LLM 结构化响应", flush=True)
 
         if not result:
             print(f"[NL2SQL] │   └─ ❌ 无法解析 LLM 响应为 JSON", flush=True)
@@ -391,9 +466,372 @@ class NL2SQLService:
             print(f"[NL2SQL] │   └─ ❌ LLM 返回的 SQL 为空", flush=True)
             raise ValueError("LLM 未返回有效的 SQL")
 
+        self._cache_generation(
+            question=question,
+            data_source_id=data_source_id,
+            sql=sql,
+            confidence=confidence,
+            explanation=explanation,
+            chart_config=chart_config,
+            cache_context=cache_context,
+        )
+
         logger.info("[NL2SQL] └─ ✅ _generate_sql_with_llm 执行完成")
         
         return sql, confidence, explanation, chart_config
+
+    def _select_relevant_schema_prompt(self, question: str, schema_prompt: str) -> str:
+        """
+        从长语义层文档中选择相关章节。
+
+        保守策略：短文本、未命中、压缩收益不明显时返回原文。
+        """
+        settings = get_settings()
+        if not getattr(settings, "nl2sql_schema_retrieval_enabled", True):
+            logger.debug("[NL2SQL] Schema 检索已关闭，使用完整 schema prompt")
+            return schema_prompt
+
+        min_chars = getattr(settings, "nl2sql_schema_retrieval_min_chars", 12000)
+        if len(schema_prompt) < min_chars:
+            logger.debug(
+                "[NL2SQL] Schema prompt 长度 %s 小于检索阈值 %s，使用完整 schema prompt",
+                len(schema_prompt),
+                min_chars,
+            )
+            return schema_prompt
+
+        sections = self._split_schema_sections(schema_prompt)
+        if len(sections) <= 2:
+            logger.debug("[NL2SQL] Schema prompt 章节数不足，使用完整 schema prompt")
+            return schema_prompt
+
+        terms = self._extract_retrieval_terms(question)
+        if not terms:
+            logger.debug("[NL2SQL] 未提取到 schema 检索关键词，使用完整 schema prompt")
+            return schema_prompt
+
+        preamble = sections[0][1] if sections[0][0] == "__preamble__" else ""
+        scored_sections = []
+        for heading, content in sections:
+            if heading == "__preamble__":
+                continue
+            score = self._score_schema_section(content, terms)
+            if score > 0:
+                scored_sections.append((score, content))
+
+        if not scored_sections:
+            logger.info("[NL2SQL] Schema 检索未命中相关章节，使用完整 schema prompt")
+            return schema_prompt
+
+        max_sections = getattr(settings, "nl2sql_schema_retrieval_max_sections", 8)
+        selected = sorted(scored_sections, key=lambda item: item[0], reverse=True)[:max_sections]
+        selected_contents = [
+            content
+            for _, content in sorted(selected, key=lambda item: schema_prompt.find(item[1]))
+        ]
+        compact_prompt = (
+            f"{preamble.rstrip()}\n\n"
+            "## 已筛选的相关语义层片段\n"
+            f"以下内容基于用户问题筛选，prompt 版本: {NL2SQL_PROMPT_VERSION}。\n\n"
+            + "\n\n".join(content.strip() for content in selected_contents)
+        ).strip()
+
+        if len(compact_prompt) >= len(schema_prompt) * 0.9:
+            logger.info("[NL2SQL] Schema 检索压缩收益不足，使用完整 schema prompt")
+            return schema_prompt
+
+        logger.info(
+            "[NL2SQL] Schema prompt 已压缩: %s -> %s 字符，章节数=%s",
+            len(schema_prompt),
+            len(compact_prompt),
+            len(selected_contents),
+        )
+        return compact_prompt
+
+    def _split_schema_sections(self, schema_prompt: str) -> List[Tuple[str, str]]:
+        """按 markdown 标题切分 schema prompt"""
+        matches = list(re.finditer(r"(?m)^(#{2,4}\s+.+)$", schema_prompt))
+        if not matches:
+            return [("__preamble__", schema_prompt)]
+
+        sections: List[Tuple[str, str]] = []
+        if matches[0].start() > 0:
+            sections.append(("__preamble__", schema_prompt[:matches[0].start()].strip()))
+
+        for idx, match in enumerate(matches):
+            start = match.start()
+            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(schema_prompt)
+            sections.append((match.group(1).strip(), schema_prompt[start:end].strip()))
+        return sections
+
+    def _extract_retrieval_terms(self, question: str) -> List[str]:
+        """提取用于 schema 章节检索的轻量关键词"""
+        terms = set()
+        normalized = question.lower()
+
+        for token in re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{1,}", normalized):
+            terms.add(token)
+
+        for chunk in re.findall(r"[\u4e00-\u9fff]{2,}", question):
+            terms.add(chunk)
+            for size in (2, 3, 4):
+                if len(chunk) >= size:
+                    for i in range(len(chunk) - size + 1):
+                        terms.add(chunk[i:i + size])
+
+        stop_terms = {
+            "查询", "统计", "分析", "显示", "获取", "一下", "多少", "哪些",
+            "今天", "昨日", "昨天", "本周", "本月", "去年", "今年",
+        }
+        return sorted((term for term in terms if term not in stop_terms), key=len, reverse=True)
+
+    def _score_schema_section(self, section: str, terms: List[str]) -> int:
+        """计算 schema 章节与问题关键词的匹配分"""
+        normalized = section.lower()
+        score = 0
+        for term in terms:
+            if term in normalized:
+                score += max(1, len(term))
+        return score
+
+    def _build_system_prompt(
+        self,
+        db_type: str,
+        db_limitations: str,
+        schema_prompt: str,
+        group_id: Optional[int] = None
+    ) -> str:
+        """构建 NL2SQL 系统提示词"""
+        group_context = (
+            f"**{group_id}**（已确认，该用户的查询应基于此集团的数据）"
+            if group_id
+            else "未知（未指定，按全局数据查询）"
+        )
+        return f"""你是一个数据分析专家，擅长将自然语言问题转换为 SQL 查询，并推荐合适的可视化图表。
+
+## 数据库类型
+当前数据源类型: **{db_type}**
+{db_limitations}
+
+## 数据源信息
+{schema_prompt}
+
+## 当前用户上下文
+- 当前用户集团ID：{group_context}
+
+## 规则
+1. 只生成 SELECT 查询，禁止生成 UPDATE/DELETE/DROP 等操作
+2. 【重要】所有表名必须带库名前缀，如 `库名.表名`（例如 `ads_cockpit_freedom.store_sales`），否则跨库查询会失败！
+3. 【关键】必须严格使用下方语义层文档中定义的字段名，**禁止使用文档中不存在的字段**！
+   - **【必须】在生成 SQL 前，必须逐一核对每个字段是否在该表的语义层文档中有定义**
+   - **【严重】禁止使用其他表的字段混到当前表中，即使字段名相同也不行！每个表有自己独立的字段列表**
+   - **【警告】文档中记录的字段可能与实际表结构有差异！如果 SQL 执行报错字段不存在，必须立即改用文档中明确存在的其他字段，禁止使用任何未经验证的字段！**
+   - 字段名必须完全匹配（如 `store_code` 不能写成 `store_name` 或 `store`）
+   - 如果需要的字段在文档中不存在，请在 explanation 中说明，并使用文档中存在的相似字段
+4. 条件要准确匹配问题中的语义
+5. 日期格式使用 YYYYMMDD（如 20260508）
+6. 【重要】必须包含 ORDER BY 子句以支持分页，没有 ORDER BY 会导致查询失败！如果查询是聚合查询（SUM/COUNT/AVG等），**ORDER BY 的列必须在 SELECT 中或 GROUP BY 子句中**，且必须包含 GROUP BY！
+7. 【重要】关于 group_id 和分表选择规则（ads_cockpit_fd_store_ware_d 系列表按集团分表）：
+   - 【核心规则】ads_cockpit_fd_store_ware_d 表是按集团分表的！！！不同集团的数据存不同后缀的表中。**必须根据「当前用户上下文」中的集团ID使用对应的分表名，不能使用无后缀的基础表名！**
+   - 【分表规则】分表后缀 = group_id，例如 group_id=812 时表名应为 ads_cockpit_fd_store_ware_d_812
+   - 已知分表映射：
+     - group_id=57362 → `ads_cockpit_fd_store_ware_d_57362`
+     - group_id=812 → `ads_cockpit_fd_store_ware_d_812`
+     - group_id=其他 → `ads_cockpit_fd_store_ware_d_其他`
+   - 【重要】基础表名 `ads_cockpit_fd_store_ware_d`（无后缀）是除已列举集团以外的其他集团数据，**不要使用它**，除非「当前用户上下文」明确说集团ID未知
+   - 【必须】如果「当前用户上下文」中给出了集团ID，必须在 SQL 中使用对应的分表名，并且在 WHERE 条件中添加 `group_id = xxx`
+   - 注意：此规则同样适用于同结构的 ads_fd_dim_store_ware 维度表
+8. 不要使用 SQL 注释（-- 或 /* */）
+9. 不要在 SQL 末尾添加分号
+10. 根据查询结果判断合适的图表类型：
+   - 柱状图(bar)：适合对比分类数据的大小
+   - 折线图(line)：适合展示趋势变化
+   - 饼图(pie)：适合展示占比关系
+   - 散点图(scatter)：适合展示相关性
+11. X轴选择维度/分类字段，Y轴选择数值/指标字段
+12. 【推荐】使用中文作为字段别名，例如 `SUM(sale_amt) AS `销售额``，方便非技术人员理解，注意用反引号包裹中文别名
+13. 【重要】金额和数量类指标必须保留2位小数，使用 `ROUND(字段, 2)` 或 `CAST(字段 AS DECIMAL(18,2))`
+
+## 输出格式
+请返回以下 JSON 格式（不要添加任何其他文字）：
+{{
+  "sql": "生成的 SQL 语句",
+  "confidence": 0.0-1.0,
+  "explanation": "SQL 生成逻辑的简要说明（必须说明使用了哪些字段，这些字段在文档中是否存在）",
+  "chart_config": {{
+    "chart_type": "bar|line|pie|scatter",
+    "x_axis": "X轴字段名（维度/分类）",
+    "y_axis": "Y轴字段名（数值/指标）",
+    "reason": "选择该图表配置的原因"
+  }}
+}}
+"""
+
+    def _repair_sql_with_llm(
+        self,
+        llm_client: LLMClient,
+        question: str,
+        failed_sql: str,
+        error_msg: str,
+        data_source_id: int,
+        group_id: Optional[int] = None,
+        context: Optional[str] = None,
+    ) -> Tuple[str, float, str, Optional[Dict[str, Any]]]:
+        """基于执行错误让 LLM 修复 SQL，返回候选 SQL"""
+        ds = self.ds_repo.get_by_id(data_source_id) if self.ds_repo else None
+        db_type = ds.type.upper() if ds and ds.type else "DORIS"
+        db_limitations = self._get_db_limitations(db_type)
+        schema_prompt = self.build_schema_prompt(data_source_id)
+        schema_prompt = self._select_relevant_schema_prompt(
+            f"{question}\n{failed_sql}\n{error_msg}",
+            schema_prompt,
+        )
+        system_prompt = self._build_system_prompt(
+            db_type=db_type,
+            db_limitations=db_limitations,
+            schema_prompt=schema_prompt,
+            group_id=group_id,
+        )
+        repair_prompt = f"""## SQL 修复模式
+你需要修复上一条 SQL，使其能正确执行。
+
+要求：
+1. 只返回修复后的 SELECT SQL 和说明，不要改变用户原始问题的查询意图。
+2. 优先根据错误信息修正表名、字段名、聚合/GROUP BY、日期字段、函数兼容性。
+3. 不要引入语义层文档中不存在的字段。
+
+原始问题:
+{question}
+
+执行失败 SQL:
+{failed_sql}
+
+执行错误:
+{error_msg}
+"""
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": repair_prompt},
+        ]
+        if context:
+            messages.insert(1, {"role": "system", "content": "## 多轮对话上下文\n" + context})
+
+        result = None
+        if getattr(llm_client, "supports_structured_output", False):
+            try:
+                result = llm_client.chat_structured(messages, GeneratedSQLResult, temperature=0.0)
+            except Exception as e:
+                logger.warning(f"[NL2SQL] 修复结构化输出失败，回退文本解析: {e}")
+
+        if result is None:
+            response = llm_client.chat(messages, temperature=0.0)
+            result = self._parse_llm_response(response)
+
+        if not result:
+            raise ValueError("无法解析修复 SQL 响应")
+
+        sql = result.get("sql", "").strip()
+        if not sql:
+            raise ValueError("LLM 未返回有效的修复 SQL")
+
+        confidence = float(result.get("confidence", 0.0))
+        explanation = result.get("explanation", "")
+        chart_config_raw = result.get("chart_config")
+        chart_config = None
+        if chart_config_raw and isinstance(chart_config_raw, dict):
+            chart_config = {
+                "chart_type": chart_config_raw.get("chart_type", "bar"),
+                "x_axis": chart_config_raw.get("x_axis", ""),
+                "y_axis": chart_config_raw.get("y_axis", ""),
+                "reason": chart_config_raw.get("reason", ""),
+            }
+        return sql, confidence, explanation, chart_config
+
+    def _build_generation_cache_context(
+        self,
+        llm_client: LLMClient,
+        group_id: Optional[int],
+        context: Optional[str],
+        schema_prompt: str
+    ) -> Dict[str, Any]:
+        """构建 NL2SQL 生成缓存上下文"""
+        settings = getattr(llm_client, "settings", None)
+        schema_fingerprint = hashlib.sha256(schema_prompt.encode("utf-8")).hexdigest()[:16]
+        llm_fingerprint_data = {
+            "adapter": getattr(llm_client, "adapter", ""),
+            "provider": getattr(llm_client, "provider", ""),
+            "api_mode": getattr(llm_client, "api_mode", ""),
+            "model": getattr(settings, "llm_model", "") if settings else "",
+        }
+        llm_fingerprint = hashlib.sha256(
+            json.dumps(llm_fingerprint_data, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:16]
+        return {
+            "group_id": group_id,
+            "context": context,
+            "schema_fingerprint": schema_fingerprint,
+            "llm_fingerprint": llm_fingerprint,
+            "prompt_version": NL2SQL_PROMPT_VERSION,
+        }
+
+    def _get_cached_generation(
+        self,
+        question: str,
+        data_source_id: int,
+        cache_context: Dict[str, Any]
+    ) -> Optional[Tuple[str, float, str, Optional[Dict[str, Any]]]]:
+        """读取 NL2SQL 生成缓存"""
+        try:
+            cached = get_nl2sql_cache().get(
+                question,
+                data_source_id,
+                group_id=cache_context["group_id"],
+                context=cache_context["context"],
+                schema_fingerprint=cache_context["schema_fingerprint"],
+                llm_fingerprint=cache_context["llm_fingerprint"],
+                prompt_version=cache_context["prompt_version"],
+            )
+            if not cached or not cached.get("sql"):
+                return None
+            return (
+                cached["sql"],
+                float(cached.get("confidence", 0.0)),
+                cached.get("explanation") or "基于缓存的 NL2SQL 生成结果",
+                cached.get("chart_config"),
+            )
+        except Exception as e:
+            logger.warning(f"[NL2SQL] 读取生成缓存失败，继续调用 LLM: {e}")
+            return None
+
+    def _cache_generation(
+        self,
+        question: str,
+        data_source_id: int,
+        sql: str,
+        confidence: float,
+        explanation: str,
+        chart_config: Optional[Dict[str, Any]],
+        cache_context: Dict[str, Any]
+    ) -> None:
+        """写入 NL2SQL 生成缓存，失败不影响主流程"""
+        try:
+            cached = get_nl2sql_cache().set(
+                question=question,
+                data_source_id=data_source_id,
+                sql=sql,
+                explanation=explanation,
+                confidence=confidence,
+                chart_config=chart_config,
+                group_id=cache_context["group_id"],
+                context=cache_context["context"],
+                schema_fingerprint=cache_context["schema_fingerprint"],
+                llm_fingerprint=cache_context["llm_fingerprint"],
+                prompt_version=cache_context["prompt_version"],
+            )
+            if cached:
+                logger.info("[NL2SQL] 生成结果已写入缓存")
+        except Exception as e:
+            logger.warning(f"[NL2SQL] 写入生成缓存失败: {e}")
 
     def _parse_llm_response(self, response: str) -> Optional[Dict[str, Any]]:
         """

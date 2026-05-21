@@ -2,12 +2,31 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 
+
 class NL2SQLRequest(BaseModel):
     """NL2SQL 查询请求"""
     question: str = Field(..., description="自然语言问题")
     data_source_id: int = Field(..., description="数据源 ID")
     context: Optional[str] = Field(None, description="上下文信息")
     group_id: Optional[int] = Field(None, description="用户所属集团ID，用于分表选择")
+
+
+class NL2SQLChartConfig(BaseModel):
+    """LLM 推荐图表配置"""
+    chart_type: str = Field("bar", description="图表类型: bar, line, pie, scatter")
+    x_axis: str = Field("", description="X 轴字段名")
+    y_axis: str = Field("", description="Y 轴字段名")
+    reason: str = Field("", description="推荐原因")
+
+
+class GeneratedSQLResult(BaseModel):
+    """LLM 生成 SQL 的内部结构化输出"""
+    sql: str = Field(..., description="生成的 SELECT SQL 语句")
+    confidence: float = Field(0.0, ge=0.0, le=1.0, description="置信度 0-1")
+    explanation: str = Field("", description="SQL 生成逻辑说明")
+    chart_config: Optional[NL2SQLChartConfig] = Field(None, description="推荐图表配置")
+
+
 class SQLSuggestion(BaseModel):
     """SQL 建议"""
     sql: str = Field(..., description="生成的 SQL")

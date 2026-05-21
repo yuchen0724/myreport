@@ -23,7 +23,7 @@ def test_nl2sql_query(client, auth_headers):
         from app.utils.llm_client import LLMError
         
         # 让 LLM 调用抛异常，测试 fallback 到规则引擎
-        mock_llm.generate_sql.side_effect = LLMError("mock: no external LLM in tests")
+        mock_llm.chat.side_effect = LLMError("mock: no external LLM in tests")
         mock_llm.timeout = 1
         
         response = client.post(

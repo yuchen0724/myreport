@@ -37,7 +37,12 @@ export async function getFrontendConfig() {
     
     console.log('[NL2SQL] 📋 获取前端配置成功:', {
       nl2sql_timeout: data.nl2sql_timeout,
-      nl2sql_timeout_ms: data.nl2sql_timeout_ms
+      nl2sql_timeout_ms: data.nl2sql_timeout_ms,
+      llm_adapter: data.llm_adapter,
+      llm_provider: data.llm_provider,
+      llm_model: data.llm_model,
+      structured_output: data.nl2sql_structured_output_enabled,
+      schema_retrieval: data.nl2sql_schema_retrieval_enabled
     })
     
     return data
@@ -46,7 +51,15 @@ export async function getFrontendConfig() {
     // 返回默认值：后端 300s + 60s 缓冲 = 360s
     return {
       nl2sql_timeout: 300,
-      nl2sql_timeout_ms: 360000
+      nl2sql_timeout_ms: 360000,
+      llm_adapter: 'raw',
+      llm_provider: 'openai',
+      llm_model: 'gpt-3.5-turbo',
+      llm_api_mode: 'chat',
+      nl2sql_structured_output_enabled: false,
+      nl2sql_schema_retrieval_enabled: true,
+      nl2sql_schema_retrieval_min_chars: 12000,
+      nl2sql_schema_retrieval_max_sections: 8
     }
   }
 }

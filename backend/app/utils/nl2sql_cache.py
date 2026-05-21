@@ -94,8 +94,18 @@ class NL2SQLCache:
             self._redis_client = None
             return None
     
-    def _hash_question(self, question: str, data_source_id: int) -> str:
-        """Generate cache key hash from question and data source.
+    def _hash_question(
+        self,
+        question: str,
+        data_source_id: int,
+        *,
+        group_id: Optional[int] = None,
+        context: Optional[str] = None,
+        schema_fingerprint: str = "",
+        llm_fingerprint: str = "",
+        prompt_version: str = "v1"
+    ) -> str:
+        """Generate cache key hash from question, data source, and generation context.
         
         Args:
             question: The natural language question
@@ -104,12 +114,29 @@ class NL2SQLCache:
         Returns:
             16-character MD5 hash string
         """
-        # Normalize question: lowercase and strip whitespace
-        normalized_question = question.lower().strip()
-        key = f"{data_source_id}:{normalized_question}"
+        key_data = {
+            "data_source_id": data_source_id,
+            "group_id": group_id,
+            "question": question.lower().strip(),
+            "context": (context or "").strip(),
+            "schema_fingerprint": schema_fingerprint,
+            "llm_fingerprint": llm_fingerprint,
+            "prompt_version": prompt_version,
+        }
+        key = json.dumps(key_data, ensure_ascii=False, sort_keys=True)
         return hashlib.md5(key.encode('utf-8')).hexdigest()[:16]
     
-    def _make_cache_key(self, question: str, data_source_id: int) -> str:
+    def _make_cache_key(
+        self,
+        question: str,
+        data_source_id: int,
+        *,
+        group_id: Optional[int] = None,
+        context: Optional[str] = None,
+        schema_fingerprint: str = "",
+        llm_fingerprint: str = "",
+        prompt_version: str = "v1"
+    ) -> str:
         """Create full Redis cache key.
         
         Args:
@@ -119,10 +146,28 @@ class NL2SQLCache:
         Returns:
             Redis key in format: nl2sql:{hash}
         """
-        hash_key = self._hash_question(question, data_source_id)
+        hash_key = self._hash_question(
+            question,
+            data_source_id,
+            group_id=group_id,
+            context=context,
+            schema_fingerprint=schema_fingerprint,
+            llm_fingerprint=llm_fingerprint,
+            prompt_version=prompt_version,
+        )
         return f"nl2sql:{hash_key}"
     
-    def get(self, question: str, data_source_id: int) -> Optional[Dict[str, Any]]:
+    def get(
+        self,
+        question: str,
+        data_source_id: int,
+        *,
+        group_id: Optional[int] = None,
+        context: Optional[str] = None,
+        schema_fingerprint: str = "",
+        llm_fingerprint: str = "",
+        prompt_version: str = "v1"
+    ) -> Optional[Dict[str, Any]]:
         """Get cached SQL result.
         
         Args:
@@ -138,7 +183,15 @@ class NL2SQLCache:
             if client is None:
                 return None
             
-            cache_key = self._make_cache_key(question, data_source_id)
+            cache_key = self._make_cache_key(
+                question,
+                data_source_id,
+                group_id=group_id,
+                context=context,
+                schema_fingerprint=schema_fingerprint,
+                llm_fingerprint=llm_fingerprint,
+                prompt_version=prompt_version,
+            )
             cached_value = client.get(cache_key)
             
             if cached_value is None:
@@ -159,7 +212,14 @@ class NL2SQLCache:
         data_source_id: int,
         sql: str,
         explanation: Optional[str] = None,
-        confidence: float = 0.9
+        confidence: float = 0.9,
+        chart_config: Optional[Dict[str, Any]] = None,
+        *,
+        group_id: Optional[int] = None,
+        context: Optional[str] = None,
+        schema_fingerprint: str = "",
+        llm_fingerprint: str = "",
+        prompt_version: str = "v1"
     ) -> bool:
         """Set cache for a NL2SQL result.
         
@@ -178,12 +238,26 @@ class NL2SQLCache:
             if client is None:
                 return False
             
-            cache_key = self._make_cache_key(question, data_source_id)
+            cache_key = self._make_cache_key(
+                question,
+                data_source_id,
+                group_id=group_id,
+                context=context,
+                schema_fingerprint=schema_fingerprint,
+                llm_fingerprint=llm_fingerprint,
+                prompt_version=prompt_version,
+            )
             
             cache_value = {
+                "data_source_id": data_source_id,
+                "group_id": group_id,
                 "sql": sql,
                 "explanation": explanation,
-                "confidence": confidence
+                "confidence": confidence,
+                "chart_config": chart_config,
+                "schema_fingerprint": schema_fingerprint,
+                "llm_fingerprint": llm_fingerprint,
+                "prompt_version": prompt_version,
             }
             
             client.setex(
@@ -195,7 +269,7 @@ class NL2SQLCache:
             logger.debug(f"Cached SQL for question: {question[:50]}...")
             return True
             
-        except (RedisError, json.JSONEncodeError, Exception) as e:
+        except Exception as e:
             logger.warning(f"Cache set failed: {e}")
             return False
     
