@@ -82,10 +82,7 @@ async def update_template(
     """更新模板"""
     service = TemplateService(db)
     try:
-        template = service.update_template(template_id, template_data, current_user_id)
-        if not template:
-            raise HTTPException(status_code=404, detail="Template not found")
-        return template
+        return service.update_template(template_id, template_data, current_user_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -100,10 +97,7 @@ async def delete_template(
 ):
     """删除模板"""
     service = TemplateService(db)
-    success = service.delete_template(template_id, current_user_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Template not found")
-    return None
+    service.delete_template(template_id, current_user_id)
 
 @router.get("/{template_id}/versions", response_model=List[TemplateVersionResponse])
 async def get_template_versions(
@@ -125,10 +119,7 @@ async def rollback_template(
 ):
     """回滚模板到指定版本"""
     service = TemplateService(db)
-    template = service.rollback_template(template_id, version, current_user_id)
-    if not template:
-        raise HTTPException(status_code=404, detail="Template or version not found")
-    return template
+    return service.rollback_template(template_id, version, current_user_id)
 
 @router.post("/{template_id}/share")
 async def share_template(
@@ -139,9 +130,7 @@ async def share_template(
 ):
     """分享模板"""
     service = TemplateService(db)
-    success = service.share_template(template_id, share_request, current_user_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Template not found")
+    service.share_template(template_id, share_request, current_user_id)
     return {"success": True}
 
 @router.get("/shared/me", response_model=List[SharedTemplateResponse])
@@ -191,11 +180,4 @@ async def get_version_diff(
 ):
     """获取版本差异"""
     service = TemplateService(db)
-    try:
-        diff = service.get_version_diff(template_id, version1, version2)
-        return diff
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+    return service.get_version_diff(template_id, version1, version2)

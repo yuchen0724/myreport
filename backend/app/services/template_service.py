@@ -300,7 +300,7 @@ class TemplateService:
         # 获取指定版本
         target_version = self.version_repo.get_by_version(template_id, version)
         if not target_version:
-            return None
+            raise NotFoundError(f"版本不存在 (template_id={template_id}, version={version})")
 
         # 获取当前模板
         template = self._require_template(template_id)
@@ -494,7 +494,10 @@ class TemplateService:
         ).first()
 
         if not v1 or not v2:
-            raise ValueError("版本不存在")
+            missing = version2 if v1 else version1
+            raise NotFoundError(
+                f"版本不存在 (template_id={template_id}, version={missing})"
+            )
 
         # 解析配置
         config1 = json.loads(v1.config) if isinstance(v1.config, str) else v1.config
