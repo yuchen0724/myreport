@@ -34,6 +34,7 @@ class NL2SQLService:
         self.db = db
         self.ds_repo = DataSourceRepository(db) if db else None
         self.llm_client: Optional[LLMClient] = None
+        self._prompt_template_cache: Dict[str, Dict[str, Any]] = {}
 
     def _get_llm_client(self) -> LLMClient:
         """获取 LLM 客户端（惰性初始化）"""
@@ -607,7 +608,14 @@ class NL2SQLService:
             if group_id
             else "未知（未指定，按全局数据查询）"
         )
-        return f"""你是一个数据分析专家，擅长将自然语言问题转换为 SQL 查询，并推荐合适的可视化图表。
+        table_name_rule = (
+            "【重要】所有表名必须带库名前缀，且 PostgreSQL 必须使用 `库名.public.表名` 格式"
+            "（例如 `mydb.public.dim_store`）"
+            if self._is_postgres_db_type(db_type)
+            else "【重要】所有表名必须带库名前缀，如 `库名.表名`"
+            "（例如 `ads_cockpit_freedom.store_sales`），否则跨库查询会失败！"
+        )
+        default_prompt = f"""你是一个数据分析专家，擅长将自然语言问题转换为 SQL 查询，并推荐合适的可视化图表。
 
 ## 数据库类型
 当前数据源类型: **{db_type}**
@@ -621,7 +629,7 @@ class NL2SQLService:
 
 ## 规则
 1. 只生成 SELECT 查询，禁止生成 UPDATE/DELETE/DROP 等操作
-2. 【重要】所有表名必须带库名前缀，如 `库名.表名`（例如 `ads_cockpit_freedom.store_sales`），否则跨库查询会失败！
+2. {table_name_rule}
 3. 【关键】必须严格使用下方语义层文档中定义的字段名，**禁止使用文档中不存在的字段**！
    - **【必须】在生成 SQL 前，必须逐一核对每个字段是否在该表的语义层文档中有定义**
    - **【严重】禁止使用其他表的字段混到当前表中，即使字段名相同也不行！每个表有自己独立的字段列表**
@@ -666,6 +674,128 @@ class NL2SQLService:
   }}
 }}
 """
+        settings = get_settings()
+        custom_template = self._load_prompt_template(
+            getattr(settings, "nl2sql_system_prompt_path", None),
+            "system",
+        )
+        if not custom_template:
+            return default_prompt
+
+        context = {
+            "db_type": db_type,
+            "db_limitations": db_limitations,
+            "schema_prompt": schema_prompt,
+            "group_context": group_context,
+            "table_name_rule": table_name_rule,
+        }
+        return self._render_prompt_template(
+            custom_template,
+            context=context,
+            template_name="system",
+            fallback=default_prompt,
+        )
+
+    @staticmethod
+    def _is_postgres_db_type(db_type: Optional[str]) -> bool:
+        """判断是否 PostgreSQL 数据源类型。"""
+        if not db_type:
+            return False
+        normalized = db_type.upper()
+        return normalized in {"POSTGRES", "POSTGRESQL", "PG"}
+
+    def _load_prompt_template(self, template_path: Optional[str], template_name: str) -> Optional[str]:
+        """从配置路径读取提示词模板（支持绝对路径或相对 backend/ 路径，含热更新）。"""
+        if not template_path:
+            return None
+
+        cache_key = f"{template_name}:{template_path}"
+        path = Path(template_path)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parents[2] / path
+
+        try:
+            stat_result = path.stat()
+        except OSError as e:
+            logger.warning(f"[NL2SQL] 读取 {template_name} 提示词模板失败: {path} ({e})")
+            self._prompt_template_cache.pop(cache_key, None)
+            return None
+
+        cached = self._prompt_template_cache.get(cache_key)
+        if (
+            cached
+            and cached.get("path") == str(path)
+            and cached.get("mtime_ns") == stat_result.st_mtime_ns
+        ):
+            return cached.get("content")
+
+        try:
+            template = path.read_text(encoding="utf-8")
+        except OSError as e:
+            logger.warning(f"[NL2SQL] 读取 {template_name} 提示词模板失败: {path} ({e})")
+            self._prompt_template_cache.pop(cache_key, None)
+            return None
+
+        self._prompt_template_cache[cache_key] = {
+            "path": str(path),
+            "mtime_ns": stat_result.st_mtime_ns,
+            "content": template,
+        }
+        logger.info(f"[NL2SQL] 加载/刷新 {template_name} 提示词模板: {path}")
+        return template
+
+    def _render_prompt_template(
+        self,
+        template: str,
+        context: Dict[str, Any],
+        template_name: str,
+        fallback: str,
+    ) -> str:
+        """渲染提示词模板；渲染失败时回退默认模板。"""
+        try:
+            return template.format(**context)
+        except Exception as e:
+            logger.warning(f"[NL2SQL] 渲染 {template_name} 提示词模板失败，回退默认模板: {e}")
+            return fallback
+
+    def _build_repair_prompt(self, question: str, failed_sql: str, error_msg: str) -> str:
+        """构建 SQL 修复提示词，支持从配置文件读取模板。"""
+        default_prompt = f"""## SQL 修复模式
+你需要修复上一条 SQL，使其能正确执行。
+
+要求：
+1. 只返回修复后的 SELECT SQL 和说明，不要改变用户原始问题的查询意图。
+2. 优先根据错误信息修正表名、字段名、聚合/GROUP BY、日期字段、函数兼容性。
+3. 不要引入语义层文档中不存在的字段。
+
+原始问题:
+{question}
+
+执行失败 SQL:
+{failed_sql}
+
+执行错误:
+{error_msg}
+"""
+        settings = get_settings()
+        custom_template = self._load_prompt_template(
+            getattr(settings, "nl2sql_repair_prompt_path", None),
+            "repair",
+        )
+        if not custom_template:
+            return default_prompt
+
+        context = {
+            "question": question,
+            "failed_sql": failed_sql,
+            "error_msg": error_msg,
+        }
+        return self._render_prompt_template(
+            custom_template,
+            context=context,
+            template_name="repair",
+            fallback=default_prompt,
+        )
 
     def _repair_sql_with_llm(
         self,
@@ -692,23 +822,11 @@ class NL2SQLService:
             schema_prompt=schema_prompt,
             group_id=group_id,
         )
-        repair_prompt = f"""## SQL 修复模式
-你需要修复上一条 SQL，使其能正确执行。
-
-要求：
-1. 只返回修复后的 SELECT SQL 和说明，不要改变用户原始问题的查询意图。
-2. 优先根据错误信息修正表名、字段名、聚合/GROUP BY、日期字段、函数兼容性。
-3. 不要引入语义层文档中不存在的字段。
-
-原始问题:
-{question}
-
-执行失败 SQL:
-{failed_sql}
-
-执行错误:
-{error_msg}
-"""
+        repair_prompt = self._build_repair_prompt(
+            question=question,
+            failed_sql=failed_sql,
+            error_msg=error_msg,
+        )
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": repair_prompt},
@@ -944,15 +1062,31 @@ class NL2SQLService:
         logger.info(f"[NL2SQL] 🔍 ========== 开始构建 Schema Prompt ==========")
         logger.info(f"[NL2SQL] ├─ 数据源ID: {data_source_id}")
         semantic_doc = self._load_semantic_doc(data_source_id)
+        ds = self.ds_repo.get_by_id(data_source_id) if self.ds_repo else None
+        db_name = ds.database if ds and ds.database else "数据库名"
+        ds_type = ds.type.upper() if ds and ds.type else ""
+        pg_table_format_hint = (
+            "\n【注意】当前是 PostgreSQL 数据源，生成 SQL 时表名必须使用 `库名.public.表名` 格式"
+            f"（如 `{db_name}.public.dim_store`）。\n"
+            if self._is_postgres_db_type(ds_type)
+            else ""
+        )
         if semantic_doc:
             logger.info(f"[NL2SQL] │   ├─ 语义层文档: 找到, 长度={len(semantic_doc)} 字符")
             logger.info(f"[NL2SQL] │   │   ├─ 加载的文档: {self._get_loaded_doc_names(data_source_id)}")
-            # 获取数据库名
-            ds = self.ds_repo.get_by_id(data_source_id) if self.ds_repo else None
-            db_name = ds.database if ds and ds.database else "数据库名"
             logger.info(f"[NL2SQL] │   │   └─ 数据库名: {db_name}")
             # 【重要】语义层文档中的表名已包含库名前缀，告诉 LLM 不要重复添加
-            prefix_hint = f"\n## 重要提示\n【注意】本文档中的表名**已经包含库名前缀**（如 `ads_cockpit_qck.dim_store`），请直接使用文档中的表名，**不要再添加其他库名**！\n"
+            prefix_example = (
+                f"{db_name}.public.dim_store"
+                if self._is_postgres_db_type(ds_type)
+                else "ads_cockpit_qck.dim_store"
+            )
+            prefix_hint = (
+                f"\n## 重要提示\n"
+                f"【注意】本文档中的表名**已经包含库名前缀**（如 `{prefix_example}`），"
+                "请直接使用文档中的表名，**不要再添加其他库名**！\n"
+                f"{pg_table_format_hint}"
+            )
             return prefix_hint + semantic_doc
 
         # 2. 回退到动态查询
@@ -976,10 +1110,22 @@ class NL2SQLService:
 
             # 构建格式化的 schema 描述
             db_name = ds.database or ""
+            ds_type = ds.type.upper() if ds.type else ""
+            first_table_name = next(iter(tables_info), "table").split(".")[-1]
+            table_format_example = (
+                f"{db_name}.public.{first_table_name}"
+                if self._is_postgres_db_type(ds_type)
+                else f"{db_name}.{first_table_name}"
+            )
+            table_format_rule = (
+                f"【重要】SQL中所有表名必须使用 `{db_name}.public.表名` 格式，例如 `{table_format_example}`"
+                if self._is_postgres_db_type(ds_type)
+                else f"【重要】SQL中所有表名必须使用 `{db_name}.表名` 格式，例如 `{table_format_example}`"
+            )
             prompt_parts = [
                 f"数据源: {ds.name} ({ds.type})",
                 f"数据库: {db_name}",
-                f"【重要】SQL中所有表名必须使用 `{db_name}.表名` 格式，例如 `{db_name}.{next(iter(tables_info), 'table')}`",
+                table_format_rule,
                 "",
                 "## 表结构信息",
                 ""

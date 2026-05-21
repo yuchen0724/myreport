@@ -1,5 +1,6 @@
 # backend/tests/test_nl2sql.py
 from types import SimpleNamespace
+import time
 
 import pytest
 from app.schemas.nl2sql import NL2SQLRequest
@@ -51,6 +52,104 @@ def test_build_system_prompt_includes_required_sections():
     assert "只生成 SELECT 查询" in prompt
     assert '"sql": "生成的 SQL 语句"' in prompt
     assert '"chart_config"' in prompt
+
+
+def test_build_system_prompt_for_postgresql_uses_public_schema_rule():
+    service = NL2SQLService(query_service=object(), db=None)
+
+    prompt = service._build_system_prompt(
+        db_type="POSTGRESQL",
+        db_limitations="PostgreSQL 限制",
+        schema_prompt="### 表: mydb.public.dim_store\n| col | type |",
+        group_id=None,
+    )
+
+    assert "POSTGRESQL" in prompt
+    assert "库名.public.表名" in prompt
+    assert "mydb.public.dim_store" in prompt
+
+
+def test_build_system_prompt_reads_template_from_config_file(monkeypatch, tmp_path):
+    template_file = tmp_path / "system_prompt.txt"
+    template_file.write_text(
+        "DB={db_type}\nRULE={table_name_rule}\nGROUP={group_context}\nSCHEMA={schema_prompt}",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "app.services.nl2sql_service.get_settings",
+        lambda: SimpleNamespace(
+            nl2sql_system_prompt_path=str(template_file),
+            nl2sql_repair_prompt_path=None,
+        ),
+    )
+
+    service = NL2SQLService(query_service=object(), db=None)
+    prompt = service._build_system_prompt(
+        db_type="POSTGRESQL",
+        db_limitations="PostgreSQL 限制",
+        schema_prompt="### 表: mydb.public.dim_store",
+        group_id=812,
+    )
+
+    assert "DB=POSTGRESQL" in prompt
+    assert "库名.public.表名" in prompt
+    assert "GROUP=**812**" in prompt
+    assert "SCHEMA=### 表: mydb.public.dim_store" in prompt
+
+
+def test_build_repair_prompt_reads_template_from_config_file(monkeypatch, tmp_path):
+    template_file = tmp_path / "repair_prompt.txt"
+    template_file.write_text(
+        "Q={question}\nSQL={failed_sql}\nERR={error_msg}",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "app.services.nl2sql_service.get_settings",
+        lambda: SimpleNamespace(
+            nl2sql_system_prompt_path=None,
+            nl2sql_repair_prompt_path=str(template_file),
+        ),
+    )
+
+    service = NL2SQLService(query_service=object(), db=None)
+    prompt = service._build_repair_prompt(
+        question="查询销售额",
+        failed_sql="SELECT bad_col FROM t",
+        error_msg="column bad_col does not exist",
+    )
+
+    assert "Q=查询销售额" in prompt
+    assert "SQL=SELECT bad_col FROM t" in prompt
+    assert "ERR=column bad_col does not exist" in prompt
+
+
+def test_prompt_template_hot_reload_without_restart(monkeypatch, tmp_path):
+    template_file = tmp_path / "repair_prompt.txt"
+    template_file.write_text("V1-{question}", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.services.nl2sql_service.get_settings",
+        lambda: SimpleNamespace(
+            nl2sql_system_prompt_path=None,
+            nl2sql_repair_prompt_path=str(template_file),
+        ),
+    )
+
+    service = NL2SQLService(query_service=object(), db=None)
+    prompt_v1 = service._build_repair_prompt(
+        question="q1",
+        failed_sql="SELECT 1",
+        error_msg="err",
+    )
+    assert prompt_v1 == "V1-q1"
+
+    time.sleep(0.02)
+    template_file.write_text("V2-{question}", encoding="utf-8")
+    prompt_v2 = service._build_repair_prompt(
+        question="q2",
+        failed_sql="SELECT 1",
+        error_msg="err",
+    )
+    assert prompt_v2 == "V2-q2"
 
 
 def test_select_relevant_schema_prompt_compacts_long_schema(monkeypatch):
