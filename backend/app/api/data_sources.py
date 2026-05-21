@@ -98,13 +98,7 @@ async def update_data_source(
 ):
     """更新数据源"""
     ds_service = DataSourceService(db)
-    ds = ds_service.update_data_source(ds_id, ds_data)
-    if not ds:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="数据源不存在",
-        )
-    return ds
+    return ds_service.update_data_source(ds_id, ds_data, current_user_id)
 
 
 @router.delete("/{ds_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -115,12 +109,7 @@ async def delete_data_source(
 ):
     """删除数据源"""
     ds_service = DataSourceService(db)
-    success = ds_service.delete_data_source(ds_id)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="数据源不存在",
-        )
+    ds_service.delete_data_source(ds_id, current_user_id)
 
 
 @router.post("/test", response_model=DataSourceTestResponse)

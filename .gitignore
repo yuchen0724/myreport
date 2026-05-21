@@ -7,6 +7,7 @@ __pycache__/
 env/
 venv/
 .env
+.env.*
 ENV/
 build/
 develop-eggs/
@@ -29,6 +30,7 @@ wheels/
 *.sqlite
 *.sqlite3
 dump.rdb
+*.rdb
 
 # Logs
 logs/
@@ -37,6 +39,8 @@ logs/
 # Node
 node_modules/
 package-lock.json
+frontend/.env
+frontend/.env.*
 
 # IDE
 .vscode/
@@ -54,8 +58,11 @@ Thumbs.db
 
 # DeepSeek agent cache
 .deepseek/
+.hermes/
 frontend/vite.config.js.timestamp-*
 .venv/
-.hermes/
 backend/models/
 backend/celerybeat-schedule
+backend/htmlcov/
+.coverage
+htmlcov/

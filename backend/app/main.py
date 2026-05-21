@@ -29,12 +29,19 @@ if not settings.debug:
             "Set PASSWORD_ENCRYPTION_KEY via environment variable or .env file. "
             "Generate a secure key: openssl rand -hex 32"
         )
+    if not settings.llm_api_key:
+        raise RuntimeError(
+            "FATAL: LLM_API_KEY is empty. NL2SQL 功能需要配置 LLM_API_KEY。"
+            "Set LLM_API_KEY via environment variable or .env file."
+        )
 else:
     # 开发环境仅警告
     if settings.secret_key == "change-me-in-production-please":
         warnings.warn("⚠️  SECRET_KEY 仍使用默认值！生产部署前务必修改。")
     if not settings.password_encryption_key:
         warnings.warn("⚠️  PASSWORD_ENCRYPTION_KEY 为空！生产部署前务必设置。")
+    if not settings.llm_api_key:
+        warnings.warn("⚠️  LLM_API_KEY 为空！NL2SQL 功能将不可用。")
     if settings.cors_origins == ["http://localhost:5173"]:
         warnings.warn("⚠️  CORS origins 为默认本地配置，请根据实际部署地址修改。")
 

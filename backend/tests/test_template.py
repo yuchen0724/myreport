@@ -79,7 +79,7 @@ def test_delete_template(db_session):
     created = service.create_template(template_data, user_id=3)
 
     # 删除模板
-    success = service.delete_template(created.id)
+    success = service.delete_template(created.id, user_id=3)
 
     assert success is True
 

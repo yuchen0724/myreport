@@ -19,6 +19,9 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _fernet: Optional[Fernet] = None
 
 
+import warnings
+
+
 def _get_fernet() -> Fernet:
     """获取 Fernet 加密器实例（惰性初始化）。
 
@@ -32,6 +35,7 @@ def _get_fernet() -> Fernet:
     if not key:
         # 从 secret_key 派生稳定密钥，重启后仍然有效
         import base64
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
             length=32,
@@ -40,6 +44,10 @@ def _get_fernet() -> Fernet:
         )
         derived = hkdf.derive(settings.secret_key.encode())
         key = base64.urlsafe_b64encode(derived).decode()
+        warnings.warn(
+            "⚠️  PASSWORD_ENCRYPTION_KEY 未设置，已从 SECRET_KEY 派生加密密钥。"
+            "生产环境请显式设置 PASSWORD_ENCRYPTION_KEY。"
+        )
     _fernet = Fernet(key.encode() if isinstance(key, str) else key)
     return _fernet
 

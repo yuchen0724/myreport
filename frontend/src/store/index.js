@@ -2,9 +2,22 @@ import { defineStore } from "pinia"
 import { ref, computed } from "vue"
 import { getMenuTree } from "@/api/menu"
 
+/**
+ * ⚠️ 安全说明：当前使用 sessionStorage 存储 Token。
+ *
+ * sessionStorage 在关闭标签页后自动清除，比 localStorage 更安全。
+ * 但 Token 仍可被 JavaScript 读取，存在 XSS 窃取风险。
+ * 生产环境建议迁移至 httpOnly Cookie（后端设置，前端无法读取）。
+ *
+ * 迁移方案参考：后端设置 Cookie（httpOnly, Secure, SameSite=Strict），
+ * 前端移除所有 Token 读写逻辑，改为依赖 Cookie 自动携带。
+ */
+
+const STORAGE = window.sessionStorage
+
 export const useUserStore = defineStore("user", () => {
-  const token = ref(localStorage.getItem("token") || "")
-  const user = ref(JSON.parse(localStorage.getItem("user") || "null"))
+  const token = ref(STORAGE.getItem("token") || "")
+  const user = ref(JSON.parse(STORAGE.getItem("user") || "null"))
 
   // 角色相关
   const role = computed(() => user.value?.role || "user")
@@ -13,7 +26,7 @@ export const useUserStore = defineStore("user", () => {
 
   function setToken(newToken) {
     token.value = newToken
-    localStorage.setItem("token", newToken)
+    STORAGE.setItem("token", newToken)
   }
 
   function setUser(newUser) {
@@ -24,14 +37,14 @@ export const useUserStore = defineStore("user", () => {
       role: roleMap[newUser.role_id] || 'user'
     }
     user.value = userWithRole
-    localStorage.setItem("user", JSON.stringify(userWithRole))
+    STORAGE.setItem("user", JSON.stringify(userWithRole))
   }
 
   function logout() {
     token.value = ""
     user.value = null
-    localStorage.removeItem("token")
-    localStorage.removeItem("user")
+    STORAGE.removeItem("token")
+    STORAGE.removeItem("user")
     // 清空菜单缓存
     const menuStore = useMenuStore()
     menuStore.clearMenus()

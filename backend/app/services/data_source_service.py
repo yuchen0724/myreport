@@ -2,11 +2,24 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.repositories.data_source_repository import DataSourceRepository
 from app.schemas.data_source import DataSourceCreate, DataSourceUpdate, DataSourceResponse, DataSourceTestRequest, DataSourceTestResponse
+from app.exceptions import NotFoundError, AuthorizationError
 
 
 class DataSourceService:
     def __init__(self, db: Session):
         self.ds_repo = DataSourceRepository(db)
+
+    def _require_data_source(self, ds_id: int) -> DataSourceResponse:
+        """获取数据源，不存在则抛出 NotFoundError"""
+        db_ds = self.ds_repo.get_by_id(ds_id)
+        if not db_ds:
+            raise NotFoundError(f"数据源不存在 (id={ds_id})")
+        return db_ds
+
+    def _check_owner(self, ds, user_id: int) -> None:
+        """校验当前用户是否为数据源所有者，不是则抛出 AuthorizationError"""
+        if ds.created_by and ds.created_by != user_id:
+            raise AuthorizationError("您没有权限操作此数据源")
 
     def create_data_source(self, ds_data: DataSourceCreate, user_id: int) -> DataSourceResponse:
         """创建数据源"""
@@ -40,11 +53,10 @@ class DataSourceService:
 
         return [DataSourceResponse.model_validate(ds) for ds in db_dss]
 
-    def update_data_source(self, ds_id: int, ds_data: DataSourceUpdate) -> Optional[DataSourceResponse]:
+    def update_data_source(self, ds_id: int, ds_data: DataSourceUpdate, user_id: int) -> Optional[DataSourceResponse]:
         """更新数据源"""
-        db_ds = self.ds_repo.get_by_id(ds_id)
-        if not db_ds:
-            return None
+        db_ds = self._require_data_source(ds_id)
+        self._check_owner(db_ds, user_id)
         
         # 处理更新数据：使用 exclude_unset=True 但后端需要更新布尔字段
         update_data = ds_data.model_dump(exclude_unset=True)
@@ -67,11 +79,10 @@ class DataSourceService:
         updated_ds = self.ds_repo.update(db_ds, update_data)
         return DataSourceResponse.model_validate(updated_ds)
 
-    def delete_data_source(self, ds_id: int) -> bool:
+    def delete_data_source(self, ds_id: int, user_id: int) -> bool:
         """删除数据源"""
-        db_ds = self.ds_repo.get_by_id(ds_id)
-        if not db_ds:
-            return False
+        db_ds = self._require_data_source(ds_id)
+        self._check_owner(db_ds, user_id)
         return self.ds_repo.delete(db_ds)
 
     def test_connection(self, request: DataSourceTestRequest) -> DataSourceTestResponse:

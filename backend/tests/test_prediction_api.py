@@ -243,9 +243,10 @@ def test_delete_forecast_progress(client, auth_headers, prediction_enabled):
 
 def test_forecast_export_endpoint_validation(client, auth_headers, prediction_enabled):
     """导出接口缺少必要参数应返回 422"""
-    response = client.get(
+    response = client.post(
         "/api/prediction/forecast/export",
         headers=auth_headers,
+        json={},
     )
     # 缺少 data_source_id
     assert response.status_code == 422

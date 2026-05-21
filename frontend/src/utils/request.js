@@ -37,6 +37,8 @@ request.interceptors.response.use(
         userStore.logout()
         // 只有不在登录页时才跳转
         if (!window.location.pathname.includes('/login')) {
+          // 使用硬跳转以确保 Pinia 状态完全重置
+          // （router.push 可能因循环依赖无法在此文件使用）
           window.location.href = '/login'
         }
       }

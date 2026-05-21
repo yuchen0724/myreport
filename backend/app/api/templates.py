@@ -100,7 +100,7 @@ async def delete_template(
 ):
     """删除模板"""
     service = TemplateService(db)
-    success = service.delete_template(template_id)
+    success = service.delete_template(template_id, current_user_id)
     if not success:
         raise HTTPException(status_code=404, detail="Template not found")
     return None
@@ -162,9 +162,9 @@ async def get_template_shares(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id)
 ):
-    """获取模板的分享用户列表"""
+    """获取模板的分享用户列表（仅模板所有者可查看）"""
     service = TemplateService(db)
-    users = service.get_template_shares(template_id)
+    users = service.get_template_shares(template_id, current_user_id)
     return users
 
 @router.post("/{template_id}/unshare")
@@ -174,9 +174,9 @@ async def unshare_template(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id)
 ):
-    """取消分享模板"""
+    """取消分享模板（仅模板所有者可操作）"""
     service = TemplateService(db)
-    success = service.unshare_template(template_id, request.user_id)
+    success = service.unshare_template(template_id, request.user_id, current_user_id)
     if not success:
         raise HTTPException(status_code=404, detail="分享记录不存在")
     return {"success": True}

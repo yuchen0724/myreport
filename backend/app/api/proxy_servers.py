@@ -74,13 +74,7 @@ async def update_proxy_server(
 ):
     """更新代理服务器"""
     ps_service = ProxyServerService(db)
-    ps = ps_service.update_proxy_server(ps_id, ps_data)
-    if not ps:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="代理服务器不存在",
-        )
-    return ps
+    return ps_service.update_proxy_server(ps_id, ps_data, current_user_id)
 
 
 @router.delete("/{ps_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -91,12 +85,7 @@ async def delete_proxy_server(
 ):
     """删除代理服务器"""
     ps_service = ProxyServerService(db)
-    success = ps_service.delete_proxy_server(ps_id)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="代理服务器不存在",
-        )
+    ps_service.delete_proxy_server(ps_id, current_user_id)
 
 
 @router.post("/test", response_model=ProxyServerTestResponse)

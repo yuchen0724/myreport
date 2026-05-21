@@ -8,12 +8,25 @@ from app.schemas.proxy_server import (
     ProxyServerTestRequest,
     ProxyServerTestResponse,
 )
+from app.exceptions import NotFoundError, AuthorizationError
 
 
 class ProxyServerService:
     def __init__(self, db: Session):
         self.db = db
         self.ps_repo = ProxyServerRepository(db)
+
+    def _require_proxy_server(self, ps_id: int):
+        """获取代理服务器，不存在则抛出 NotFoundError"""
+        ps = self.ps_repo.get_by_id(ps_id)
+        if not ps:
+            raise NotFoundError(f"代理服务器不存在 (id={ps_id})")
+        return ps
+
+    def _check_owner(self, ps, user_id: int) -> None:
+        """校验当前用户是否为代理服务器所有者，不是则抛出 AuthorizationError"""
+        if ps.created_by and ps.created_by != user_id:
+            raise AuthorizationError("您没有权限操作此代理服务器")
 
     def create_proxy_server(self, ps_data: ProxyServerCreate, user_id: int) -> ProxyServerResponse:
         """创建代理服务器"""
@@ -40,11 +53,10 @@ class ProxyServerService:
         ps_list = self.ps_repo.get_active()
         return [ProxyServerResponse.model_validate(ps) for ps in ps_list]
 
-    def update_proxy_server(self, ps_id: int, ps_data: ProxyServerUpdate) -> Optional[ProxyServerResponse]:
+    def update_proxy_server(self, ps_id: int, ps_data: ProxyServerUpdate, user_id: int) -> Optional[ProxyServerResponse]:
         """更新代理服务器"""
-        db_ps = self.ps_repo.get_by_id(ps_id)
-        if not db_ps:
-            return None
+        db_ps = self._require_proxy_server(ps_id)
+        self._check_owner(db_ps, user_id)
         
         # 处理密码更新
         update_data = ps_data.model_dump(exclude_unset=True)
@@ -55,11 +67,10 @@ class ProxyServerService:
         updated_ps = self.ps_repo.update(db_ps, update_data)
         return ProxyServerResponse.model_validate(updated_ps)
 
-    def delete_proxy_server(self, ps_id: int) -> bool:
+    def delete_proxy_server(self, ps_id: int, user_id: int) -> bool:
         """删除代理服务器"""
-        db_ps = self.ps_repo.get_by_id(ps_id)
-        if not db_ps:
-            return False
+        db_ps = self._require_proxy_server(ps_id)
+        self._check_owner(db_ps, user_id)
         return self.ps_repo.delete(db_ps)
 
     def test_connection(self, request: ProxyServerTestRequest) -> ProxyServerTestResponse:

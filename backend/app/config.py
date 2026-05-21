@@ -41,7 +41,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 1440
 
     # Encryption for data source passwords
-    password_encryption_key: str = "VT5RFR5hLoJCohCgtlCvuqpSqt1ES3x0xWBDtmP_B9w="
+    # 生产环境务必通过 .env 或环境变量设置！生成命令: openssl rand -hex 32
+    password_encryption_key: str = ""
 
     # CORS
     cors_origins: List[str] = ["http://localhost:5173"]
@@ -54,10 +55,10 @@ class Settings(BaseSettings):
 
     # LLM / NL2SQL
     llm_adapter: str = "langchain"  # raw, langchain
-    llm_provider: str = "azure"  # openai, azure, ollama, anthropic
-    llm_api_base: str = "https://ai-gateway.dmall.com/9/openai/v1"
-    llm_api_key: str = "738f78fc-8deb-4378-a755-26c2f8e888fb"
-    llm_model: str = "gpt-5.4-nano"
+    llm_provider: str = "openai"  # openai, azure, ollama, anthropic
+    llm_api_base: str = ""
+    llm_api_key: str = ""
+    llm_model: str = "gpt-4o"
     llm_api_mode: str = "responses"  # chat (chat.completions) 或 responses (OpenAI Responses API)
     
     # Azure OpenAI
@@ -97,20 +98,45 @@ class Settings(BaseSettings):
 
     @field_validator("database_url", "secret_key")
     @classmethod
-    def validate_required(cls, v: str) -> str:
+    def validate_required(cls, v: str, info) -> str:
         """Validate required fields are not empty or placeholder."""
         if not v:
             raise ValueError("Config value cannot be empty")
         if v in ("changeme", "your-secret-key", "your-encryption-key", "change-me-in-production-please"):
-            raise ValueError(f"Config value is a placeholder: {v}")
+            # 生产环境拒绝启动，开发环境仅警告（由 main.py 负责）
+            if not info.data.get("debug", True):
+                raise ValueError(f"Config value is a placeholder: {v}")
         return v
 
     @field_validator("password_encryption_key")
     @classmethod
     def validate_encryption_key(cls, v: str, info) -> str:
-        """Validate password encryption key is not empty in production."""
-        if not v and not info.data.get("debug", True):
-            raise ValueError("password_encryption_key must be set in production. Generate via: openssl rand -hex 32")
+        """Validate password encryption key is not empty in production.
+        
+        Dev 环境允许为空（security.py 会从 secret_key 派生备用密钥），
+        但会触发 main.py 的启动警告。
+        """
+        if not v:
+            if not info.data.get("debug", True):
+                raise ValueError(
+                    "password_encryption_key must be set in production. "
+                    "Generate via: openssl rand -hex 32"
+                )
+        return v
+
+    @field_validator("llm_api_key")
+    @classmethod
+    def validate_llm_api_key(cls, v: str, info) -> str:
+        """Validate LLM API key is not empty when NL2SQL is in use.
+        
+        Dev 环境仅警告，生产环境抛出异常。
+        """
+        if not v:
+            if not info.data.get("debug", True):
+                raise ValueError(
+                    "llm_api_key must be set in production when NL2SQL is enabled. "
+                    "Set LLM_API_KEY via .env or environment variable."
+                )
         return v
 
     @field_validator("cors_origins", mode="before")

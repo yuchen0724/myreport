@@ -8,6 +8,7 @@ from app.models.template_share import TemplateShare
 from app.models.user import User
 from app.repositories.template_repository import TemplateRepository
 from app.repositories.template_version_repository import TemplateVersionRepository
+from app.exceptions import AuthorizationError, NotFoundError
 from sqlalchemy.orm import Session
 
 class TemplateService:
@@ -17,6 +18,18 @@ class TemplateService:
         self.db = db
         self.template_repo = TemplateRepository(db)
         self.version_repo = TemplateVersionRepository(db)
+
+    def _require_template(self, template_id: int) -> Template:
+        """获取模板，不存在则抛出 NotFoundError"""
+        template = self.template_repo.get_by_id(template_id)
+        if not template:
+            raise NotFoundError(f"模板不存在 (id={template_id})")
+        return template
+
+    def _check_owner(self, template: Template, user_id: int) -> None:
+        """校验当前用户是否为模板所有者，不是则抛出 AuthorizationError"""
+        if template.created_by != user_id:
+            raise AuthorizationError("您没有权限操作此模板")
 
     def create_template(self, template_data: TemplateCreate, user_id: int) -> TemplateResponse:
         """
@@ -177,11 +190,12 @@ class TemplateService:
             模板响应
 
         Raises:
+            NotFoundError: 模板不存在
+            AuthorizationError: 无操作权限
             ValueError: 配置中缺少必要字段
         """
-        template = self.template_repo.get_by_id(template_id)
-        if not template:
-            return None
+        template = self._require_template(template_id)
+        self._check_owner(template, user_id)
 
         # 更新模板
         if template_data.name is not None:
@@ -224,20 +238,23 @@ class TemplateService:
             updated_at=updated_template.updated_at
         )
 
-    def delete_template(self, template_id: int) -> bool:
+    def delete_template(self, template_id: int, user_id: int) -> bool:
         """
         删除模板
 
         Args:
             template_id: 模板 ID
+            user_id: 用户 ID
 
         Returns:
             是否成功
-        """
-        template = self.template_repo.get_by_id(template_id)
-        if not template:
-            return False
 
+        Raises:
+            NotFoundError: 模板不存在
+            AuthorizationError: 无操作权限
+        """
+        template = self._require_template(template_id)
+        self._check_owner(template, user_id)
         return self.template_repo.delete(template)
 
     def get_template_versions(self, template_id: int) -> List[TemplateVersionResponse]:
@@ -275,6 +292,10 @@ class TemplateService:
 
         Returns:
             模板响应
+
+        Raises:
+            NotFoundError: 模板或版本不存在
+            AuthorizationError: 无操作权限
         """
         # 获取指定版本
         target_version = self.version_repo.get_by_version(template_id, version)
@@ -282,9 +303,8 @@ class TemplateService:
             return None
 
         # 获取当前模板
-        template = self.template_repo.get_by_id(template_id)
-        if not template:
-            return None
+        template = self._require_template(template_id)
+        self._check_owner(template, user_id)
 
         # 更新模板配置
         template.config = target_version.config
@@ -324,10 +344,13 @@ class TemplateService:
 
         Returns:
             是否成功
+
+        Raises:
+            NotFoundError: 模板不存在
+            AuthorizationError: 无操作权限
         """
-        template = self.template_repo.get_by_id(template_id)
-        if not template:
-            return False
+        template = self._require_template(template_id)
+        self._check_owner(template, shared_by)
 
         # 删除旧的分享记录
         self.db.query(TemplateShare).filter(
@@ -385,16 +408,23 @@ class TemplateService:
             for share, template, user in shares
         ]
 
-    def get_template_shares(self, template_id: int) -> List[dict]:
+    def get_template_shares(self, template_id: int, user_id: int) -> List[dict]:
         """
         获取模板的分享用户列表
 
         Args:
             template_id: 模板 ID
+            user_id: 请求用户 ID
 
         Returns:
             用户信息列表（包含用户ID、用户名、邮箱、分享时间）
+
+        Raises:
+            NotFoundError: 模板不存在
+            AuthorizationError: 无操作权限
         """
+        template = self._require_template(template_id)
+        self._check_owner(template, user_id)
         shares = self.db.query(TemplateShare, User).join(
             User, TemplateShare.user_id == User.id
         ).filter(
@@ -411,20 +441,27 @@ class TemplateService:
             for share, user in shares
         ]
 
-    def unshare_template(self, template_id: int, user_id: int) -> bool:
+    def unshare_template(self, template_id: int, target_user_id: int, current_user_id: int) -> bool:
         """
         取消分享模板
 
         Args:
             template_id: 模板 ID
-            user_id: 用户 ID
+            target_user_id: 被取消分享的用户 ID
+            current_user_id: 当前操作用户 ID
 
         Returns:
             是否成功
+
+        Raises:
+            NotFoundError: 模板或分享记录不存在
+            AuthorizationError: 无操作权限
         """
+        template = self._require_template(template_id)
+        self._check_owner(template, current_user_id)
         share = self.db.query(TemplateShare).filter(
             TemplateShare.template_id == template_id,
-            TemplateShare.user_id == user_id
+            TemplateShare.user_id == target_user_id
         ).first()
 
         if not share:
