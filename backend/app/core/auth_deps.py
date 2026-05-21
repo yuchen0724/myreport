@@ -84,3 +84,22 @@ def get_current_user(
             detail="用户已被禁用",
         )
     return user
+
+
+def get_current_admin_user(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """验证当前用户是否为管理员，是则返回 User 对象。
+
+    用于需要管理员权限的 API 端点。
+    管理员通过 role_id=1 标识（对应 roles 表中 name='admin' 的角色）。
+
+    Raises:
+        HTTPException 403: 非管理员用户
+    """
+    if current_user.role_id != 1:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="需要管理员权限",
+        )
+    return current_user
