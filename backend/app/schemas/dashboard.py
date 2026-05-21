@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import ConfigDict, BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -11,8 +11,7 @@ class DashboardLayoutResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DashboardLayoutCreate(BaseModel):
@@ -38,8 +37,7 @@ class WidgetConfigResponse(BaseModel):
     visible: bool = True
     extra_config: Optional[Dict[str, Any]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WidgetConfigCreate(BaseModel):
@@ -75,8 +73,7 @@ class DashboardWidgetConfigResponse(BaseModel):
     position: int
     visible: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DashboardWidgetUpdate(BaseModel):

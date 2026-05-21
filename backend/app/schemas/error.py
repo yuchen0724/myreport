@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field, field_serializer
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class ErrorDetail(BaseModel):
@@ -19,7 +19,7 @@ class ErrorResponse(BaseModel):
     message: str = Field(..., description="错误消息")
     details: Optional[Dict[str, Any]] = Field(None, description="错误详情")
     errors: Optional[list[ErrorDetail]] = Field(None, description="错误列表")
-    timestamp: datetime = Field(default_factory=datetime.now, description="时间戳")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="时间戳")
     path: Optional[str] = Field(None, description="请求路径")
     request_id: Optional[str] = Field(None, description="请求ID")
     
@@ -28,10 +28,7 @@ class ErrorResponse(BaseModel):
         """序列化时间戳"""
         return value.isoformat()
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    # timestamp 序列化已由 @field_serializer('timestamp') 处理
 
 
 class ValidationErrorResponse(ErrorResponse):

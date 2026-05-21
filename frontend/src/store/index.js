@@ -11,9 +11,21 @@ import { getMenuTree } from "@/api/menu"
  *
  * 迁移方案参考：后端设置 Cookie（httpOnly, Secure, SameSite=Strict），
  * 前端移除所有 Token 读写逻辑，改为依赖 Cookie 自动携带。
+ *
+ * 兼容处理：从 localStorage 读取旧 Token 并迁移到 sessionStorage，
+ * 避免代码更新后用户因 Token 存储位置变化而登出。
  */
 
 const STORAGE = window.sessionStorage
+
+// ---- sessionStorage ← localStorage 迁移 ----
+// 如果 sessionStorage 为空但 localStorage 有旧 Token，迁移并清理
+if (!STORAGE.getItem("token") && window.localStorage.getItem("token")) {
+  STORAGE.setItem("token", window.localStorage.getItem("token"))
+  STORAGE.setItem("user", window.localStorage.getItem("user") || "")
+  window.localStorage.removeItem("token")
+  window.localStorage.removeItem("user")
+}
 
 export const useUserStore = defineStore("user", () => {
   const token = ref(STORAGE.getItem("token") || "")

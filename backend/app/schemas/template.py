@@ -1,5 +1,5 @@
 # backend/app/schemas/template.py
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -29,8 +29,7 @@ class TemplateResponse(TemplateBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class TemplateVersionResponse(BaseModel):
     """模板版本响应"""
@@ -41,8 +40,7 @@ class TemplateVersionResponse(BaseModel):
     created_by: int
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class TemplateShareRequest(BaseModel):
     """模板分享请求"""
@@ -61,8 +59,7 @@ class TemplateShareUserResponse(BaseModel):
     email: Optional[str] = None
     shared_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class UnshareRequest(BaseModel):
     """取消分享请求"""

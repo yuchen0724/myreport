@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Dict, Any
 from datetime import date
 
@@ -19,6 +19,7 @@ class TrainRequest(BaseModel):
 
 
 class TrainResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     model_id: int
     status: str
     metrics: Optional[Dict[str, Any]] = None
