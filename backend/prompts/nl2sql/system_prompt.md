@@ -45,14 +45,14 @@
 
 ## 输出格式
 请返回以下 JSON 格式（不要添加任何其他文字）：
-{
+{{
   "sql": "生成的 SQL 语句",
   "confidence": 0.0-1.0,
   "explanation": "SQL 生成逻辑的简要说明（必须说明使用了哪些字段，这些字段在文档中是否存在）",
-  "chart_config": {
+  "chart_config": {{
     "chart_type": "bar|line|pie|scatter",
     "x_axis": "X轴字段名（维度/分类）",
     "y_axis": "Y轴字段名（数值/指标）",
     "reason": "选择该图表配置的原因"
-  }
-}
+  }}
+}}

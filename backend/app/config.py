@@ -75,9 +75,9 @@ class Settings(BaseSettings):
     nl2sql_schema_retrieval_enabled: bool = True
     nl2sql_schema_retrieval_min_chars: int = 12000
     nl2sql_schema_retrieval_max_sections: int = 8
-    # 提示词模板路径（可选，支持绝对路径或相对 backend/ 的路径）
-    nl2sql_system_prompt_path: Optional[str] = None
-    nl2sql_repair_prompt_path: Optional[str] = None
+    # 提示词模板路径（支持绝对路径或相对 backend/ 的路径）
+    nl2sql_system_prompt_path: Optional[str] = "prompts/nl2sql/system_prompt.md"
+    nl2sql_repair_prompt_path: Optional[str] = "prompts/nl2sql/repair_prompt.md"
 
     # Prediction (销售预测)
     prediction_enabled: bool = False

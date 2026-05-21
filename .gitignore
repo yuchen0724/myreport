@@ -58,3 +58,4 @@ frontend/vite.config.js.timestamp-*
 .venv/
 .hermes/
 backend/models/
+backend/celerybeat-schedule
