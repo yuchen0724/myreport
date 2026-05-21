@@ -25,7 +25,7 @@
             <el-option
               v-for="g in groupOptions"
               :key="g.group_id"
-              :label="g.group_name"
+              :label="formatGroupLabel(g)"
               :value="g.group_id"
             />
           </el-select>
@@ -217,9 +217,9 @@ const { loadStored, saveToStorage } = useFormPersistence('nl2sql_form', {
 })
 const stored = loadStored()
 const form = ref({
-  data_source_id: stored.data_source_id,
+  data_source_id: stored.data_source_id ? Number(stored.data_source_id) : null,
   question: stored.question,
-  group_id: stored.group_id
+  group_id: stored.group_id ? Number(stored.group_id) : null
 })
 
 // 将索引数组 rows 转换为对象数组
@@ -488,6 +488,10 @@ watch(() => form.value.data_source_id, () => {
     form.value.group_id = null
     return
   }
+  // 数据源列表尚未加载完时，保留已有 group_id，不提前清空
+  if (typeof dsLoadGroupMap.value[dsId] === 'undefined') {
+    return
+  }
   // 只有开启集团加载的数据源才调用加载接口
   if (dsLoadGroupMap.value[dsId]) {
     loadGroups()
@@ -505,6 +509,12 @@ const loadDataSources = async () => {
     const map = {}
     response.forEach(ds => { map[ds.id] = ds.load_group })
     dsLoadGroupMap.value = map
+
+    // 页面刷新后：若已有数据源选择且该数据源启用集团加载，主动恢复集团选项
+    const dsId = form.value.data_source_id
+    if (dsId && map[dsId]) {
+      await loadGroups()
+    }
   } catch (error) {
     console.error('[NL2SQL] ❌ 数据源加载失败:', error)
     ElMessage.error('加载数据源失败')
@@ -523,7 +533,8 @@ const loadGroups = async () => {
     const groups = await getGroups(dsId)
     groupOptions.value = groups
     // 如果当前 group_id 不在新列表中，清空
-    if (form.value.group_id && !groups.find(g => g.group_id === form.value.group_id)) {
+    const selectedGroupId = Number(form.value.group_id)
+    if (selectedGroupId && !groups.find(g => Number(g.group_id) === selectedGroupId)) {
       form.value.group_id = null
     }
   } catch (error) {
@@ -533,6 +544,12 @@ const loadGroups = async () => {
   } finally {
     groupLoading.value = false
   }
+}
+
+const formatGroupLabel = (group) => {
+  const gid = group?.group_id ?? ''
+  const gname = group?.group_name ?? ''
+  return gname ? `${gid} - ${gname}` : String(gid)
 }
 
 const handleParse = async () => {
