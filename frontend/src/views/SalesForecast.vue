@@ -227,7 +227,7 @@ import { useFormPersistence } from '@/composables/useFormPersistence'
 
 export default {
   name: 'SalesForecast',
-  components: { Refresh, StaticTableEnhancer },
+  components: { Refresh, MagicStick, StaticTableEnhancer },
   setup() {
     const { loadStored, saveToStorage } = useFormPersistence('sales_forecast_form', {
       dataSourceId: null,
