@@ -477,6 +477,7 @@ def _train_and_predict_with_progress(
             def _batch_progress_cb(batch_no, total_batches, batch_rows):
                 """分批进度回调"""
                 nonlocal result_count
+                result_count += batch_rows
                 pct = int(batch_no / total_batches * 80) + 5
                 if pct > 85:
                     pct = 85
