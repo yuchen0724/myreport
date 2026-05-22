@@ -883,6 +883,12 @@ class PredictionService:
 
         logger.info(f"[分批训练] {len(all_groups)} 个分组, {len(batches)} 批")
 
+        # 断点续训保护：如果 start_batch >= total_batches，说明所有批次之前已完成，
+        # 但无 checkpoint 可加载（Prophet 路径），从头开始
+        if start_batch > 0 and start_batch >= len(batches):
+            logger.info(f"[分批训练] start_batch={start_batch} >= 总批数={len(batches)}，重置为从头开始")
+            start_batch = 0
+
         batch_model = None
         total_preds = 0
         all_mae, all_rmse = [], []
