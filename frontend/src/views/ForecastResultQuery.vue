@@ -38,7 +38,7 @@
                 <el-option
                   v-for="m in models"
                   :key="m.model_id"
-                  :label="`模型 #${m.model_id} (${formatDate(m.trained_at)})`"
+                  :label="`模型 #${m.model_id} [${m.model_type}] (${formatDate(m.trained_at)})`"
                   :value="m.model_id"
                 />
               </el-select>

@@ -59,7 +59,19 @@ class PredictionService:
             from app.algorithms.prophet_predictor import ProphetPredictor
             self._algorithms["prophet"] = ProphetPredictor()
         except ImportError:
-            logger.warning("[算法] Prophet 未安装，仅 lightgbm 可用")
+            logger.warning("[算法] Prophet 未安装")
+        # Naive 基线（无额外依赖）
+        try:
+            from app.algorithms.naive_predictor import NaivePredictor
+            self._algorithms["naive"] = NaivePredictor()
+        except ImportError as e:
+            logger.warning(f"[算法] Naive 注册失败: {e}")
+        # SARIMA（需要 statsmodels）
+        try:
+            from app.algorithms.sarima_predictor import SARIMAPredictor
+            self._algorithms["sarima"] = SARIMAPredictor()
+        except ImportError as e:
+            logger.warning(f"[算法] SARIMA 注册失败: {e}")
         return self._algorithms
 
     def _get_algorithm(self, model_type: str = "lightgbm") -> BasePredictor:
