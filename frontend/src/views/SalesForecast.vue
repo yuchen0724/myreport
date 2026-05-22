@@ -51,7 +51,7 @@
               @click="handleRecommend"
               :disabled="!form.dataSourceId"
             >
-              <el-icon><Light /></el-icon> 智能推荐
+              <el-icon><MagicStick /></el-icon> 智能推荐
             </el-button>
           </el-form-item>
           <!-- 推荐结果展示 -->
@@ -218,7 +218,7 @@
 
 <script>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
-import { Refresh, Light } from '@element-plus/icons-vue'
+import { Refresh, MagicStick } from '@element-plus/icons-vue'
 import { trainAndPredict, getTrainStatus, getPredictStatus, getMyTrainTasks, stopTrainTask, getForecastHistory, getForecastRunning, deleteForecastProgress, deleteTrainHistory, deleteTrainHistoryByTask, recommendAlgorithm } from '@/api/prediction'
 import { getDataSourceList } from '@/api/data_source'
 import { ElMessageBox, ElMessage } from 'element-plus'
