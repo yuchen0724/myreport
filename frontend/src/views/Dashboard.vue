@@ -604,6 +604,7 @@ export default {
       applyPreset, renameLayout, confirmRename, handleDeleteLayout,
       toggleVisibility, addLegacyWidget,
       saveLegacyWidgets, resetLegacyLayout,
+      layoutKey,
       Sort, View, Hide,
     }
   },
