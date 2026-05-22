@@ -214,19 +214,17 @@ class PredictionService:
         is_subquery = table_name and table_name.strip().upper().startswith(("SELECT", "(SELECT"))
         
         if is_subquery:
-            # 已经是子查询，直接作为派生表使用，需要加别名
-            cte_prefix = ""
-            # 子查询需要在 FROM 中加括号并加别名
-            table_ref = f"({table}) AS t"
-            top_groups_table = f"({table}) AS t"
-            # 子查询的别名用于 SQL 中的字段引用
-            table_alias = "t"
+            # 子查询：用 CTE 替代内联嵌套，避免 Doris 重复扫描
+            cte_prefix = f"WITH data_src AS ({table}) "
+            table_ref = "data_src"
+            top_groups_table = "data_src"
+            table_alias = "data_src"
         else:
             # 普通表名：走原有的 CTE 逻辑
-            cte_prefix = f"WITH t_table AS ({table}) " if table_name else ""
-            table_ref = "t_table" if table_name else table
-            top_groups_table = table
-            table_alias = "src"
+            cte_prefix = f"WITH data_src AS ({table}) " if table_name else ""
+            table_ref = "data_src" if table_name else table
+            top_groups_table = "data_src" if table_name else table
+            table_alias = "data_src" if table_name else "src"
 
         # 0. 快速获取最近活跃分组列表：取前一天峰值排前 N 的分组
         #    25.7亿行数据，GROUP BY 全表不可行，改为最近一天优先取高频分组
@@ -745,24 +743,31 @@ class PredictionService:
     def _resolve_table_context(self, ds, table_name: str = None) -> dict:
         """解析表名/子查询，返回 SQL 上下文
 
+        关键优化：对子查询和自定义表名始终使用 CTE（WITH data_src AS (...)），
+        避免子查询被多层内联嵌套导致 Doris 重复扫描。
+
         Returns:
             dict with keys: cte_prefix, table_ref, top_groups_table, table_alias, is_subquery
         """
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
         is_subquery = table_name and table_name.strip().upper().startswith(("SELECT", "(SELECT"))
-        if is_subquery:
-            return {
-                "cte_prefix": "",
-                "table_ref": f"({table}) AS t",
-                "top_groups_table": f"({table}) AS t",
-                "table_alias": "t",
-                "is_subquery": True,
-            }
-        else:
-            cte_prefix = f"WITH t_table AS ({table}) " if table_name else ""
+
+        # 统一 CTE 名称，简化逻辑
+        if is_subquery or table_name:
+            cte_name = "data_src"
+            cte_prefix = f"WITH {cte_name} AS ({table}) "
             return {
                 "cte_prefix": cte_prefix,
-                "table_ref": "t_table" if table_name else table,
+                "table_ref": cte_name,
+                "top_groups_table": cte_name,
+                "table_alias": cte_name,
+                "is_subquery": is_subquery,
+            }
+        else:
+            # 默认无自定义表名：直接使用全量表名，不改动 LightGBM 原生路径
+            return {
+                "cte_prefix": "",
+                "table_ref": table,
                 "top_groups_table": table,
                 "table_alias": "src",
                 "is_subquery": False,
@@ -888,9 +893,12 @@ class PredictionService:
 
             # 2. 拉取本批数据
             sql = self._build_batch_fetch_sql(ctx, batch_groups, start_date, end_date)
+            logger.info(f"[分批训练] 批次 {batch_no}/{len(batches)} SQL: {sql.replace(chr(10), ' ').strip()}")
             rows, cols = execute_query(ds, sql)
             if not rows:
+                logger.info(f"[分批训练] 批次 {batch_no}/{len(batches)} 无数据")
                 continue
+            logger.info(f"[分批训练] 批次 {batch_no}/{len(batches)} 拉取 {len(rows)} 行")
 
             chunk = pd.DataFrame(rows, columns=cols)
             chunk[TARGET_COL] = pd.to_numeric(chunk[TARGET_COL], errors="coerce").fillna(0)

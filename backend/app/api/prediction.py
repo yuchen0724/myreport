@@ -199,6 +199,9 @@ def get_train_status(
         percent=progress.get("percent"),
         phase=progress.get("phase"),
         detail=progress.get("detail"),
+        started_at=progress.get("started_at"),
+        elapsed_seconds=progress.get("elapsed_seconds"),
+        duration_seconds=progress.get("duration_seconds"),
     )
 
 
@@ -306,6 +309,9 @@ def get_my_train_tasks(
                     "phase": prog.get("phase", ""),
                     "detail": prog.get("detail", ""),
                     "status": prog.get("status", m.status),
+                    "started_at": prog.get("started_at"),
+                    "elapsed_seconds": prog.get("elapsed_seconds"),
+                    "duration_seconds": prog.get("duration_seconds"),
                 }
             except Exception:
                 item["progress"] = None
@@ -476,6 +482,9 @@ def get_predict_status(
         percent=progress.get("percent"),
         phase=progress.get("phase"),
         detail=progress.get("detail"),
+        started_at=progress.get("started_at"),
+        elapsed_seconds=progress.get("elapsed_seconds"),
+        duration_seconds=progress.get("duration_seconds"),
     )
 
 

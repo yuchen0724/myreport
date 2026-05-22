@@ -93,6 +93,9 @@ class TaskStatusResponse(BaseModel):
     percent: Optional[int] = None
     phase: Optional[str] = None
     detail: Optional[str] = None
+    started_at: Optional[str] = Field(None, description="任务启动时间 ISO 格式")
+    elapsed_seconds: Optional[float] = Field(None, description="当前已耗时（秒），运行中时实时更新")
+    duration_seconds: Optional[float] = Field(None, description="总耗时（秒），任务完成后固定")
 
 
 class TrainAndPredictRequest(BaseModel):

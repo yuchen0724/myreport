@@ -16,6 +16,10 @@ from app.models.prediction import PredictionResult
 
 logger = logging.getLogger(__name__)
 
+# 抑制 Prophet 底层 Stan/CmdStanPy 的 Chain 日志刷屏
+logging.getLogger("cmdstanpy").setLevel(logging.WARNING)
+logging.getLogger("prophet").setLevel(logging.WARNING)
+
 TARGET_COL = "actual_sale_untaxed_amt"
 
 
@@ -33,6 +37,7 @@ class ProphetPredictor(BasePredictor):
     SEASONALITY_MODE = "multiplicative"  # 零售数据季节性幅度随时间增长
     WEEKLY_SEASONALITY = True
     DAILY_SEASONALITY = False
+    YEARLY_SEASONALITY = False   # 关闭内置年季节性，用自定义的（fourier_order=3 更简洁）
     UNCERTAINTY_SAMPLES = 1000  # 置信区间采样数（越大越稳定）
     CHANGEPOINT_PRIOR_SCALE = 0.05  # 趋势变化敏感度
     SEASONALITY_PRIOR_SCALE = 10.0  # 季节性强度
@@ -89,6 +94,7 @@ class ProphetPredictor(BasePredictor):
                 seasonality_mode=self.SEASONALITY_MODE,
                 weekly_seasonality=self.WEEKLY_SEASONALITY,
                 daily_seasonality=self.DAILY_SEASONALITY,
+                yearly_seasonality=self.YEARLY_SEASONALITY,
                 uncertainty_samples=self.UNCERTAINTY_SAMPLES,
                 changepoint_prior_scale=self.CHANGEPOINT_PRIOR_SCALE,
                 seasonality_prior_scale=self.SEASONALITY_PRIOR_SCALE,

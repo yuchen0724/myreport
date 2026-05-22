@@ -111,6 +111,9 @@
           />
           <div class="progress-detail">{{ tp.detail }}</div>
           <div class="progress-time" v-if="tp.createdAt">提交时间: {{ tp.createdAt }}</div>
+          <div class="progress-time" v-if="tp.elapsedSeconds > 0">
+            {{ tp.status === 'success' || tp.status === 'failed' ? '耗时' : '已运行' }}: {{ formatDuration(tp.durationSeconds || tp.elapsedSeconds) }}
+          </div>
         </div>
       </el-card>
     </div>
@@ -217,6 +220,7 @@ export default {
     let _trainAndPredictLock = false
     let _pollingInterval = null
     let _pollingTaskId = null
+    let _tickInterval = null  // 1秒本地计时器
 
     const historyColumns = [
       { prop: 'data_source_name', label: '数据源', width: 140 },
@@ -278,9 +282,29 @@ export default {
       console.log('[loadHistory] taskHistory:', taskHistory.value.length, JSON.parse(JSON.stringify(taskHistory.value.slice(0, 2))))
     }
 
+    // 1秒本地计时器：秒级刷新运行时间，不依赖 API
+    function startTickTimer() {
+      if (_tickInterval) return
+      _tickInterval = setInterval(() => {
+        for (const tp of taskProgresses.value) {
+          if (tp.status === 'running') {
+            tp.elapsedSeconds = (tp.elapsedSeconds || 0) + 1
+          }
+        }
+      }, 1000)
+    }
+
+    function stopTickTimer() {
+      if (_tickInterval) {
+        clearInterval(_tickInterval)
+        _tickInterval = null
+      }
+    }
+
     // 统一轮询
     function startPolling() {
       if (_pollingInterval) return
+      startTickTimer()  // 同时启动本地计时器
       _pollingInterval = setInterval(async () => {
         const tasks = taskProgresses.value
         if (tasks.length === 0) { stopPolling(); return }
@@ -293,6 +317,11 @@ export default {
             tp.percent = s.percent || 0
             tp.phase = s.phase || '运行中'
             tp.detail = s.detail || ''
+            // 用服务端时间校准本地计时器（避免累积漂移）
+            if (s.elapsed_seconds) {
+              tp.elapsedSeconds = Math.round(s.elapsed_seconds)
+            }
+            tp.durationSeconds = s.duration_seconds
             if (s.status === 'success') {
               tp.status = 'success'; tp.percent = 100; tp.phase = '完成'
               removeFromActive(tp.taskId)
@@ -335,11 +364,24 @@ export default {
         _pollingInterval = null
         _pollingTaskId = null
       }
+      stopTickTimer()
     }
 
     function removeFromActive(taskId) {
       const idx = taskProgresses.value.findIndex(t => t.taskId === taskId)
       if (idx !== -1) taskProgresses.value.splice(idx, 1)
+    }
+
+    function formatDuration(seconds) {
+      if (!seconds || seconds <= 0) return ''
+      const s = Math.round(seconds)
+      if (s < 60) return `${s}秒`
+      const m = Math.floor(s / 60)
+      const sec = s % 60
+      if (m < 60) return `${m}分${sec}秒`
+      const h = Math.floor(m / 60)
+      const min = m % 60
+      return `${h}时${min}分${sec}秒`
     }
 
     function addToHistory(item) {
@@ -417,7 +459,7 @@ export default {
         if (!taskId) { resultMsg.value = '任务提交失败'; return }
         const ds = dataSources.value.find(d => d.id === form.value.dataSourceId)
         const dsName = ds ? ds.name : `数据源#${form.value.dataSourceId}`
-        taskProgresses.value.push({ taskId, percent: 0, phase: '初始化', detail: '训练+预测任务已提交', status: 'running', taskType: 'train-and-predict', createdAt: new Date().toLocaleString(), dataSourceName: dsName })
+        taskProgresses.value.push({ taskId, percent: 0, phase: '初始化', detail: '训练+预测任务已提交', status: 'running', taskType: 'train-and-predict', createdAt: new Date().toLocaleString(), dataSourceName: dsName, elapsedSeconds: 0 })
         startPolling()
         resultMsg.value = `训练+预测任务已提交，task_id=${taskId.slice(0, 16)}...`
       } catch (e) { resultMsg.value = `提交失败: ${e.message || e}` }
@@ -449,7 +491,7 @@ export default {
             if (existingTaskIds.has(t.task_id)) continue
             existingTaskIds.add(t.task_id)
             const progress = t.progress || {}
-            taskProgresses.value.push({ taskId: t.task_id, modelId: t.model_id, percent: progress.percent || 0, phase: progress.phase || '正在恢复', detail: progress.detail || '查询任务状态...', status: 'running', taskType: 'train', createdAt: t.created_at ? new Date(t.created_at).toLocaleString() : '', dataSourceName: t.data_source_name || '' })
+            taskProgresses.value.push({ taskId: t.task_id, modelId: t.model_id, percent: progress.percent || 0, phase: progress.phase || '正在恢复', detail: progress.detail || '查询任务状态...', status: 'running', taskType: 'train', createdAt: t.created_at ? new Date(t.created_at).toLocaleString() : '', dataSourceName: t.data_source_name || '', elapsedSeconds: progress.elapsed_seconds || 0 })
           } else if (t.status === 'ready' || t.status === 'failed') {
             // loadHistory 已处理
           }
@@ -463,7 +505,7 @@ export default {
               hasRunning = true
               if (existingTaskIds.has(f.task_id)) continue
               existingTaskIds.add(f.task_id)
-              taskProgresses.value.push({ taskId: f.task_id, modelId: f.model_id, percent: f.percent || 0, phase: f.phase || '正在恢复', detail: f.detail || '预测任务恢复中...', status: 'running', taskType: 'predict', createdAt: '', dataSourceName: f.data_source_name || '' })
+              taskProgresses.value.push({ taskId: f.task_id, modelId: f.model_id, percent: f.percent || 0, phase: f.phase || '正在恢复', detail: f.detail || '预测任务恢复中...', status: 'running', taskType: 'predict', createdAt: '', dataSourceName: f.data_source_name || '', elapsedSeconds: f.elapsed_seconds || 0 })
             }
           }
         } catch { /* silent */ }
@@ -476,6 +518,7 @@ export default {
       taskProgresses, taskHistory, historyColumns,
       handleTrainAndPredict, handleStopTask,
       handleDeleteProgress, handleDeleteHistory, onDataSourceChange,
+      formatDuration,
     }
   }
 }

@@ -1,6 +1,7 @@
 """预测相关 Celery 后台任务"""
 
 import json
+import os
 import logging
 import lightgbm as lgb
 from datetime import datetime, timezone, timedelta
@@ -23,7 +24,7 @@ PREDICTION_TASK_TIME_LIMIT: int = _settings.prediction_task_time_limit
 
 # Redis 存储训练进度（替代内存字典方案）
 # 每条进度用 Redis HASH 存储：train:progress:{task_id}
-# HASH 字段: {status, model_id, percent, phase, detail, error}
+# HASH 字段: {status, model_id, percent, phase, detail, error, started_at, elapsed_seconds}
 # 进度 key 有 TTL=7200 秒（2小时），训练结束后自动过期
 _PROGRESS_TTL = 7200
 
@@ -72,10 +73,31 @@ def _update_progress(task_id: str, phase: str, detail: str = "", model_id: int =
 
     每次调用覆盖写入 HASH 并刷新 TTL。
     相比内存字典方案：页面刷新/Worker 重启后进度不丢失。
+
+    自动计时：首次调用时记录 started_at，每次更新 elapsed_seconds。
     """
     r = _get_redis()
     key = _progress_key(task_id)
     final_pct = str(percent) if percent is not None else str(_PHASE_WEIGHTS.get(phase, 0))
+
+    # 计时：如果尚未记录 started_at，则写入当前时间
+    # 每次调用都更新 elapsed_seconds（从 started_at 到现在的秒数）
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat()
+    existing_started = r.hget(key, "started_at")
+    if not existing_started:
+        started_iso = now_iso
+    else:
+        started_iso = existing_started.decode() if isinstance(existing_started, bytes) else existing_started
+
+    # 计算已耗��秒数
+    try:
+        started_dt = datetime.fromisoformat(started_iso)
+        elapsed = (now_dt - started_dt).total_seconds()
+        elapsed_str = f"{elapsed:.1f}"
+    except Exception:
+        elapsed_str = "0.0"
+
     r.hset(key, mapping={
         "status": "running",
         "model_id": str(model_id) if model_id else "",
@@ -83,8 +105,24 @@ def _update_progress(task_id: str, phase: str, detail: str = "", model_id: int =
         "percent": final_pct,
         "phase": phase,
         "detail": detail,
+        "started_at": started_iso,
+        "elapsed_seconds": elapsed_str,
     })
     r.expire(key, _PROGRESS_TTL)
+
+
+def _get_duration_seconds(r, key: str) -> str:
+    """从 Redis 读取 started_at，计算当前已耗时（秒）"""
+    try:
+        started = r.hget(key, "started_at")
+        if started:
+            started_str = started.decode() if isinstance(started, bytes) else started
+            started_dt = datetime.fromisoformat(started_str)
+            elapsed = (datetime.now(timezone.utc) - started_dt).total_seconds()
+            return f"{elapsed:.1f}"
+    except Exception:
+        pass
+    return "0.0"
 
 
 @celery_app.task(bind=True, max_retries=2, soft_time_limit=600)
@@ -268,7 +306,6 @@ def _train_with_progress(
             # 热保存：每 5 批保存一次中间模型文件
             if batch_no % 5 == 0:
                 import joblib
-                import os
                 checkpoint_path = os.path.join(service.model_dir, f"lgb_{ds.id}_{model_record.id}.pkl")
                 os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
                 joblib.dump(model, checkpoint_path)
@@ -300,8 +337,6 @@ def _train_with_progress(
         _update_progress(task_id, _PHASE_TRAINING, f"MAE={mae:.2f}, RMSE={rmse:.2f}", model_record.id)
 
         import joblib
-        import os
-        from datetime import datetime
 
         _update_progress(task_id, _PHASE_SAVING, "保存模型文件")
         model_path = os.path.join(service.model_dir, f"lgb_{ds.id}_{model_record.id}.pkl")
@@ -638,8 +673,6 @@ def _train_and_predict_with_progress(
 
         # 保存模型文件
         import joblib
-        import os
-        from datetime import datetime
 
         _update_progress(task_id, _PHASE_SAVING, "保存模型文件", percent=92)
         model_path = os.path.join(service.model_dir, f"lgb_{ds.id}_{model_record.id}.pkl")
@@ -1151,6 +1184,24 @@ def get_async_task_progress(task_id: str) -> dict:
                     }
             except Exception:
                 pass
+        # 读取 started_at，实时计算已耗时（不再依赖 _update_progress 写入的 elapsed_seconds）
+        _started_at = data.get("started_at") or None
+        if isinstance(_started_at, bytes):
+            _started_at = _started_at.decode()
+        _elapsed = None
+        if _started_at:
+            try:
+                _started_dt = datetime.fromisoformat(_started_at)
+                _elapsed = (datetime.now(timezone.utc) - _started_dt).total_seconds()
+            except Exception:
+                pass
+        # duration_seconds 优先取 Redis 中记录的固定值（任务完成时写入），
+        # 没有的话也实时计算
+        _duration_raw = data.get("duration_seconds") or data.get("elapsed_seconds") or None
+        if isinstance(_duration_raw, bytes):
+            _duration_raw = _duration_raw.decode()
+        _duration = float(_duration_raw) if _duration_raw else (_elapsed if _elapsed else None)
+
         return {
             "status": redis_status,
             "model_id": int(data["model_id"]) if data.get("model_id") else None,
@@ -1158,6 +1209,9 @@ def get_async_task_progress(task_id: str) -> dict:
             "percent": int(data.get("percent", 0)),
             "phase": data.get("phase", ""),
             "detail": data.get("detail", ""),
+            "started_at": _started_at,
+            "elapsed_seconds": float(_elapsed) if _elapsed else None,
+            "duration_seconds": float(_duration) if _duration else None,
         }
 
     # 2) Celery AsyncResult
