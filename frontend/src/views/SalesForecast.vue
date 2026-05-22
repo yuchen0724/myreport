@@ -437,6 +437,10 @@ export default {
         } else {
           ElMessage.warning('缺少标识信息，无法删除'); return
         }
+        // 无论走 modelId 还是 taskId，都额外清理 Redis 进度和残留 ForecastHistory
+        if (taskId) {
+          try { await deleteForecastProgress(taskId) } catch { /* 冗余清理，失败不影响主流程 */ }
+        }
         ElMessage.success('删除成功')
       } catch (e) {
         ElMessage.error(`删除失败: ${e.message || e}`)

@@ -340,20 +340,15 @@ def _hard_delete_model(model, db):
     """硬删除模型记录及关联的预测历史"""
     if model is None:
         return
-    # 清理预测历史
-    try:
-        db.query(ForecastHistory).filter(
-            ForecastHistory.model_id == model.id
-        ).delete()
-    except Exception:
-        pass
+    # 清理预测历史（按 task_id 最可靠，model_id 可能为 None）
     if model.task_id:
         try:
-            db.query(ForecastHistory).filter(
+            deleted = db.query(ForecastHistory).filter(
                 ForecastHistory.task_id == model.task_id
             ).delete()
-        except Exception:
-            pass
+            logger.info(f"[硬删除] 清理 ForecastHistory({model.task_id}): {deleted} 条")
+        except Exception as e:
+            logger.error(f"[硬删除] 清理 ForecastHistory(task_id) 失败: {e}", exc_info=True)
     # 清理模型
     db.delete(model)
     db.commit()
@@ -364,8 +359,8 @@ def _hard_delete_model(model, db):
         r = _get_redis()
         if r and model.task_id:
             r.delete(_progress_key(model.task_id))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[硬删除] 清理 Redis 失败: {e}")
 
 
 @router.delete("/history/{model_id}", response_model=dict)
@@ -428,12 +423,14 @@ def delete_train_history_by_task(
 
     # 始终清理关联的预测历史记录
     try:
-        db.query(ForecastHistory).filter(
+        deleted = db.query(ForecastHistory).filter(
             ForecastHistory.task_id == task_id
         ).delete()
         db.commit()
-    except Exception:
-        pass
+        if deleted:
+            logger.info(f"[按task删除] 清理 ForecastHistory({task_id}): {deleted} 条")
+    except Exception as e:
+        logger.warning(f"[按task删除] 清理 ForecastHistory 失败: {e}")
 
     # 始终清理 Redis 进度
     try:
