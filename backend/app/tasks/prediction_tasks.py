@@ -112,6 +112,7 @@ def _train_with_progress(
     valid_days: int = 30,
     table_name: Optional[str] = None,
     user_id: Optional[int] = None,
+    model_type: str = "lightgbm",
     is_retry: bool = False,
 ) -> int:
     """带进度汇报的训练流程
@@ -125,18 +126,98 @@ def _train_with_progress(
 
     try:
         service = PredictionService(db)
+
+        ds = service.ds_repo.get_by_id(data_source_id)
+        if not ds:
+            raise ValueError(f"数据源 {data_source_id} 不存在")
+
+        # ── 非 LightGBM 算法：自己创建模型记录，直接调算法 ──
+        if model_type != "lightgbm":
+            _update_progress(task_id, _PHASE_INIT, f"使用 {model_type} 算法训练")
+            algo = service._get_algorithm(model_type)
+
+            model_record = service.model_repo.create(
+                data_source_id=data_source_id,
+                model_type=model_type,
+                status="training",
+                task_id=task_id,
+                created_by=user_id,
+            )
+            _update_progress(task_id, _PHASE_INIT,
+                             f"模型记录已创建，id={model_record.id}",
+                             model_record.id)
+
+            try:
+                # 拉取历史数据
+                df = service._fetch_history_data(data_source_id, train_days,
+                                                  table_name=table_name)
+                if len(df) < 10:
+                    raise ValueError(f"历史数据不足({len(df)}行)")
+
+                _update_progress(task_id, _PHASE_TRAINING, "模型训练中...",
+                                 model_record.id, percent=50)
+
+                # 算法训练
+                model, metrics = algo.train(df, model_record, service)
+
+                # 保存模型
+                _update_progress(task_id, _PHASE_SAVING, "保存模型文件", percent=90)
+                model_path = os.path.join(
+                    service.model_dir,
+                    f"{model_type}_{ds.id}_{model_record.id}.pkl"
+                )
+                algo.save(model, model_path)
+
+                service.model_repo.update_status(
+                    model_record.id, "ready",
+                    model_path=model_path,
+                    feature_count=len(get_feature_columns()),
+                    train_start_date=df["dt"].min().date() if not df.empty else datetime.now().date(),
+                    train_end_date=df["dt"].max().date() if not df.empty else datetime.now().date(),
+                    train_row_count=len(df),
+                    model_metrics=metrics,
+                    trained_at=datetime.now(timezone(timedelta(hours=8))),
+                )
+
+                _update_progress(task_id, _PHASE_SAVING, "训练完成",
+                                 model_record.id, percent=100)
+                r = _get_redis()
+                key = _progress_key(task_id)
+                r.hset(key, mapping={
+                    "status": "success", "model_id": str(model_record.id),
+                    "error": "", "percent": "100", "phase": "完成",
+                    "detail": f"{model_type} 训练完成，ID={model_record.id}",
+                })
+                r.expire(key, _PROGRESS_TTL)
+                return model_record.id
+
+            except Exception as e:
+                logger.error(f"[Celery] {model_type} 训练失败: task_id={task_id}, error={e}")
+                try:
+                    service.model_repo.update_status(
+                        model_record.id, "failed", error_message=str(e))
+                except Exception:
+                    pass
+                try:
+                    r = _get_redis()
+                    key = _progress_key(task_id)
+                    r.hset(key, mapping={
+                        "status": "failed", "model_id": str(model_record.id),
+                        "error": str(e), "percent": "0", "phase": "失败", "detail": str(e),
+                    })
+                    r.expire(key, _PROGRESS_TTL)
+                except Exception:
+                    pass
+                raise
+
+        # ── LightGBM 增量训练路径 ──────────
         train_kwargs = {
             "train_days": train_days,
             "test_days": test_days,
             "valid_days": valid_days,
         }
-
         if table_name:
             train_kwargs["table_name"] = table_name
-
-        ds = service.ds_repo.get_by_id(data_source_id)
-        if not ds:
-            raise ValueError(f"数据源 {data_source_id} 不存在")
 
         # 重试时复用已有 DB 记录，不创建新记录
         if is_retry:
@@ -144,10 +225,9 @@ def _train_with_progress(
                 PredictionModel.task_id == task_id
             ).first()
             if not model_record:
-                # 如果找不到（极端情况），才创建新记录
                 model_record = service.model_repo.create(
                     data_source_id=data_source_id,
-                    model_type="lightgbm",
+                    model_type=model_type,
                     status="training",
                     task_id=task_id,
                     created_by=user_id,
@@ -155,10 +235,9 @@ def _train_with_progress(
             else:
                 _update_progress(task_id, _PHASE_INIT, f"重试中，复用模型记录 id={model_record.id}", model_record.id)
         else:
-            # 首次执行：创建模型记录
             model_record = service.model_repo.create(
                 data_source_id=data_source_id,
-                model_type="lightgbm",
+                model_type=model_type,
                 status="training",
                 task_id=task_id,
                 created_by=user_id,
@@ -298,6 +377,7 @@ def _train_and_predict_with_progress(
     forecast_days: int = 30,
     table_name: Optional[str] = None,
     user_id: Optional[int] = None,
+    model_type: str = "lightgbm",
     batch_size: Optional[int] = None,
     batch_unit: Optional[int] = None,
     is_retry: bool = False,
@@ -325,16 +405,134 @@ def _train_and_predict_with_progress(
         if not ds:
             raise ValueError(f"数据源 {data_source_id} 不存在")
 
+        # ── 非 LightGBM 算法：分组分批训练+预测 ──
+        if model_type != "lightgbm":
+            _update_progress(task_id, _PHASE_INIT, f"使用 {model_type} 算法训练+预测")
+
+            algo = service._get_algorithm(model_type)
+
+            # 创建模型记录
+            model_record = service.model_repo.create(
+                data_source_id=data_source_id,
+                model_type=model_type,
+                status="training",
+                task_id=task_id,
+                created_by=user_id,
+            )
+            _update_progress(task_id, "准备数据",
+                             f"查询活跃分组，数据源={data_source_id}",
+                             model_record.id, percent=3)
+
+            # 重试断点续训
+            start_batch = 0
+            if is_retry:
+                try:
+                    r = _get_redis()
+                    cb = r.hget(_progress_key(task_id), "completed_batches")
+                    if cb:
+                        start_batch = int(cb)
+                        _update_progress(task_id, "分批处理",
+                                         f"断点续训：跳过前 {start_batch} 批",
+                                         model_record.id, percent=9)
+                except Exception:
+                    pass
+
+            result_count = 0
+
+            def _batch_progress_cb(batch_no, total_batches, batch_rows):
+                """分批进度回调"""
+                nonlocal result_count
+                pct = int(batch_no / total_batches * 80) + 5
+                if pct > 85:
+                    pct = 85
+                _update_progress(
+                    task_id, "分批处理",
+                    f"处理中 {batch_no}/{total_batches} 批, 预测 {result_count} 条",
+                    model_record.id, percent=pct,
+                )
+                try:
+                    r = _get_redis()
+                    r.hset(_progress_key(task_id), "completed_batches", str(batch_no))
+                except Exception:
+                    pass
+
+            try:
+                batch_model, metrics, result_count = service._batch_train_predict(
+                    algo=algo, ds=ds, model_record=model_record,
+                    train_days=train_days,
+                    forecast_days=forecast_days,
+                    table_name=table_name,
+                    test_days=test_days,
+                    valid_days=valid_days,
+                    batch_size=batch_size or 200,
+                    batch_unit=batch_unit or 10,
+                    start_batch=start_batch,
+                    progress_callback=_batch_progress_cb,
+                )
+            except Exception as e:
+                logger.error(f"[Celery] {model_type} 训练+预测失败: task_id={task_id}, error={e}")
+                try:
+                    service.model_repo.update_status(
+                        model_record.id, "failed", error_message=str(e))
+                except Exception:
+                    pass
+                r = _get_redis()
+                key = _progress_key(task_id)
+                r.hset(key, mapping={
+                    "status": "failed", "model_id": str(model_record.id),
+                    "error": str(e), "percent": "0", "phase": "失败", "detail": str(e),
+                })
+                r.expire(key, _PROGRESS_TTL)
+                raise
+
+            # 保存模型文件
+            _update_progress(task_id, _PHASE_SAVING, "保存模型文件", percent=92)
+            model_path = os.path.join(
+                service.model_dir, f"{model_type}_{ds.id}_{model_record.id}.pkl"
+            )
+            algo.save(batch_model, model_path)
+
+            service.model_repo.update_status(
+                model_record.id, "ready",
+                model_path=model_path,
+                feature_count=len(get_feature_columns()),
+                train_row_count=sum(1 for _ in []),  # 简化：实际行数由各算法内部统计
+                model_metrics=metrics,
+                trained_at=datetime.now(timezone(timedelta(hours=8))),
+            )
+
+            _update_progress(task_id, _PHASE_SAVING, "保存完成", model_record.id, percent=95)
+            logger.info(f"[训练+预测] 写入 {result_count} 条预测结果，模型 model_id={model_record.id}")
+
+            # 写入预测历史
+            from app.repositories.prediction_repository import ForecastHistoryRepository
+            hist_repo = ForecastHistoryRepository(db)
+            hist_repo.create(
+                task_id=task_id, model_id=model_record.id,
+                data_source_id=data_source_id, forecast_days=forecast_days,
+                result_count=result_count, status="success", created_by=user_id,
+            )
+
+            r = _get_redis()
+            key = _progress_key(task_id)
+            r.hset(key, mapping={
+                "status": "success", "model_id": str(model_record.id),
+                "error": "", "percent": "100", "phase": "完成",
+                "detail": f"{model_type} 训练+预测完成，预测{result_count}条",
+            })
+            r.expire(key, _PROGRESS_TTL)
+            return model_record.id, result_count
+
+        # ── LightGBM 增量训练+预测路径 ──
         # 重试时复用已有 DB 记录，不创建新记录
         if is_retry:
             model_record = db.query(PredictionModel).filter(
                 PredictionModel.task_id == task_id
             ).first()
             if not model_record:
-                # 极端情况找不到时才创建新记录
                 model_record = service.model_repo.create(
                     data_source_id=data_source_id,
-                    model_type="lightgbm",
+                    model_type=model_type,
                     status="training",
                     task_id=task_id,
                     created_by=user_id,
@@ -344,10 +542,9 @@ def _train_and_predict_with_progress(
                                  f"重试中，复用模型记录 id={model_record.id}",
                                  model_record.id, percent=3)
         else:
-            # 首次执行：创建模型记录
             model_record = service.model_repo.create(
                 data_source_id=data_source_id,
-                model_type="lightgbm",
+                model_type=model_type,
                 status="training",
                 task_id=task_id,
                 created_by=user_id,
@@ -524,6 +721,7 @@ def _train_and_predict_with_progress(
 def train_prediction_model_async(
     self,
     data_source_id: int,
+    model_type: str = "lightgbm",
     train_days: Optional[int] = None,
     test_days: Optional[int] = None,
     valid_days: Optional[int] = None,
@@ -566,6 +764,7 @@ def train_prediction_model_async(
             valid_days=valid_days or 30,
             table_name=table_name, 
             user_id=user_id,
+            model_type=model_type,
             is_retry=self.request.retries > 0,
         )
         return {"model_id": model_id, "status": "success"}
@@ -619,6 +818,7 @@ def train_prediction_model_async(
 def train_and_predict_prediction_async(
     self,
     data_source_id: int,
+    model_type: str = "lightgbm",
     train_days: Optional[int] = None,
     test_days: Optional[int] = None,
     valid_days: Optional[int] = None,
@@ -662,6 +862,7 @@ def train_and_predict_prediction_async(
             forecast_days=forecast_days or 30,
             table_name=table_name,
             user_id=user_id,
+            model_type=model_type,
             batch_size=batch_size,
             batch_unit=batch_unit,
             is_retry=self.request.retries > 0,

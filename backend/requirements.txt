@@ -24,4 +24,5 @@ pyecharts>=2.0.0
 lightgbm>=4.0.0
 scikit-learn>=1.3.0
 joblib>=1.3.0
+prophet>=1.1.6
 PySocks>=1.7.1

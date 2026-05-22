@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     nl2sql_repair_prompt_path: Optional[str] = "prompts/nl2sql/repair_prompt.md"
 
     # Prediction (销售预测)
-    prediction_enabled: bool = False
+    prediction_enabled: bool = True
     prediction_model_dir: str = "./models/prediction"
     prediction_train_default_days: int = 365
     prediction_forecast_days: int = 30

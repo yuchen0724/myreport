@@ -34,6 +34,7 @@ def train_model(
     try:
         task = train_prediction_model_async.delay(
             data_source_id=req.data_source_id,
+            model_type=req.model_type,
             train_days=req.train_days,
             test_days=req.test_days,
             valid_days=req.valid_days,
@@ -115,6 +116,7 @@ def train_and_predict(
     try:
         task = train_and_predict_prediction_async.delay(
             data_source_id=req.data_source_id,
+            model_type=req.model_type,
             train_days=req.train_days,
             test_days=req.test_days,
             valid_days=req.valid_days,
@@ -288,6 +290,7 @@ def get_my_train_tasks(
             "model_id": m.id,
             "data_source_id": m.data_source_id,
             "data_source_name": ds_name,
+            "model_type": m.model_type,
             "status": final_status,
             "task_id": m.task_id,
             "created_at": m.created_at.isoformat() if m.created_at else None,

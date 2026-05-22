@@ -35,6 +35,12 @@
           <el-form-item label="每批分组数">
             <el-input-number v-model="form.batchUnit" :min="1" :max="200" :step="1" />
           </el-form-item>
+          <el-form-item label="算法">
+            <el-select v-model="form.modelType" style="width: 130px">
+              <el-option label="LightGBM" value="lightgbm" />
+              <el-option label="Prophet" value="prophet" />
+            </el-select>
+          </el-form-item>
         </div>
         <!-- 第二行：查询语句（独占双行宽度） -->
         <div class="sql-row">
@@ -135,6 +141,11 @@
         <template #model_id="{ row }">
           <el-tag size="small">{{ row.model_id ?? '-' }}</el-tag>
         </template>
+        <template #model_type="{ row }">
+          <el-tag :type="row.model_type === 'prophet' ? 'success' : 'primary'" size="small" effect="plain">
+            {{ row.model_type === 'prophet' ? 'Prophet' : row.model_type === 'lightgbm' ? 'LightGBM' : (row.model_type || '-') }}
+          </el-tag>
+        </template>
         <template #status="{ row }">
           <el-tag :type="row.status === 'ready' || row.status === 'success' ? 'success' : 'danger'" size="small">
             {{ row.status === 'ready' || row.status === 'success' ? '成功' : '失败' }}
@@ -187,6 +198,7 @@ export default {
       tableName: '',
       batchSize: 200,
       batchUnit: 10,
+      modelType: 'lightgbm',
     })
 
     const form = ref(loadStored())
@@ -209,6 +221,7 @@ export default {
     const historyColumns = [
       { prop: 'data_source_name', label: '数据源', width: 140 },
       { prop: 'model_id', label: '模型ID', width: 80, slotName: 'model_id' },
+      { prop: 'model_type', label: '算法', width: 100, slotName: 'model_type' },
       { prop: 'status', label: '状态', width: 90, slotName: 'status' },
       { prop: 'metrics', label: '指标', width: 200, slotName: 'metrics' },
       { prop: 'task_id', label: '任务ID', minWidth: 150, slotName: 'task_id' },
@@ -399,7 +412,7 @@ export default {
         const tableName = form.value.tableName.trim() || null
         const batchSize = form.value.batchSize || null
         const batchUnit = form.value.batchUnit || null
-        const res = await trainAndPredict(form.value.dataSourceId, form.value.trainDays, form.value.forecastDays, tableName, batchSize, batchUnit, form.value.testDays, form.value.validDays)
+        const res = await trainAndPredict(form.value.dataSourceId, form.value.trainDays, form.value.forecastDays, tableName, batchSize, batchUnit, form.value.testDays, form.value.validDays, form.value.modelType)
         const taskId = res.task_id || (res.data && res.data.task_id)
         if (!taskId) { resultMsg.value = '任务提交失败'; return }
         const ds = dataSources.value.find(d => d.id === form.value.dataSourceId)

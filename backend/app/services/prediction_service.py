@@ -25,6 +25,9 @@ from app.models.prediction import PredictionResult
 from app.utils.feature_engineering import build_features_from_history, get_feature_columns
 from app.utils.db_executor import execute_query
 
+# 算法注册（惰性导入，避免 prophet/lightgbm 未安装时崩溃）
+from app.algorithms.base import BasePredictor
+
 logger = logging.getLogger(__name__)
 
 TARGET_COL = "actual_sale_untaxed_amt"  # 预测目标字段
@@ -39,6 +42,35 @@ class PredictionService:
         self.result_repo = PredictionResultRepository(db)
         self.model_dir = settings.prediction_model_dir
         os.makedirs(self.model_dir, exist_ok=True)
+        # 算法注册表：model_type → BasePredictor 实例（惰性初始化）
+        self._algorithms: dict[str, BasePredictor] | None = None
+
+    def _get_algorithms(self) -> dict[str, BasePredictor]:
+        """懒加载算法注册表，避免未安装的算法模块导致导入失败"""
+        if self._algorithms is not None:
+            return self._algorithms
+        self._algorithms = {}
+        # LightGBM（强依赖，始终可用）
+        from app.algorithms.lightgbm_predictor import LightGBMPredictor
+        self._algorithms["lightgbm"] = LightGBMPredictor()
+        # Prophet（可选依赖）
+        try:
+            from app.algorithms.prophet_predictor import ProphetPredictor
+            self._algorithms["prophet"] = ProphetPredictor()
+        except ImportError:
+            logger.warning("[算法] Prophet 未安装，仅 lightgbm 可用")
+        return self._algorithms
+
+    def _get_algorithm(self, model_type: str = "lightgbm") -> BasePredictor:
+        """按 model_type 查找算法实例"""
+        algos = self._get_algorithms()
+        algo = algos.get(model_type)
+        if not algo:
+            raise ValueError(
+                f"不支持的模型类型: '{model_type}'，"
+                f"支持: {list(algos.keys())}"
+            )
+        return algo
 
     def _lookup_ware_names(self, ds_id: int, pairs: list) -> dict:
         """从 Doris 维度表批量查 ware_name，返回 (store_code, matnr) -> ware_name 字典
@@ -88,6 +120,14 @@ class PredictionService:
         start_date = end_date - timedelta(days=days)
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
         
+        # 检测 table_name 是否为完整 SELECT 语句（大小写不敏感）
+        is_subquery = table_name and table_name.strip().upper().startswith(("SELECT", "(SELECT"))
+        if is_subquery:
+            # 子查询需要加括号和别名才能在 FROM 中使用
+            table_ref = f"({table}) AS _sub"
+        else:
+            table_ref = table
+        
         # 格式化日期范围
         start_str = start_date.strftime("%Y%m%d")
         end_str = end_date.strftime("%Y%m%d")
@@ -96,7 +136,7 @@ class PredictionService:
         sql = f"""\
             SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
                 dt, store_code, matnr, {TARGET_COL}
-            FROM {table}
+            FROM {table_ref}
             WHERE dt >= {start_str}
               AND dt < {end_str}
               AND exclude_flag != 1
@@ -454,28 +494,35 @@ class PredictionService:
         return (model, feature_cols, total_trained_rows, train_start, train_end, mae_val, rmse_val, "", batch_no)
 
     def train(self, ds_id: int, train_days: int = None, test_days: int = None, 
-              valid_days: int = None, table_name: str = None) -> int:
+              valid_days: int = None, table_name: str = None,
+              model_type: str = "lightgbm") -> int:
         """
-        训练模型。
-        
+        训练模型（通过算法注册表分发）。
+
         Args:
             ds_id: 数据源ID
             train_days: 训练集天数（默认配置）
             test_days: 测试集天数（默认30天）
             valid_days: 验证集天数（默认30天）
-        
+            table_name: 自定义表名
+            model_type: 模型类型（"lightgbm" / "prophet"），默认 lightgbm
+
         Returns: 模型记录 ID
         """
         train_days = train_days or settings.prediction_train_default_days
         test_days = test_days if test_days is not None else settings.prediction_test_days
         valid_days = valid_days if valid_days is not None else settings.prediction_valid_days
         
-        logger.info(f"[预测] 开始训练，数据源={ds_id}，训练={train_days}天，测试={test_days}天，验证={valid_days}天")
+        # 获取算法
+        algo = self._get_algorithm(model_type)
+        
+        logger.info(f"[预测] 开始训练，数据源={ds_id}，类型={model_type}，"
+                     f"训练={train_days}天，测试={test_days}天，验证={valid_days}天")
 
         # 创建模型记录
         model_record = self.model_repo.create(
             data_source_id=ds_id,
-            model_type="lightgbm",
+            model_type=model_type,
             status="training",
         )
 
@@ -487,53 +534,30 @@ class PredictionService:
                     f"历史数据不足({len(df)}行)，需要至少 {settings.prediction_min_history_days * 10} 行"
                 )
 
-            # 2. 特征工程
-            df_feat = build_features_from_history(df)
-            df_feat = df_feat.dropna(subset=get_feature_columns()).reset_index(drop=True)
+            # 2. 算法训练（内部包含特征工程+模型训练+评估）
+            model, metrics = algo.train(df, model_record, self)
 
-            # 3. 构造训练集
+            # 3. 保存模型
+            model_filename = f"{model_type}_{ds_id}_{model_record.id}.pkl"
+            model_path = os.path.join(self.model_dir, model_filename)
+            algo.save(model, model_path)
+
+            # 4. 更新模型记录
             feature_cols = get_feature_columns()
-            X = df_feat[feature_cols].values
-            y = df_feat[TARGET_COL].values
-
-            # 4. 训练 LightGBM
-            model = lgb.LGBMRegressor(
-                n_estimators=200,
-                learning_rate=0.05,
-                max_depth=8,
-                num_leaves=31,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                random_state=42,
-                verbose=-1,
-                num_threads=2,
-            )
-            model.fit(X, y)
-
-            # 5. 评估
-            y_pred = model.predict(X)
-            mae = float(np.mean(np.abs(y - y_pred)))
-            rmse = float(np.sqrt(np.mean((y - y_pred) ** 2)))
-            logger.info(f"[预测] 训练完成: MAE={mae:.2f}, RMSE={rmse:.2f}")
-
-            # 6. 保存模型
-            model_path = os.path.join(self.model_dir, f"lgb_{ds_id}_{model_record.id}.pkl")
-            joblib.dump(model, model_path)
-            # 同时保存原生 Booster 格式，用于 pred_interval 置信区间计算
-            model.booster_.save_model(model_path.replace('.pkl', '.txt'))
-
-            # 7. 更新模型记录
+            df_dates = df["dt"] if hasattr(df, "dt") else pd.Series()
             self.model_repo.update_status(
                 model_record.id, "ready",
                 model_path=model_path,
                 feature_count=len(feature_cols),
-                train_start_date=df["dt"].min().date(),
-                train_end_date=df["dt"].max().date(),
-                train_row_count=len(df_feat),
-                model_metrics={"mae": mae, "rmse": rmse},
+                train_start_date=df_dates.min().date() if not df_dates.empty else date.today(),
+                train_end_date=df_dates.max().date() if not df_dates.empty else date.today(),
+                train_row_count=len(df),
+                model_metrics=metrics,
                 trained_at=datetime.now(TZ_UTC8),
             )
 
+            logger.info(f"[预测] 训练完成: model_id={model_record.id}, "
+                         f"MAE={metrics.get('mae', 'N/A')}, RMSE={metrics.get('rmse', 'N/A')}")
             return model_record.id
 
         except Exception as e:
@@ -718,15 +742,195 @@ class PredictionService:
 
         return results
 
+    def _resolve_table_context(self, ds, table_name: str = None) -> dict:
+        """解析表名/子查询，返回 SQL 上下文
+
+        Returns:
+            dict with keys: cte_prefix, table_ref, top_groups_table, table_alias, is_subquery
+        """
+        table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
+        is_subquery = table_name and table_name.strip().upper().startswith(("SELECT", "(SELECT"))
+        if is_subquery:
+            return {
+                "cte_prefix": "",
+                "table_ref": f"({table}) AS t",
+                "top_groups_table": f"({table}) AS t",
+                "table_alias": "t",
+                "is_subquery": True,
+            }
+        else:
+            cte_prefix = f"WITH t_table AS ({table}) " if table_name else ""
+            return {
+                "cte_prefix": cte_prefix,
+                "table_ref": "t_table" if table_name else table,
+                "top_groups_table": table,
+                "table_alias": "src",
+                "is_subquery": False,
+            }
+
+    def _query_top_groups(self, ds, table_name: str, batch_size: int) -> list:
+        """查前一天 TOP-N 活跃分组"""
+        ctx = self._resolve_table_context(ds, table_name)
+        latest_day = date.today() - timedelta(days=1)
+        top_groups_dt = latest_day.strftime('%Y%m%d')
+
+        sql = f"""{ctx['cte_prefix']}\
+            SELECT /*+ SET_VAR(query_timeout=120) */
+                group_id, store_code, matnr, SUM(actual_sale_untaxed_amt) as total_sales
+            FROM {ctx['table_ref']}
+            WHERE dt >= '{top_groups_dt}'
+              AND exclude_flag != 1
+              AND (service_flag != 1 OR service_flag IS NULL)
+              AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
+            GROUP BY group_id, store_code, matnr
+            ORDER BY total_sales DESC
+            LIMIT {batch_size}
+        """
+        rows, _ = execute_query(ds, sql)
+        return [(row[0], row[1], row[2]) for row in rows]
+
+    def _build_batch_fetch_sql(self, ctx: dict, batch_groups: list,
+                                start_date: date, end_date: date) -> str:
+        """为一批分组生成数据拉取 SQL"""
+        top_groups_table = ctx["top_groups_table"]
+        table_alias = ctx["table_alias"]
+
+        top_groups_subquery = self._build_top_groups_subquery(top_groups_table)
+
+        batch_values = " UNION ALL ".join(
+            f"SELECT {gid} AS group_id, '{scode}' AS store_code, '{mnr}' AS matnr"
+            for gid, scode, mnr in batch_groups
+        )
+
+        sql = f"""{ctx['cte_prefix']}\
+            SELECT /*+ SET_VAR(exec_mem_limit=1073741824, query_timeout=600) */
+                {table_alias}.dt, {table_alias}.group_id, {table_alias}.store_code,
+                {table_alias}.matnr, {table_alias}.{TARGET_COL}
+            FROM {ctx['table_ref']}
+            JOIN {top_groups_subquery}
+              ON {table_alias}.group_id = top_g.group_id
+             AND {table_alias}.store_code = top_g.store_code
+             AND {table_alias}.matnr = top_g.matnr
+            JOIN ({batch_values}) batch_g
+              ON {table_alias}.group_id = batch_g.group_id
+             AND {table_alias}.store_code = batch_g.store_code
+             AND {table_alias}.matnr = batch_g.matnr
+            WHERE {table_alias}.dt >= '{start_date.strftime('%Y%m%d')}'
+              AND {table_alias}.dt < '{end_date.strftime('%Y%m%d')}'
+              AND {table_alias}.exclude_flag != 1
+              AND ({table_alias}.service_flag != 1 OR {table_alias}.service_flag IS NULL)
+              AND ({table_alias}.shopping_bag_flag != 1 OR {table_alias}.shopping_bag_flag IS NULL)
+            ORDER BY {table_alias}.store_code, {table_alias}.matnr, {table_alias}.dt
+        """
+        return sql
+
+    def _build_top_groups_subquery(self, top_groups_table: str) -> str:
+        """构建活跃分组子查询（用于 JOIN）"""
+        latest_day = date.today() - timedelta(days=1)
+        top_groups_dt = latest_day.strftime('%Y%m%d')
+        return f"""(
+            SELECT group_id, store_code, matnr
+            FROM {top_groups_table}
+            WHERE dt >= '{top_groups_dt}'
+              AND exclude_flag != 1
+              AND (service_flag != 1 OR service_flag IS NULL)
+              AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
+            GROUP BY group_id, store_code, matnr
+            ORDER BY SUM(actual_sale_untaxed_amt) DESC
+        ) top_g"""
+
+    def _batch_train_predict(
+        self,
+        algo: BasePredictor,
+        ds,
+        model_record,
+        train_days: int,
+        forecast_days: int,
+        table_name: str = None,
+        test_days: int = 30,
+        valid_days: int = 30,
+        batch_size: int = 200,
+        batch_unit: int = 10,
+        start_batch: int = 0,
+        progress_callback: callable = None,
+    ) -> tuple:
+        """通用分批训练+预测（适用于 LightGBM 外的算法）
+
+        按前一天 TOP-N 活跃分组分批处理。每批：拉取 → 训练 → 预测 → 保存结果。
+
+        Returns:
+            (batch_model, metrics, total_predictions)
+        """
+        end_date = date.today()
+        total_days_needed = train_days + valid_days + test_days
+        start_date = end_date - timedelta(days=total_days_needed)
+
+        ctx = self._resolve_table_context(ds, table_name)
+
+        # 1. 查活跃分组
+        all_groups = self._query_top_groups(ds, table_name, batch_size)
+        if not all_groups:
+            raise ValueError("无有效训练数据")
+
+        batch_group_size = min(batch_unit, 200)
+        batches = [all_groups[i:i+batch_group_size]
+                   for i in range(0, len(all_groups), batch_group_size)]
+
+        logger.info(f"[分批训练] {len(all_groups)} 个分组, {len(batches)} 批")
+
+        batch_model = None
+        total_preds = 0
+        all_mae, all_rmse = [], []
+
+        for batch_no, batch_groups in enumerate(batches, 1):
+            if start_batch > 0 and batch_no <= start_batch:
+                continue
+
+            # 2. 拉取本批数据
+            sql = self._build_batch_fetch_sql(ctx, batch_groups, start_date, end_date)
+            rows, cols = execute_query(ds, sql)
+            if not rows:
+                continue
+
+            chunk = pd.DataFrame(rows, columns=cols)
+            chunk[TARGET_COL] = pd.to_numeric(chunk[TARGET_COL], errors="coerce").fillna(0)
+            chunk[TARGET_COL] = chunk[TARGET_COL] / 100.0
+
+            # 3. 训练
+            batch_model, batch_metrics = algo.train(chunk, model_record, self)
+            if batch_metrics.get("mae") is not None:
+                all_mae.append(batch_metrics["mae"])
+            if batch_metrics.get("rmse") is not None:
+                all_rmse.append(batch_metrics["rmse"])
+
+            # 4. 预测
+            batch_results = algo.predict(
+                batch_model, model_record, chunk, forecast_days, self
+            )
+            if batch_results:
+                self.result_repo.bulk_save(batch_results)
+                total_preds += len(batch_results)
+
+            # 5. 进度回调
+            if progress_callback:
+                progress_callback(batch_no, len(batches), len(batch_results))
+
+        if batch_model is None:
+            raise ValueError("训练数据不足（所有批次无有效数据）")
+
+        avg_mae = float(np.mean(all_mae)) if all_mae else 0.0
+        avg_rmse = float(np.mean(all_rmse)) if all_rmse else 0.0
+        metrics = {"mae": round(avg_mae, 2), "rmse": round(avg_rmse, 2)}
+
+        return batch_model, metrics, total_preds
+
     def predict(self, ds_id: int, forecast_days: int = None, table_name: str = None,
                 model_id: int = None, progress_callback: callable = None) -> tuple:
         """
-        用指定模型预测未来 N 天销售额。
-        
+        用指定模型预测未来 N 天销售额（通过算法注册表分发）。
+
         如果 model_id 不传，使用该数据源最新 ready 的模型。
 
-        progress_callback(model_id, store_idx, total_stores, store_code) 用于更新进度
-        
         返回: (写入的预测结果条数, 实际使用的模型ID)
         """
         forecast_days = forecast_days or settings.prediction_forecast_days
@@ -740,147 +944,21 @@ class PredictionService:
             if not model_record:
                 raise ValueError(f"数据源 {ds_id} 没有已训练好的模型")
 
-        model = joblib.load(model_record.model_path)
-        # 从模型指标中读取 RMSE，用于计算 90% 置信区间（pred ± 1.645×RMSE）
-        model_metrics = model_record.model_metrics or {}
-        rmse = model_metrics.get("rmse")
-        if rmse is not None:
-            try:
-                rmse = float(rmse)
-            except (TypeError, ValueError):
-                rmse = None
-        feature_cols = get_feature_columns()
+        # 按算法类型分发
+        algo = self._get_algorithm(model_record.model_type)
+        model = algo.load(model_record.model_path)
 
-        # 拉取最新数据构造特征
+        # 拉取最新数据
         df = self._fetch_history_data(ds_id, days=60, table_name=table_name)
-        df_feat = build_features_from_history(df)
-        df_feat = df_feat.dropna(subset=feature_cols)
 
-        # 旧模型降级：从近期历史数据动态计算 RMSE（兼容旧模型无 model_metrics）
-        if rmse is None or rmse <= 0:
-            try:
-                _val_days = min(forecast_days * 2, 14)
-                _last_ref_date = df_feat["dt"].max()
-                _val_start = _last_ref_date - pd.Timedelta(days=_val_days)
-                _val_data = df_feat[df_feat["dt"] >= _val_start]
-                if len(_val_data) >= 10:
-                    _y_true = _val_data[TARGET_COL].values
-                    _y_pred = model.predict(_val_data[feature_cols])
-                    _computed_rmse = float(np.sqrt(np.mean((_y_true - _y_pred) ** 2)))
-                    if _computed_rmse > 0:
-                        rmse = _computed_rmse
-                        logger.info(f"[预测] 从历史数据动态计算 RMSE={rmse:.2f} ({len(_val_data)} 条样本)")
-            except Exception as _e:
-                logger.warning(f"[预测] 动态 RMSE 计算失败: {_e}")
-
-        # 获取所有门店列表
-        stores = sorted(df_feat["store_code"].unique())
-        total_stores = len(stores)
-
-        results = []
-        for store_idx, store_code in enumerate(stores):
-            store_df = df_feat[df_feat["store_code"] == store_code]
-            if store_df.empty:
-                continue
-
-            # 取每个 SKU 的最新一条
-            latest = (
-                store_df.sort_values("dt")
-                .groupby(["store_code", "matnr"])
-                .last()
-                .reset_index()
-            )
-
-            # 按每个 SKU 递归滚动预测
-            # 原理：维护历史+预测值的 DataFrame，每次追加预测行后重新计算特征
-            lookback_window = 60
-            for sku_idx, (sku_row_idx, sku_row) in enumerate(latest.iterrows()):
-                store_code = sku_row["store_code"]
-                matnr_val = sku_row["matnr"]
-
-                sku_history = store_df[
-                    (store_df["store_code"] == store_code) &
-                    (store_df["matnr"] == matnr_val)
-                ].sort_values("dt")
-
-                # 取历史最后 lookback_window 天的原始数据（未构造特征）
-                # 保留 dt, store_code, matnr, TARGET_COL 四列用于滚动追加
-                base_cols = ["dt", "store_code", "matnr", TARGET_COL]
-                history_raw = sku_history[base_cols].tail(lookback_window).copy()
-
-                if len(history_raw) < 7:
-                    continue
-
-                # 先构造一次特征，确认能产出有效行
-                history_feat = build_features_from_history(history_raw.copy())
-                history_feat = history_feat.dropna(subset=feature_cols)
-
-                if history_feat.empty:
-                    continue
-
-                # 获取最后一天的日期，用于推算未来日期
-                last_date = pd.to_datetime(history_raw["dt"].iloc[-1], format="%Y%m%d", errors="coerce")
-
-                for i in range(forecast_days):
-                    # 构造当前历史的完整特征
-                    current_feat = build_features_from_history(history_raw.copy())
-                    current_feat = current_feat.dropna(subset=feature_cols)
-
-                    if current_feat.empty:
-                        break
-
-                    # 取最后一天的特征行用于预测（保持 DataFrame 格式，保留特征名）
-                    row_df = current_feat.iloc[-1:][feature_cols]
-
-                    # 计算点预测
-                    pred = max(float(model.predict(row_df)[0]), 0)
-
-                    # 使用训练 RMSE 计算 90% 置信区间（pred ± 1.645×RMSE）
-                    if rmse is not None and rmse > 0:
-                        margin = 1.645 * rmse
-                        lower = round(max(pred - margin, 0), 2)
-                        upper = round(pred + margin, 2)
-                    else:
-                        # 旧模型无 RMSE 指标时降级为点预测
-                        lower = upper = None
-
-                    # 计算预测日期
-                    forecast_date = last_date + timedelta(days=i + 1)
-                    forecast_dt_str = forecast_date.strftime("%Y%m%d")
-
-                    results.append(PredictionResult(
-                        model_id=model_record.id,
-                        data_source_id=ds_id,
-                        store_code=store_code,
-                        matnr=matnr_val,
-                        forecast_date=forecast_date.date(),
-                        predicted_value=round(pred, 2),
-                        lower_bound=lower,
-                        upper_bound=upper,
-                    ))
-
-                    # 将预测值追加到历史 DataFrame，下次循环重新计算所有特征
-                    new_row = pd.DataFrame([{
-                        "dt": forecast_dt_str,
-                        "store_code": store_code,
-                        "matnr": matnr_val,
-                        TARGET_COL: pred,
-                    }])
-                    history_raw = pd.concat([history_raw, new_row], ignore_index=True)
-                    # 保持窗口大小：只保留最近 lookback_window 行
-                    if len(history_raw) > lookback_window:
-                        history_raw = history_raw.iloc[-lookback_window:].reset_index(drop=True)
-
-            if progress_callback:
-                progress_callback(model_record.id, store_idx + 1, total_stores, store_code)
-
-        # 批量查询商品名称
-        if results:
-            unique_pairs = list({(r.store_code, r.matnr) for r in results})
-            ware_name_map = self._lookup_ware_names(ds_id, unique_pairs)
-            for r in results:
-                r.ware_name = ware_name_map.get((r.store_code, r.matnr), "")
+        # 算法预测（内部包含特征工程+滚动预测+置信区间+商品名称查询）
+        # 将 progress_callback 通过 kwargs 传递，算法可选用
+        results = algo.predict(
+            model, model_record, df, forecast_days, self,
+            progress_callback=progress_callback,
+        )
 
         count = self.result_repo.bulk_save(results)
-        logger.info(f"[预测] 写入 {count} 条预测结果，模型 model_id={model_record.id}")
+        logger.info(f"[预测] 写入 {count} 条预测结果，模型 model_id={model_record.id}, "
+                     f"类型={model_record.model_type}")
         return count, model_record.id

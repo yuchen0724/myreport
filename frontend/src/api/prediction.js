@@ -1,8 +1,9 @@
 import request from '@/utils/request'
 
-export function trainModel(dataSourceId, trainDays, tableName) {
+export function trainModel(dataSourceId, trainDays, tableName, modelType) {
   return request.post('/prediction/train', {
     data_source_id: dataSourceId,
+    model_type: modelType || 'lightgbm',
     train_days: trainDays || null,
     table_name: tableName || null,
   })
@@ -75,9 +76,10 @@ export function exportForecastExcel(params) {
   return request.post('/prediction/forecast/export', params, { responseType: 'blob' })
 }
 
-export function trainAndPredict(dataSourceId, trainDays, forecastDays, tableName, batchSize, batchUnit, testDays, validDays) {
+export function trainAndPredict(dataSourceId, trainDays, forecastDays, tableName, batchSize, batchUnit, testDays, validDays, modelType) {
   return request.post('/prediction/train-and-predict', {
     data_source_id: dataSourceId,
+    model_type: modelType || 'lightgbm',
     train_days: trainDays || null,
     test_days: testDays || null,
     valid_days: validDays || null,

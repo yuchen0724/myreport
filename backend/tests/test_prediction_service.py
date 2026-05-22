@@ -81,7 +81,7 @@ def test_train_with_mock_data(db_session, monkeypatch):
         assert model_id > 0
 
         import os
-        model_path = os.path.join(tmpdir, f"lgb_1_{model_id}.pkl")
+        model_path = os.path.join(tmpdir, f"lightgbm_1_{model_id}.pkl")
         assert os.path.exists(model_path), f"模型文件不存在: {model_path}"
 
         from app.repositories.prediction_repository import PredictionModelRepository
@@ -1221,11 +1221,11 @@ def test_train_saves_booster_file(db_session, monkeypatch):
 
         import os
         # 验证 .pkl 存在
-        pkl_path = os.path.join(tmpdir, f"lgb_1_{model_id}.pkl")
+        pkl_path = os.path.join(tmpdir, f"lightgbm_1_{model_id}.pkl")
         assert os.path.exists(pkl_path), f"PKL 文件不存在: {pkl_path}"
 
         # 验证 .txt Booster 文件存在
-        txt_path = os.path.join(tmpdir, f"lgb_1_{model_id}.txt")
+        txt_path = os.path.join(tmpdir, f"lightgbm_1_{model_id}.txt")
         assert os.path.exists(txt_path), f"Booster TXT 文件不存在: {txt_path}"
 
         # 验证 .txt 可以被 lgb.Booster 加载
@@ -1395,8 +1395,8 @@ def test_predict_from_cache_populates_confidence_interval(db_session, monkeypatc
         )
 
 
-def test_predict_downgrade_without_txt_file(db_session, monkeypatch):
-    """验证旧模型（无 .txt 文件）predict 降级为点预测且置信区间为 None"""
+def test_predict_without_txt_file_fallback(db_session, monkeypatch):
+    """验证无 .txt 文件时 predict 通过动态 RMSE 计算置信区间"""
     from app.services.prediction_service import PredictionService
     from app.repositories.prediction_repository import PredictionModelRepository
     import os
@@ -1404,7 +1404,7 @@ def test_predict_downgrade_without_txt_file(db_session, monkeypatch):
     # 创建测试目录和 .pkl 文件（无 .txt）
     import tempfile
     tmpdir = tempfile.mkdtemp()
-    pkl_path = os.path.join(tmpdir, "lgb_1_999.pkl")
+    pkl_path = os.path.join(tmpdir, "lightgbm_1_999.pkl")
 
     # 用真实模型保存 .pkl（但不保存 .txt）
     import lightgbm as lgb
@@ -1461,15 +1461,23 @@ def test_predict_downgrade_without_txt_file(db_session, monkeypatch):
         assert count == 7
         assert mid == model_record.id
 
-        # 验证置信区间为 None（降级行为）
+        # 验证置信区间通过动态 RMSE 计算（非 None）
         from app.repositories.prediction_repository import PredictionResultRepository
         result_repo = PredictionResultRepository(db_session)
         results = result_repo.get_forecast(data_source_id=1, model_id=model_record.id)
 
         assert len(results) == 7
         for r in results:
-            assert r.lower_bound is None, f"降级模式应返回 None，实际={r.lower_bound}"
-            assert r.upper_bound is None, f"降级模式应返回 None，实际={r.upper_bound}"
+            assert r.lower_bound is not None, (
+                f"动态 RMSE 降级应返回非 None 置信区间，实际 lower_bound={r.lower_bound}"
+            )
+            assert r.upper_bound is not None, (
+                f"动态 RMSE 降级应返回非 None 置信区间，实际 upper_bound={r.upper_bound}"
+            )
+            assert 0 < r.lower_bound <= r.predicted_value <= r.upper_bound, (
+                f"置信区间顺序异常: lower={r.lower_bound}, pred={r.predicted_value}, "
+                f"upper={r.upper_bound}"
+            )
             assert r.predicted_value > 0
     finally:
         settings.prediction_model_dir = orig_dir
