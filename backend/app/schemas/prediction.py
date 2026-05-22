@@ -5,7 +5,7 @@ from datetime import date
 
 class TrainRequest(BaseModel):
     data_source_id: int = Field(..., description="数据源ID")
-    model_type: str = Field("lightgbm", description="模型类型: lightgbm / prophet")
+    model_type: str = Field("lightgbm", description="模型类型: lightgbm / prophet / naive / sarima")
     train_days: Optional[int] = Field(None, description="训练用历史天数，默认使用配置值")
     test_days: Optional[int] = Field(None, description="测试集天数，默认30天")
     valid_days: Optional[int] = Field(None, description="验证集天数，默认30天")
@@ -100,7 +100,7 @@ class TaskStatusResponse(BaseModel):
 
 class TrainAndPredictRequest(BaseModel):
     data_source_id: int = Field(..., description="数据源ID")
-    model_type: str = Field("lightgbm", description="模型类型: lightgbm / prophet")
+    model_type: str = Field("lightgbm", description="模型类型: lightgbm / prophet / naive / sarima")
     train_days: Optional[int] = Field(None, description="训练用历史天数，默认365")
     test_days: Optional[int] = Field(None, description="测试集天数，默认30")
     valid_days: Optional[int] = Field(None, description="验证集天数，默认30")

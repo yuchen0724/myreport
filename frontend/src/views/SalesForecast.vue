@@ -39,6 +39,8 @@
             <el-select v-model="form.modelType" style="width: 130px">
               <el-option label="LightGBM" value="lightgbm" />
               <el-option label="Prophet" value="prophet" />
+              <el-option label="Naive 基线" value="naive" />
+              <el-option label="SARIMA" value="sarima" />
             </el-select>
           </el-form-item>
         </div>
@@ -145,8 +147,11 @@
           <el-tag size="small">{{ row.model_id ?? '-' }}</el-tag>
         </template>
         <template #model_type="{ row }">
-          <el-tag :type="row.model_type === 'prophet' ? 'success' : 'primary'" size="small" effect="plain">
-            {{ row.model_type === 'prophet' ? 'Prophet' : row.model_type === 'lightgbm' ? 'LightGBM' : (row.model_type || '-') }}
+          <el-tag
+            :type="row.model_type === 'prophet' ? 'success' : row.model_type === 'naive' ? 'warning' : row.model_type === 'sarima' ? 'danger' : 'primary'"
+            size="small" effect="plain"
+          >
+            {{ row.model_type === 'prophet' ? 'Prophet' : row.model_type === 'lightgbm' ? 'LightGBM' : row.model_type === 'naive' ? 'Naive' : row.model_type === 'sarima' ? 'SARIMA' : (row.model_type || '-') }}
           </el-tag>
         </template>
         <template #status="{ row }">
