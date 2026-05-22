@@ -1,9 +1,19 @@
-"""Prophet 预测算法实现"""
+"""Prophet 预测算法实现
+
+改进：
+1. 中文节假日效应（春节/国庆等对零售影响显著）
+2. 并行训练（ThreadPool → 多组同时 fit）
+3. 自适应 Changepoint（短序列保守、长序列灵活）
+4. 减少 uncertainty_samples 提速
+
+（全部改动局限在本文件内，不影响其他算法的数据输入）
+"""
 
 from __future__ import annotations
 import os
 import logging
 import joblib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import timedelta
 
@@ -11,7 +21,7 @@ import numpy as np
 import pandas as pd
 from prophet import Prophet
 
-from app.algorithms.base import BasePredictor
+from app.algorithms.base import BasePredictor, MIN_PREDICTION
 from app.models.prediction import PredictionResult
 
 logger = logging.getLogger(__name__)
@@ -21,6 +31,9 @@ logging.getLogger("cmdstanpy").setLevel(logging.WARNING)
 logging.getLogger("prophet").setLevel(logging.WARNING)
 
 TARGET_COL = "actual_sale_untaxed_amt"
+
+# 并行训练配置
+_TRAIN_WORKERS = 4  # 同时训练 4 个 Prophet 模型
 
 
 class ProphetPredictor(BasePredictor):
@@ -34,16 +47,94 @@ class ProphetPredictor(BasePredictor):
     MODEL_TYPE = "prophet"
 
     # Prophet 超参数
-    SEASONALITY_MODE = "multiplicative"  # 零售数据季节性幅度随时间增长
+    GROWTH = "logistic"  # logistic 增长，配合 floor=0 确保预测值不低于 0
+    SEASONALITY_MODE = "additive"  # 加法季节性，趋势下降时仍保持合理预测
     WEEKLY_SEASONALITY = True
     DAILY_SEASONALITY = False
     YEARLY_SEASONALITY = False   # 关闭内置年季节性，用自定义的（fourier_order=3 更简洁）
-    UNCERTAINTY_SAMPLES = 1000  # 置信区间采样数（越大越稳定）
-    CHANGEPOINT_PRIOR_SCALE = 0.05  # 趋势变化敏感度
+    UNCERTAINTY_SAMPLES = 300   # 300 已足够稳定，比 1000 快 3x+
+    CHANGEPOINT_PRIOR_SCALE = 0.05  # 默认值，会被 _adaptive_changepoint 覆盖
     SEASONALITY_PRIOR_SCALE = 10.0  # 季节性强度
+    # 节假日
+    HOLIDAY_COUNTRY = "CN"      # 中文节假日（春节、国庆、端午等）
 
     def __init__(self, forecast_days: int = 30):
         self.forecast_days = forecast_days
+
+    # ── 内部辅助 ──────────────────────────────────────────
+
+    @staticmethod
+    def _adaptive_changepoint(n_samples: int) -> float:
+        """根据样本量自适应调整 changepoint_prior_scale
+
+        - 短序列 (< 90 天): 0.01（保守，防止过拟合）
+        - 中等 (90~365 天): 0.05（默认）
+        - 长序列 (> 365 天): 0.10（灵活捕捉趋势变化）
+        """
+        if n_samples < 90:
+            return 0.01
+        elif n_samples < 365:
+            return 0.05
+        else:
+            return 0.10
+
+    @staticmethod
+    def _train_single_group(
+        store: str,
+        matnr: str,
+        grp: pd.DataFrame,
+    ) -> Optional[Tuple[Tuple[str, str], Prophet, float, float]]:
+        """训练单个 (store, matnr) 的 Prophet 模型
+
+        设计为静态方法以便 ThreadPoolExecutor 并行调用。
+
+        Returns:
+            ((store, matnr), model, mae, rmse) 或 None（数据不足时跳过）
+        """
+        grp = grp.sort_values("dt").dropna(subset=[TARGET_COL])
+        if len(grp) < 14:
+            return None
+
+        n_samples = len(grp)
+        changepoint = ProphetPredictor._adaptive_changepoint(n_samples)
+
+        # 准备 Prophet 输入
+        prophet_df = grp[["dt", TARGET_COL]].rename(columns={
+            "dt": "ds",
+            TARGET_COL: "y",
+        })
+        # Logistic 增长需要 cap（上界）和 floor（下界=0）
+        y_max = prophet_df["y"].max()
+        prophet_df["cap"] = max(y_max * 1.2, 1.0)
+        prophet_df["floor"] = 0.0
+
+        # 训练 Prophet
+        m = Prophet(
+            growth="logistic",
+            seasonality_mode="additive",
+            weekly_seasonality=True,
+            daily_seasonality=False,
+            yearly_seasonality=False,
+            uncertainty_samples=300,
+            changepoint_prior_scale=changepoint,
+            seasonality_prior_scale=10.0,
+        )
+        # 月季节性 + 年季节性
+        m.add_seasonality(name="monthly", period=30.5, fourier_order=5)
+        m.add_seasonality(name="yearly", period=365.25, fourier_order=3)
+        # 中文节假日效应
+        m.add_country_holidays(country_name="CN")
+
+        m.fit(prophet_df)
+
+        # 训练集评估
+        forecast = m.predict(prophet_df)
+        y_true = prophet_df["y"].values
+        y_pred = forecast["yhat"].values
+        mae = float(np.mean(np.abs(y_true - y_pred)))
+        rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+
+        return ((store, matnr), m, mae, rmse)
 
     # ── train ──────────────────────────────────────────────
     def train(
@@ -54,6 +145,9 @@ class ProphetPredictor(BasePredictor):
         **kwargs,
     ) -> Tuple[Dict, Dict[str, Any]]:
         """为每个 (store_code, matnr) 训练独立的 Prophet 模型
+
+        使用 ThreadPoolExecutor 并行训练，每 4 组同时进行。
+        每组使用自适应 changepoint + 中文节假日。
 
         Args:
             df: 历史销售数据，包含 dt, store_code, matnr, actual_sale_untaxed_amt
@@ -69,55 +163,46 @@ class ProphetPredictor(BasePredictor):
         if not pd.api.types.is_datetime64_any_dtype(df["dt"]):
             df["dt"] = pd.to_datetime(df["dt"], format="%Y%m%d", errors="coerce")
 
-        groups = df.groupby(["store_code", "matnr"])
+        groups = list(df.groupby(["store_code", "matnr"]))
         total = len(groups)
-        logger.info(f"[Prophet] 训练开始: {total} 个 (门店,商品) 分组")
+        logger.info(
+            f"[Prophet] 训练开始: {total} 个分组, "
+            f"workers={_TRAIN_WORKERS}, uncertainty_samples={self.UNCERTAINTY_SAMPLES}"
+        )
 
         models: Dict[Tuple[str, str], Prophet] = {}
-        all_mae = []
-        all_rmse = []
+        all_mae: list[float] = []
+        all_rmse: list[float] = []
+        completed = 0
 
-        for idx, ((store, matnr), grp) in enumerate(groups):
-            grp = grp.sort_values("dt").dropna(subset=[TARGET_COL])
-            if len(grp) < 14:  # Prophet 最少需要 2 周数据
-                logger.debug(f"[Prophet] 跳过 {store}/{matnr}: 仅 {len(grp)} 行")
-                continue
+        # 并行训练
+        with ThreadPoolExecutor(max_workers=_TRAIN_WORKERS) as executor:
+            future_map = {}
+            for (store, matnr), grp in groups:
+                fut = executor.submit(
+                    self._train_single_group, store, matnr, grp
+                )
+                future_map[fut] = (store, matnr)
 
-            # 准备 Prophet 输入
-            prophet_df = grp[["dt", TARGET_COL]].rename(columns={
-                "dt": "ds",
-                TARGET_COL: "y",
-            })
+            for fut in as_completed(future_map):
+                store, matnr = future_map[fut]
+                try:
+                    result = fut.result()
+                except Exception as e:
+                    logger.warning(f"[Prophet] {store}/{matnr} 训练异常: {e}")
+                    continue
 
-            # 训练 Prophet
-            m = Prophet(
-                seasonality_mode=self.SEASONALITY_MODE,
-                weekly_seasonality=self.WEEKLY_SEASONALITY,
-                daily_seasonality=self.DAILY_SEASONALITY,
-                yearly_seasonality=self.YEARLY_SEASONALITY,
-                uncertainty_samples=self.UNCERTAINTY_SAMPLES,
-                changepoint_prior_scale=self.CHANGEPOINT_PRIOR_SCALE,
-                seasonality_prior_scale=self.SEASONALITY_PRIOR_SCALE,
-            )
-            # 添加月季节性和年度季节性
-            m.add_seasonality(name="monthly", period=30.5, fourier_order=5)
-            m.add_seasonality(name="yearly", period=365.25, fourier_order=3)
+                if result is None:
+                    continue
 
-            m.fit(prophet_df)
+                key, model, mae, rmse = result
+                models[key] = model
+                all_mae.append(mae)
+                all_rmse.append(rmse)
 
-            # 训练集评估
-            forecast = m.predict(prophet_df)
-            y_true = prophet_df["y"].values
-            y_pred = forecast["yhat"].values
-            mae = float(np.mean(np.abs(y_true - y_pred)))
-            rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
-            all_mae.append(mae)
-            all_rmse.append(rmse)
-
-            models[(store, matnr)] = m
-
-            if (idx + 1) % 50 == 0 or idx == 0:
-                logger.info(f"[Prophet] 训练进度 {idx+1}/{total}")
+                completed += 1
+                if completed % 50 == 0 or completed == 1:
+                    logger.info(f"[Prophet] 训练进度 {completed}/{total}")
 
         if not models:
             raise ValueError("Prophet 训练失败：无有效分组（每组需要至少 14 天数据）")
@@ -129,8 +214,10 @@ class ProphetPredictor(BasePredictor):
             "rmse": round(avg_rmse, 2),
             "model_count": len(models),
         }
-        logger.info(f"[Prophet] 训练完成: {len(models)} 个模型, "
-                     f"MAE={avg_mae:.2f}, RMSE={avg_rmse:.2f}")
+        logger.info(
+            f"[Prophet] 训练完成: {len(models)} 个模型, "
+            f"MAE={avg_mae:.2f}, RMSE={avg_rmse:.2f}"
+        )
 
         return models, metrics
 
@@ -174,17 +261,23 @@ class ProphetPredictor(BasePredictor):
                 continue
             last_date = sku_df["dt"].max()
 
-            # Prophet 生成未来日期
+            # 计算 Logistic 增长所需的 cap（与 train() 保持一致）
+            sku_y = sku_df[TARGET_COL]
+            cap_value = max(float(sku_y.max()) * 1.2, 1.0)
+
+            # Prophet 生成未来日期（Logistic 增长需 cap + floor）
             future = m.make_future_dataframe(
                 periods=forecast_days,
                 include_history=False,
             )
+            future["cap"] = cap_value
+            future["floor"] = 0.0
             forecast = m.predict(future)
 
             for i, (_, row) in enumerate(forecast.iterrows()):
-                pred = max(float(row["yhat"]), 0)
-                lower = max(float(row["yhat_lower"]), 0)
-                upper = max(float(row["yhat_upper"]), 0)
+                pred = max(float(row["yhat"]), MIN_PREDICTION)
+                lower = max(float(row["yhat_lower"]), 0.0)
+                upper = max(float(row["yhat_upper"]), 0.0)
 
                 forecast_date = last_date + timedelta(days=i + 1)
 
@@ -216,11 +309,7 @@ class ProphetPredictor(BasePredictor):
 
     # ── save / load ────────────────────────────────────────
     def save(self, model: Dict[Tuple[str, str], Prophet], model_path: str) -> None:
-        """序列化 Prophet 模型字典
-
-        Prophet 模型使用内置 serialization（JSON），
-        但为了统一管理，整体用 joblib 保存。
-        """
+        """序列化 Prophet 模型字典"""
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         joblib.dump(model, model_path)
         logger.info(f"[Prophet] 模型已保存: {model_path}")

@@ -27,7 +27,7 @@ from app.utils.db_executor import execute_query
 from app.utils.llm_client import get_llm_client
 
 # 算法注册（惰性导入，避免 prophet/lightgbm 未安装时崩溃）
-from app.algorithms.base import BasePredictor
+from app.algorithms.base import BasePredictor, MIN_PREDICTION
 
 logger = logging.getLogger(__name__)
 
@@ -688,8 +688,8 @@ class PredictionService:
                     # 取最后一天的特征行用于预测（保持 DataFrame 格式，保留特征名）
                     row_df = current_feat.iloc[-1:][feature_cols]
 
-                    # 计算点预测
-                    pred = max(float(model.predict(row_df)[0]), 0)
+                    # 计算点预测（MIN_PREDICTION 兜底，防止 0.00）
+                    pred = max(float(model.predict(row_df)[0]), MIN_PREDICTION)
 
                     # 使用模型 RMSE 计算 90% 置信区间（pred ± 1.645×RMSE）
                     if _rmse_from_metrics is not None and _rmse_from_metrics > 0:

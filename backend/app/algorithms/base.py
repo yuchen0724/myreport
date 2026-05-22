@@ -5,6 +5,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 from app.models.prediction import PredictionResult
 
+# 预测值最小兜底（1 分钱），防止负值/极小值被 round 成 0.00
+MIN_PREDICTION = 0.01
+
 
 class BasePredictor:
     """预测算法抽象接口

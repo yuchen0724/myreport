@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import lightgbm as lgb
 
-from app.algorithms.base import BasePredictor
+from app.algorithms.base import BasePredictor, MIN_PREDICTION
 from app.models.prediction import PredictionResult
 from app.utils.feature_engineering import build_features_from_history, get_feature_columns
 
@@ -150,7 +150,7 @@ class LightGBMPredictor(BasePredictor):
                         break
 
                     row_df = current_feat.iloc[-1:][feature_cols]
-                    pred = max(float(model.predict(row_df)[0]), 0)
+                    pred = max(float(model.predict(row_df)[0]), MIN_PREDICTION)
 
                     if rmse is not None and rmse > 0:
                         margin = 1.645 * rmse
