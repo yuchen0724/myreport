@@ -591,6 +591,8 @@ export default {
       handleTrainAndPredict, handleStopTask,
       handleDeleteProgress, handleDeleteHistory, onDataSourceChange,
       formatDuration,
+      recommending, recommendResult,
+      handleRecommend, algoLabel,
     }
   }
 }
