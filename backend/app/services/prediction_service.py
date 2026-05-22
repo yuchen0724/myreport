@@ -1,7 +1,6 @@
 """销售预测服务 - LightGBM 训练与推理"""
 
 import os
-import re
 import signal
 import warnings
 import logging
@@ -34,14 +33,6 @@ logger = logging.getLogger(__name__)
 
 TARGET_COL = "actual_sale_untaxed_amt"  # 预测目标字段
 TZ_UTC8 = timezone(timedelta(hours=8))
-
-# Doris 分批查询中实际需要的列（避免 SELECT * 读全部列放大 I/O）
-_REQUIRED_COLS = [
-    "dt", "group_id", "store_code", "matnr",
-    TARGET_COL,
-    "exclude_flag", "service_flag", "shopping_bag_flag",
-]
-_REQUIRED_COLS_SQL = ", ".join(_REQUIRED_COLS)
 
 
 class PredictionService:
@@ -134,7 +125,6 @@ class PredictionService:
         is_subquery = table_name and table_name.strip().upper().startswith(("SELECT", "(SELECT"))
         if is_subquery:
             # 子查询需要加括号和别名才能在 FROM 中使用
-            table = self._fix_select_star(table)
             table_ref = f"({table}) AS _sub"
         else:
             table_ref = table
@@ -223,8 +213,6 @@ class PredictionService:
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
         # 检测 table_name 是否为完整 SELECT 语句（大小写不敏感）
         is_subquery = table_name and table_name.strip().upper().startswith(("SELECT", "(SELECT"))
-        if is_subquery:
-            table = self._fix_select_star(table)
         
         if is_subquery:
             # 子查询：用 CTE 替代内联嵌套，避免 Doris 重复扫描
@@ -750,34 +738,7 @@ class PredictionService:
 
         return results
 
-    @staticmethod
-    def _detect_default_table(sql: str) -> bool:
-        """判断子查询是否引用了已知的默认表（列名已知，可安全替换 SELECT *）"""
-        return "ads_cockpit_fd_store_ware_d" in sql
-
-    @staticmethod
-    def _fix_select_star(sql: str) -> str:
-        """将子查询中的 SELECT * 替换为实际需要的列，减少 Doris I/O
-
-        仅当子查询引用已知的默认表（ads_cockpit_fd_store_ware_d）时才替换，
-        对其他表跳过，避免列名不匹配导致 SQL 错误。
-        """
-        if not re.match(r'^\s*SELECT\s+\*\s+FROM', sql, re.IGNORECASE | re.DOTALL):
-            return sql
-        if not PredictionService._detect_default_table(sql):
-            logger.warning(
-                "[优化] 子查询使用了 SELECT * 且非默认表，无法自动优化列选择。"
-                "建议在子查询中明确列出需要的列名以提升查询性能。"
-            )
-            return sql
-        return re.sub(
-            r'(?i)^(\s*SELECT)\s+\*\s+(FROM)',
-            lambda m: f"{m.group(1)} {_REQUIRED_COLS_SQL} {m.group(2)}",
-            sql,
-            count=1,
-        )
-
-    # ── SQL 优化器（LLM 驱动，可选） ──
+    # ── SQL 优化器（LLM 驱动） ──
 
     _sql_optimizer: Optional['SqlOptimizer'] = None
 
@@ -806,19 +767,14 @@ class PredictionService:
     def _resolve_table_context(self, ds, table_name: str = None) -> dict:
         """解析表名/子查询，返回 SQL 上下文
 
-        优化：
-        1. 自动将 SELECT * 替换为需要的列，减少 Doris I/O（最高可减少 60%+）
-        2. 统一使用 CTE（WITH data_src AS (...)），避免子查询被多层内联
+        SQL 的优化由 LLM 优化器（_optimize_sql）在各查询执行前完成。
+        本函数仅负责表名/子查询的解析和 CTE 包装。
 
         Returns:
             dict with keys: cte_prefix, table_ref, top_groups_table, table_alias, is_subquery
         """
         table = table_name or f"{ds.database}.ads_cockpit_fd_store_ware_d"
         is_subquery = table_name and table_name.strip().upper().startswith(("SELECT", "(SELECT"))
-
-        # 优化1：将 SELECT * 替换为实际需要的列
-        if is_subquery:
-            table = self._fix_select_star(table)
 
         # 统一 CTE 名称，简化逻辑
         if is_subquery or table_name:
@@ -867,8 +823,7 @@ class PredictionService:
                                 start_date: date, end_date: date) -> str:
         """为一批分组生成数据拉取 SQL
 
-        batch_g 已精确指定当前批次的 SKU 列表，不再需要 top_g JOIN
-        （减少了 1 次 GROUP BY + ORDER BY + 扫描）。
+        SQL 的进一步优化（列裁剪、JOIN 消除等）由 _optimize_sql 在调用方完成。
         """
         table_alias = ctx["table_alias"]
 

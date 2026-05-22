@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     prediction_task_batch_timeout: int = 120  # 单批超时（秒），超时则跳过该批
 
     # SQL 优化器（LLM 驱动，可选）
-    sql_optimizer_enabled: bool = False  # 默认关闭，开启需配置 LLM_API_KEY
+    sql_optimizer_enabled: bool = True  # 启用 LLM 驱动 SQL 优化（需要 LLM_API_KEY）
     sql_optimizer_prompt_path: Optional[str] = "prompts/sql_optimizer.md"
 
     @field_validator("database_url", "secret_key")
