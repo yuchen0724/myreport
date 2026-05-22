@@ -438,6 +438,11 @@ function getSeriesKey(row) {
 function renderChart() {
   const data = forecastData.value
   if (!data.length || !chartRef.value) return
+  // 确保 DOM 元素已布局（避免 ECharts 警告 Can't get DOM width or height）
+  if (!chartRef.value.clientWidth || !chartRef.value.clientHeight) {
+    setTimeout(() => renderChart(), 100)
+    return
+  }
 
   // 按 store_code@matnr 分组
   const groups = {}
