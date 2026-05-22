@@ -519,6 +519,8 @@ class PredictionService:
             # 6. 保存模型
             model_path = os.path.join(self.model_dir, f"lgb_{ds_id}_{model_record.id}.pkl")
             joblib.dump(model, model_path)
+            # 同时保存原生 Booster 格式，用于 pred_interval 置信区间计算
+            model.booster_.save_model(model_path.replace('.pkl', '.txt'))
 
             # 7. 更新模型记录
             self.model_repo.update_status(
@@ -575,6 +577,30 @@ class PredictionService:
         
         if df_feat.empty:
             raise ValueError("缓存数据经特征工程后无有效数据，无法预测")
+        
+        # 旧模型降级：从缓存数据动态计算 RMSE（兼容旧模型无 model_metrics）
+        model_metrics = model_record.model_metrics or {}
+        _rmse_from_metrics = model_metrics.get("rmse")
+        if _rmse_from_metrics is not None:
+            try:
+                _rmse_from_metrics = float(_rmse_from_metrics)
+            except (TypeError, ValueError):
+                _rmse_from_metrics = None
+        if _rmse_from_metrics is None or _rmse_from_metrics <= 0:
+            try:
+                _val_days = min(forecast_days * 2, 14)
+                _last_ref_date = df_feat["dt"].max()
+                _val_start = _last_ref_date - pd.Timedelta(days=_val_days)
+                _val_data = df_feat[df_feat["dt"] >= _val_start]
+                if len(_val_data) >= 10:
+                    _y_true = _val_data[TARGET_COL].values
+                    _y_pred = model.predict(_val_data[feature_cols])
+                    _computed = float(np.sqrt(np.mean((_y_true - _y_pred) ** 2)))
+                    if _computed > 0:
+                        _rmse_from_metrics = _computed
+                        logger.info(f"[预测-缓存] 从历史数据动态计算 RMSE={_rmse_from_metrics:.2f} ({len(_val_data)} 条样本)")
+            except Exception as _e:
+                logger.warning(f"[预测-缓存] 动态 RMSE 计算失败: {_e}")
         
         # 按 (store_code, matnr) 分组，取每组最后一条
         latest = (
@@ -642,8 +668,16 @@ class PredictionService:
                     # 取最后一天的特征行用于预测（保持 DataFrame 格式，保留特征名）
                     row_df = current_feat.iloc[-1:][feature_cols]
 
-                    pred = model.predict(row_df)[0]
-                    pred = max(float(pred), 0)
+                    # 计算点预测
+                    pred = max(float(model.predict(row_df)[0]), 0)
+
+                    # 使用模型 RMSE 计算 90% 置信区间（pred ± 1.645×RMSE）
+                    if _rmse_from_metrics is not None and _rmse_from_metrics > 0:
+                        margin = 1.645 * _rmse_from_metrics
+                        lower = round(max(pred - margin, 0), 2)
+                        upper = round(pred + margin, 2)
+                    else:
+                        lower = upper = None
 
                     # 计算预测日期
                     forecast_date = last_date + timedelta(days=i + 1)
@@ -656,6 +690,8 @@ class PredictionService:
                         matnr=matnr_val,
                         forecast_date=forecast_date.date(),
                         predicted_value=round(pred, 2),
+                        lower_bound=lower,
+                        upper_bound=upper,
                     ))
 
                     # 将预测值追加到历史 DataFrame，下次循环重新计算所有特征
@@ -705,12 +741,37 @@ class PredictionService:
                 raise ValueError(f"数据源 {ds_id} 没有已训练好的模型")
 
         model = joblib.load(model_record.model_path)
+        # 从模型指标中读取 RMSE，用于计算 90% 置信区间（pred ± 1.645×RMSE）
+        model_metrics = model_record.model_metrics or {}
+        rmse = model_metrics.get("rmse")
+        if rmse is not None:
+            try:
+                rmse = float(rmse)
+            except (TypeError, ValueError):
+                rmse = None
         feature_cols = get_feature_columns()
 
         # 拉取最新数据构造特征
         df = self._fetch_history_data(ds_id, days=60, table_name=table_name)
         df_feat = build_features_from_history(df)
         df_feat = df_feat.dropna(subset=feature_cols)
+
+        # 旧模型降级：从近期历史数据动态计算 RMSE（兼容旧模型无 model_metrics）
+        if rmse is None or rmse <= 0:
+            try:
+                _val_days = min(forecast_days * 2, 14)
+                _last_ref_date = df_feat["dt"].max()
+                _val_start = _last_ref_date - pd.Timedelta(days=_val_days)
+                _val_data = df_feat[df_feat["dt"] >= _val_start]
+                if len(_val_data) >= 10:
+                    _y_true = _val_data[TARGET_COL].values
+                    _y_pred = model.predict(_val_data[feature_cols])
+                    _computed_rmse = float(np.sqrt(np.mean((_y_true - _y_pred) ** 2)))
+                    if _computed_rmse > 0:
+                        rmse = _computed_rmse
+                        logger.info(f"[预测] 从历史数据动态计算 RMSE={rmse:.2f} ({len(_val_data)} 条样本)")
+            except Exception as _e:
+                logger.warning(f"[预测] 动态 RMSE 计算失败: {_e}")
 
         # 获取所有门店列表
         stores = sorted(df_feat["store_code"].unique())
@@ -771,8 +832,17 @@ class PredictionService:
                     # 取最后一天的特征行用于预测（保持 DataFrame 格式，保留特征名）
                     row_df = current_feat.iloc[-1:][feature_cols]
 
-                    pred = model.predict(row_df)[0]
-                    pred = max(float(pred), 0)
+                    # 计算点预测
+                    pred = max(float(model.predict(row_df)[0]), 0)
+
+                    # 使用训练 RMSE 计算 90% 置信区间（pred ± 1.645×RMSE）
+                    if rmse is not None and rmse > 0:
+                        margin = 1.645 * rmse
+                        lower = round(max(pred - margin, 0), 2)
+                        upper = round(pred + margin, 2)
+                    else:
+                        # 旧模型无 RMSE 指标时降级为点预测
+                        lower = upper = None
 
                     # 计算预测日期
                     forecast_date = last_date + timedelta(days=i + 1)
@@ -785,6 +855,8 @@ class PredictionService:
                         matnr=matnr_val,
                         forecast_date=forecast_date.date(),
                         predicted_value=round(pred, 2),
+                        lower_bound=lower,
+                        upper_bound=upper,
                     ))
 
                     # 将预测值追加到历史 DataFrame，下次循环重新计算所有特征

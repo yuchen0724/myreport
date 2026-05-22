@@ -193,6 +193,7 @@ def _train_with_progress(
                 checkpoint_path = os.path.join(service.model_dir, f"lgb_{ds.id}_{model_record.id}.pkl")
                 os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
                 joblib.dump(model, checkpoint_path)
+                model.booster_.save_model(checkpoint_path.replace('.pkl', '.txt'))
 
         feature_cols = get_feature_columns()
         model = lgb.LGBMRegressor(
@@ -226,6 +227,7 @@ def _train_with_progress(
         _update_progress(task_id, _PHASE_SAVING, "保存模型文件")
         model_path = os.path.join(service.model_dir, f"lgb_{ds.id}_{model_record.id}.pkl")
         joblib.dump(model, model_path)
+        model.booster_.save_model(model_path.replace('.pkl', '.txt'))
 
         service.model_repo.update_status(
             model_record.id,
@@ -445,6 +447,7 @@ def _train_and_predict_with_progress(
         _update_progress(task_id, _PHASE_SAVING, "保存模型文件", percent=92)
         model_path = os.path.join(service.model_dir, f"lgb_{ds.id}_{model_record.id}.pkl")
         joblib.dump(model, model_path)
+        model.booster_.save_model(model_path.replace('.pkl', '.txt'))
 
         service.model_repo.update_status(
             model_record.id,

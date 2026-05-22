@@ -1180,6 +1180,303 @@ def test_fetch_and_train_incremental_basic(db_session, monkeypatch):
     assert batch_no >= 1
 
 
+# =============================================================================
+# 置信区间测试
+# =============================================================================
+
+def test_train_saves_booster_file(db_session, monkeypatch):
+    """验证 train() 会额外保存 .txt Booster 文件（用于 pred_interval）"""
+    from app.services.prediction_service import PredictionService
+
+    def mock_fetch(self, ds_id, days, table_name=None):
+        import pandas as _pd
+        import numpy as _np
+        _np.random.seed(42)
+        _dates = _pd.date_range(start="2025-01-01", periods=365, freq="D")
+        _rows = []
+        for store in ["S001"]:
+            for matnr in ["M001"]:
+                for d in range(365):
+                    base = 500.0 + 100.0 * ((d % 7) + 1)
+                    val = base + float(_np.random.randint(-50, 50))
+                    _rows.append([_dates[d].strftime("%Y%m%d"), store, matnr, val])
+        df = _pd.DataFrame(_rows, columns=["dt", "store_code", "matnr", "actual_sale_untaxed_amt"])
+        df["dt"] = _pd.to_datetime(df["dt"], format="%Y%m%d")
+        return df
+
+    monkeypatch.setattr(PredictionService, "_fetch_history_data", mock_fetch)
+
+    import tempfile
+    tmpdir = tempfile.mkdtemp()
+    from app.config import get_settings
+    settings = get_settings()
+    orig_dir = settings.prediction_model_dir
+    orig_min = settings.prediction_min_history_days
+    settings.prediction_model_dir = tmpdir
+    settings.prediction_min_history_days = 1  # 降低阈值，365 行足够
+
+    try:
+        service = PredictionService(db_session)
+        model_id = service.train(ds_id=1, train_days=100)
+
+        import os
+        # 验证 .pkl 存在
+        pkl_path = os.path.join(tmpdir, f"lgb_1_{model_id}.pkl")
+        assert os.path.exists(pkl_path), f"PKL 文件不存在: {pkl_path}"
+
+        # 验证 .txt Booster 文件存在
+        txt_path = os.path.join(tmpdir, f"lgb_1_{model_id}.txt")
+        assert os.path.exists(txt_path), f"Booster TXT 文件不存在: {txt_path}"
+
+        # 验证 .txt 可以被 lgb.Booster 加载
+        import lightgbm as lgb
+        booster = lgb.Booster(model_file=txt_path)
+        assert booster is not None
+        assert booster.num_trees() > 0, "加载的 Booster 应包含已训练的树"
+
+        # 验证 Booster 可以被正常加载和预测（不做 pred_interval，该功能在 LightGBM 4.6+ 已移除）
+        import pandas as pd
+        import numpy as np
+        dummy_input = pd.DataFrame(
+            np.random.randn(1, 25),
+            columns=get_feature_columns(),
+        )
+        result = booster.predict(dummy_input)
+        assert len(result) == 1, f"预测应返回 1 个值，实际 shape={result.shape}"
+        assert float(result[0]) > 0, f"点预测应 > 0，实际={result[0]}"
+    finally:
+        settings.prediction_model_dir = orig_dir
+        settings.prediction_min_history_days = orig_min
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_predict_populates_confidence_interval(db_session, monkeypatch):
+    """验证 predict() 使用 Booster pred_interval 填充 lower_bound / upper_bound"""
+    from app.services.prediction_service import PredictionService
+
+    def mock_fetch_train(self, ds_id, days, table_name=None):
+        import pandas as _pd
+        import numpy as _np
+        _np.random.seed(42)
+        _dates = _pd.date_range(start="2025-01-01", periods=365, freq="D")
+        _rows = []
+        for store in ["S001"]:
+            for matnr in ["M001"]:
+                for d in range(365):
+                    base = 500.0 + 100.0 * ((d % 7) + 1)
+                    val = base + float(_np.random.randint(-50, 50))
+                    _rows.append([_dates[d].strftime("%Y%m%d"), store, matnr, val])
+        df = _pd.DataFrame(_rows, columns=["dt", "store_code", "matnr", "actual_sale_untaxed_amt"])
+        df["dt"] = _pd.to_datetime(df["dt"], format="%Y%m%d")
+        return df
+
+    monkeypatch.setattr(PredictionService, "_fetch_history_data", mock_fetch_train)
+
+    import tempfile
+    tmpdir = tempfile.mkdtemp()
+    from app.config import get_settings
+    settings = get_settings()
+    orig_dir = settings.prediction_model_dir
+    orig_min = settings.prediction_min_history_days
+    settings.prediction_model_dir = tmpdir
+    settings.prediction_min_history_days = 1  # 365 行足够
+
+    try:
+        # 训练
+        service = PredictionService(db_session)
+        model_id = service.train(ds_id=1, train_days=100)
+
+        # ---- 阶段2: 切换 mock 为预测数据 ----
+        def mock_fetch_predict(self, ds_id, days, table_name=None):
+            import pandas as _pd
+            import numpy as _np2
+            _np2.random.seed(123)
+            _dates = _pd.date_range(start="2025-10-01", periods=90, freq="D")
+            _rows = []
+            for store in ["S001"]:
+                for matnr in ["M001"]:
+                    for d in range(90):
+                        base = 500.0 + 100.0 * ((d % 7) + 1)
+                        val = base + float(_np2.random.randint(-50, 50))
+                        _rows.append([_dates[d].strftime("%Y%m%d"), store, matnr, val])
+            df = _pd.DataFrame(_rows, columns=["dt", "store_code", "matnr", "actual_sale_untaxed_amt"])
+            df["dt"] = _pd.to_datetime(df["dt"], format="%Y%m%d")
+            return df
+
+        monkeypatch.setattr(PredictionService, "_fetch_history_data", mock_fetch_predict)
+        monkeypatch.setattr(PredictionService, "_lookup_ware_names", lambda self, ds_id, pairs: {})
+
+        # 预测
+        count, mid = service.predict(ds_id=1, forecast_days=7, model_id=model_id)
+        assert count == 7, f"应预测 7 天，实际={count}"
+        assert mid == model_id
+
+        # ---- 阶段3: 验证 DB 中的置信区间 ----
+        from app.repositories.prediction_repository import PredictionResultRepository
+        repo = PredictionResultRepository(db_session)
+        results = repo.get_forecast(data_source_id=1, model_id=model_id)
+
+        assert len(results) == 7
+        for r in results:
+            assert r.lower_bound is not None, f"id={r.id} lower_bound 为 None"
+            assert r.upper_bound is not None, f"id={r.id} upper_bound 为 None"
+            assert 0 < r.lower_bound <= r.predicted_value <= r.upper_bound, (
+                f"id={r.id}: 置信区间顺序异常: "
+                f"lower={r.lower_bound}, pred={r.predicted_value}, upper={r.upper_bound}"
+            )
+
+    finally:
+        settings.prediction_model_dir = orig_dir
+        settings.prediction_min_history_days = orig_min
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_predict_from_cache_populates_confidence_interval(db_session, monkeypatch):
+    """验证 _predict_from_cache() 使用 model.booster_ 填充置信区间"""
+    from app.services.prediction_service import PredictionService
+    from app.repositories.prediction_repository import PredictionModelRepository
+
+    repo = PredictionModelRepository(db_session)
+    model_record = repo.create(
+        data_source_id=1,
+        model_type="lightgbm",
+        status="ready",
+        model_path="/tmp/test_ci_cache.pkl",
+        model_metrics={"rmse": 100.0},
+    )
+
+    # 用真实 LGBMRegressor 替代 MagicMock（需要 booster_ 属性）
+    import lightgbm as lgb
+    import numpy as _np
+    real_model = lgb.LGBMRegressor(
+        n_estimators=10, learning_rate=0.05,
+        max_depth=4, num_leaves=8,
+        random_state=42, verbose=-1, num_threads=1,
+    )
+
+    # 构造足够历史数据作训练
+    np.random.seed(42)
+    dates = pd.date_range(start="2025-01-01", periods=100, freq="D")
+    X = np.random.randn(100, 25)
+    y = np.random.randn(100) * 100 + 500
+    real_model.fit(X, y)
+
+    # 构造预测用的模拟数据（90天，1店1品）
+    from datetime import date, timedelta
+    np.random.seed(42)
+    predict_dates = pd.date_range(start="2025-04-01", periods=90, freq="D")
+    rows = []
+    for d in range(90):
+        val = 500.0 + float(np.random.randint(-50, 50))
+        rows.append([predict_dates[d].strftime("%Y%m%d"), "S001", "M001", val])
+
+    data_df = pd.DataFrame(rows, columns=["dt", "store_code", "matnr", "actual_sale_untaxed_amt"])
+    data_df["dt"] = pd.to_datetime(data_df["dt"], format="%Y%m%d")
+
+    monkeypatch.setattr(PredictionService, "_lookup_ware_names", lambda self, ds_id, pairs: {})
+
+    service = PredictionService(db_session)
+    results = service._predict_from_cache(
+        data_df=data_df,
+        model=real_model,
+        model_record=model_record,
+        forecast_days=7,
+        progress_callback=None,
+    )
+
+    assert len(results) == 7
+    for r in results:
+        assert r.lower_bound is not None, f"id={r.id} lower_bound 为 None"
+        assert r.upper_bound is not None, f"id={r.id} upper_bound 为 None"
+        assert 0 < r.lower_bound <= r.predicted_value <= r.upper_bound, (
+            f"置信区间顺序异常: lower={r.lower_bound}, pred={r.predicted_value}, upper={r.upper_bound}"
+        )
+
+
+def test_predict_downgrade_without_txt_file(db_session, monkeypatch):
+    """验证旧模型（无 .txt 文件）predict 降级为点预测且置信区间为 None"""
+    from app.services.prediction_service import PredictionService
+    from app.repositories.prediction_repository import PredictionModelRepository
+    import os
+
+    # 创建测试目录和 .pkl 文件（无 .txt）
+    import tempfile
+    tmpdir = tempfile.mkdtemp()
+    pkl_path = os.path.join(tmpdir, "lgb_1_999.pkl")
+
+    # 用真实模型保存 .pkl（但不保存 .txt）
+    import lightgbm as lgb
+    import numpy as np
+    real_model = lgb.LGBMRegressor(
+        n_estimators=5, verbose=-1, num_threads=1,
+    )
+    X = np.random.randn(50, 25)
+    y = np.random.randn(50) * 100 + 500
+    real_model.fit(X, y)
+
+    import joblib
+    joblib.dump(real_model, pkl_path)
+    # 确认没有 .txt 文件
+    txt_path = pkl_path.replace('.pkl', '.txt')
+    assert not os.path.exists(txt_path)
+
+    # 创建模型记录指向这个路径
+    repo = PredictionModelRepository(db_session)
+    model_record = repo.create(
+        data_source_id=1,
+        model_type="lightgbm",
+        status="ready",
+        model_path=pkl_path,
+    )
+
+    def mock_fetch(self, ds_id, days, table_name=None):
+        import pandas as _pd
+        import numpy as _np2
+        _np2.random.seed(42)
+        _dates = _pd.date_range(start="2025-01-01", periods=90, freq="D")
+        _rows = []
+        for store in ["S001"]:
+            for matnr in ["M001"]:
+                for d in range(90):
+                    val = 500.0 + float(_np2.random.randint(-50, 50))
+                    _rows.append([_dates[d].strftime("%Y%m%d"), store, matnr, val])
+        df = _pd.DataFrame(_rows, columns=["dt", "store_code", "matnr", "actual_sale_untaxed_amt"])
+        df["dt"] = _pd.to_datetime(df["dt"], format="%Y%m%d")
+        return df
+
+    monkeypatch.setattr(PredictionService, "_fetch_history_data", mock_fetch)
+    monkeypatch.setattr(PredictionService, "_lookup_ware_names", lambda self, ds_id, pairs: {})
+
+    from app.config import get_settings
+    settings = get_settings()
+    orig_dir = settings.prediction_model_dir
+    settings.prediction_model_dir = tmpdir
+
+    try:
+        service = PredictionService(db_session)
+        count, mid = service.predict(ds_id=1, forecast_days=7, model_id=model_record.id)
+
+        assert count == 7
+        assert mid == model_record.id
+
+        # 验证置信区间为 None（降级行为）
+        from app.repositories.prediction_repository import PredictionResultRepository
+        result_repo = PredictionResultRepository(db_session)
+        results = result_repo.get_forecast(data_source_id=1, model_id=model_record.id)
+
+        assert len(results) == 7
+        for r in results:
+            assert r.lower_bound is None, f"降级模式应返回 None，实际={r.lower_bound}"
+            assert r.upper_bound is None, f"降级模式应返回 None，实际={r.upper_bound}"
+            assert r.predicted_value > 0
+    finally:
+        settings.prediction_model_dir = orig_dir
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def test_fetch_and_train_incremental_no_data(db_session, monkeypatch):
     """验证 _fetch_and_train_incremental 无数据时抛出异常"""
     from app.services.prediction_service import PredictionService
