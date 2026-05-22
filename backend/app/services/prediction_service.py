@@ -897,7 +897,9 @@ class PredictionService:
             if start_batch > 0 and batch_no <= start_batch:
                 continue
 
-            # 2. 拉取本批数据
+            # 2. 拉取本批数据（在 SQL 查询前先更新进度，避免长时间无反馈）
+            if progress_callback:
+                progress_callback(batch_no, len(batches), None)
             sql = self._build_batch_fetch_sql(ctx, batch_groups, start_date, end_date)
             logger.info(f"[分批训练] 批次 {batch_no}/{len(batches)} SQL: {sql.replace(chr(10), ' ').strip()}")
             rows, cols = execute_query(ds, sql)

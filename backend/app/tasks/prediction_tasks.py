@@ -475,8 +475,18 @@ def _train_and_predict_with_progress(
             result_count = 0
 
             def _batch_progress_cb(batch_no, total_batches, batch_rows):
-                """分批进度回调"""
+                """分批进度回调
+
+                batch_rows=None 表示 SQL 查询前的"准备中"信号（避免长时间无反馈）。
+                """
                 nonlocal result_count
+                if batch_rows is None:
+                    _update_progress(
+                        task_id, "分批处理",
+                        f"查询批次 {batch_no}/{total_batches} 数据中...",
+                        model_record.id, percent=5,
+                    )
+                    return
                 result_count += batch_rows
                 pct = int(batch_no / total_batches * 80) + 5
                 if pct > 85:
