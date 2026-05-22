@@ -96,6 +96,10 @@ class Settings(BaseSettings):
     prediction_task_time_limit: int = 1800
     prediction_task_batch_timeout: int = 120  # 单批超时（秒），超时则跳过该批
 
+    # SQL 优化器（LLM 驱动，可选）
+    sql_optimizer_enabled: bool = False  # 默认关闭，开启需配置 LLM_API_KEY
+    sql_optimizer_prompt_path: Optional[str] = "prompts/sql_optimizer.md"
+
     @field_validator("database_url", "secret_key")
     @classmethod
     def validate_required(cls, v: str, info) -> str:

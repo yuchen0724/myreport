@@ -25,6 +25,7 @@ from app.repositories.prediction_repository import (
 from app.models.prediction import PredictionResult
 from app.utils.feature_engineering import build_features_from_history, get_feature_columns
 from app.utils.db_executor import execute_query
+from app.utils.llm_client import get_llm_client
 
 # 算法注册（惰性导入，避免 prophet/lightgbm 未安装时崩溃）
 from app.algorithms.base import BasePredictor
@@ -321,6 +322,7 @@ class PredictionService:
                   AND ({table_alias}.shopping_bag_flag != 1 OR {table_alias}.shopping_bag_flag IS NULL)
                 ORDER BY {table_alias}.store_code, {table_alias}.matnr, {table_alias}.dt
             """
+            sql = self._optimize_sql(sql)
             logger.info(f"[训练] 分批批次 batch={batch_no}/{total_batches}, 该批分组数={len(batch_groups)}, SQL: {sql.replace(chr(10), ' ').strip()}")
 
             # 单批超时保护：超时则跳过该批，不打断整个任务
@@ -775,6 +777,32 @@ class PredictionService:
             count=1,
         )
 
+    # ── SQL 优化器（LLM 驱动，可选） ──
+
+    _sql_optimizer: Optional['SqlOptimizer'] = None
+
+    def _get_sql_optimizer(self):
+        """惰性加载 SQL 优化器"""
+        if self._sql_optimizer is None:
+            try:
+                from app.services.sql_optimizer import SqlOptimizer
+                self._sql_optimizer = SqlOptimizer()
+            except Exception as e:
+                logger.warning(f"[SQL优化] 初始化失败: {e}")
+                self._sql_optimizer = None
+        return self._sql_optimizer
+
+    def _optimize_sql(self, sql: str) -> str:
+        """通过 LLM 优化 SQL（失败时返回原始 SQL，不中断流程）"""
+        optimizer = self._get_sql_optimizer()
+        if optimizer is None:
+            return sql
+        try:
+            return optimizer.optimize(sql)
+        except Exception as e:
+            logger.warning(f"[SQL优化] 优化异常: {e}")
+            return sql
+
     def _resolve_table_context(self, ds, table_name: str = None) -> dict:
         """解析表名/子查询，返回 SQL 上下文
 
@@ -831,6 +859,7 @@ class PredictionService:
             ORDER BY total_sales DESC
             LIMIT {batch_size}
         """
+        sql = self._optimize_sql(sql)
         rows, _ = execute_query(ds, sql)
         return [(row[0], row[1], row[2]) for row in rows]
 
@@ -938,6 +967,7 @@ class PredictionService:
             if progress_callback:
                 progress_callback(batch_no, len(batches), None)
             sql = self._build_batch_fetch_sql(ctx, batch_groups, start_date, end_date)
+            sql = self._optimize_sql(sql)
             logger.info(f"[分批训练] 批次 {batch_no}/{len(batches)} SQL: {sql.replace(chr(10), ' ').strip()}")
             rows, cols = execute_query(ds, sql)
             if not rows:
