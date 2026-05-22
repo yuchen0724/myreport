@@ -155,6 +155,12 @@ watch(
 const initChart = () => {
   if (!chartRef.value) return
 
+  // 确保容器已布局（避免 ECharts 警告 Can't get DOM width or height）
+  if (!chartRef.value.clientWidth || !chartRef.value.clientHeight) {
+    setTimeout(() => initChart(), 150)
+    return
+  }
+
   chartInstance = echarts.init(chartRef.value, props.darkMode ? 'dark' : null)
   
   // 根据主题应用不同的背景配置
