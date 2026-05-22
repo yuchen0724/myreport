@@ -42,7 +42,39 @@
               <el-option label="Naive 基线" value="naive" />
               <el-option label="SARIMA" value="sarima" />
             </el-select>
+            <el-button
+              size="small"
+              type="info"
+              plain
+              :loading="recommending"
+              style="margin-left: 8px"
+              @click="handleRecommend"
+              :disabled="!form.dataSourceId"
+            >
+              <el-icon><Light /></el-icon> 智能推荐
+            </el-button>
           </el-form-item>
+          <!-- 推荐结果展示 -->
+          <div v-if="recommendResult.length > 0" class="recommend-results">
+            <div
+              v-for="rec in recommendResult"
+              :key="rec.algorithm"
+              class="recommend-item"
+              :class="{ active: rec.algorithm === form.modelType }"
+              @click="form.modelType = rec.algorithm"
+            >
+              <el-tag
+                size="small"
+                :type="rec.label === '强烈推荐' ? 'success' : rec.label === '推荐' ? 'primary' : rec.label === '可选' ? 'warning' : 'info'"
+                effect="dark"
+              >
+                {{ rec.score }}
+              </el-tag>
+              <span class="rec-algo">{{ algoLabel(rec.algorithm) }}</span>
+              <span class="rec-label">{{ rec.label }}</span>
+              <span class="rec-reason">{{ rec.reason }}</span>
+            </div>
+          </div>
         </div>
         <!-- 第二行：查询语句（独占双行宽度） -->
         <div class="sql-row">
@@ -186,8 +218,8 @@
 
 <script>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
-import { trainAndPredict, getTrainStatus, getPredictStatus, getMyTrainTasks, stopTrainTask, getForecastHistory, getForecastRunning, deleteForecastProgress, deleteTrainHistory, deleteTrainHistoryByTask } from '@/api/prediction'
+import { Refresh, Light } from '@element-plus/icons-vue'
+import { trainAndPredict, getTrainStatus, getPredictStatus, getMyTrainTasks, stopTrainTask, getForecastHistory, getForecastRunning, deleteForecastProgress, deleteTrainHistory, deleteTrainHistoryByTask, recommendAlgorithm } from '@/api/prediction'
 import { getDataSourceList } from '@/api/data_source'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import StaticTableEnhancer from '@/components/StaticTableEnhancer.vue'
@@ -222,6 +254,8 @@ export default {
     const taskProgress = ref(null)
     const taskProgresses = ref([])
     const taskHistory = ref([])
+    const recommending = ref(false)
+    const recommendResult = ref([])
     let _trainAndPredictLock = false
     let _pollingInterval = null
     let _pollingTaskId = null
@@ -248,6 +282,35 @@ export default {
 
     async function onDataSourceChange() {
       await loadHistory()
+    }
+
+    function algoLabel(algorithm) {
+      const labels = { lightgbm: 'LightGBM', prophet: 'Prophet', naive: 'Naive', sarima: 'SARIMA' }
+      return labels[algorithm] || algorithm
+    }
+
+    async function handleRecommend() {
+      if (!form.value.dataSourceId) {
+        ElMessage.warning('请先选择数据源')
+        return
+      }
+      recommending.value = true
+      recommendResult.value = []
+      try {
+        const tableName = form.value.tableName.trim() || undefined
+        const res = await recommendAlgorithm(form.value.dataSourceId, tableName)
+        const data = res.data || res
+        const list = data.recommendations || []
+        recommendResult.value = list
+        // 自动选择最高分推荐（如果 >= 55 分即"推荐"及以上）
+        if (list.length > 0 && list[0].score >= 55) {
+          form.value.modelType = list[0].algorithm
+        }
+      } catch (e) {
+        ElMessage.error('推荐失败: ' + (e.message || e))
+      } finally {
+        recommending.value = false
+      }
     }
 
     async function loadHistory() {
@@ -594,4 +657,36 @@ export default {
 .model-option-rows { color: var(--el-color-warning); }
 .model-option-time { margin-left: auto; }
 .filter-bar { display: flex; align-items: center; gap: 8px; }
+
+/* 推荐结果 */
+.recommend-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 4px 100px;
+}
+.recommend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+  background: var(--el-fill-color-blank);
+}
+.recommend-item:hover {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+.recommend-item.active {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-8);
+  box-shadow: 0 0 0 1px var(--el-color-primary);
+}
+.rec-algo { font-weight: 600; color: var(--el-text-color-primary); }
+.rec-label { color: var(--el-color-primary); font-size: 11px; }
+.rec-reason { color: var(--el-text-color-secondary); font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

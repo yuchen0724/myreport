@@ -76,6 +76,16 @@ export function exportForecastExcel(params) {
   return request.post('/prediction/forecast/export', params, { responseType: 'blob' })
 }
 
+export function recommendAlgorithm(dataSourceId, tableName) {
+  return request.get('/prediction/recommend-algorithm', {
+    params: {
+      data_source_id: dataSourceId,
+      table_name: tableName || undefined,
+      _t: Date.now(),
+    },
+  })
+}
+
 export function trainAndPredict(dataSourceId, trainDays, forecastDays, tableName, batchSize, batchUnit, testDays, validDays, modelType) {
   return request.post('/prediction/train-and-predict', {
     data_source_id: dataSourceId,

@@ -16,6 +16,7 @@ from app.schemas.prediction import (
 from app.models.prediction import PredictionModel, ForecastHistory
 from app.repositories.prediction_repository import PredictionResultRepository, PredictionModelRepository, ForecastHistoryRepository
 from app.models.user import User
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/prediction", tags=["预测"])
 
@@ -703,3 +704,87 @@ def delete_forecast_progress(
         pass
 
     return {"success": True, "message": "已清理"}
+
+
+# ── 算法推荐 ──
+
+class AlgorithmRecommendation(BaseModel):
+    """单条算法推荐"""
+    model_config = {"protected_namespaces": ()}
+    algorithm: str
+    score: int = Field(..., ge=0, le=100)
+    label: str = Field(..., description="强烈推荐 / 推荐 / 可选 / 不推荐")
+    reason: str = Field(..., description="推荐理由")
+
+
+class RecommendAlgorithmResponse(BaseModel):
+    """算法推荐响应"""
+    recommendations: list[AlgorithmRecommendation]
+    data_source_id: int
+    note: str = Field("", description="备注说明")
+
+
+@router.get("/recommend-algorithm", response_model=RecommendAlgorithmResponse)
+def recommend_algorithm(
+    data_source_id: int = Query(..., description="数据源 ID"),
+    table_name: Optional[str] = Query(None, description="表名或子查询"),
+    db: Session = Depends(get_db),
+):
+    """自动推荐最佳预测算法
+
+    通过对历史数据进行轻量分析（采样 TOP-10 活跃分组，分析季节性强度、趋势、数据量），
+    为每种算法计算推荐得分。
+
+    返回按得分降序排列的推荐列表，包含推荐理由。
+    """
+    from app.algorithms.recommender import AlgorithmRecommender
+    from app.services.prediction_service import PredictionService
+
+    service = PredictionService(db)
+    recommender = AlgorithmRecommender()
+
+    try:
+        result = recommender.recommend(
+            data_source_id=data_source_id,
+            table_name=table_name,
+            service=service,
+        )
+    except Exception as e:
+        logger.warning(f"[推荐] 推荐失败: {e}")
+        # 降级返回默认推荐
+        result = [
+            {
+                "algorithm": "lightgbm",
+                "score": 70,
+                "label": "推荐",
+                "reason": "通用场景，稳定可靠（推荐失败，默认推荐）",
+            },
+            {
+                "algorithm": "naive",
+                "score": 50,
+                "label": "可选",
+                "reason": "零训练成本基线",
+            },
+            {
+                "algorithm": "sarima",
+                "score": 40,
+                "label": "可选",
+                "reason": "需独立拟合每个分组",
+            },
+            {
+                "algorithm": "prophet",
+                "score": 30,
+                "label": "不推荐",
+                "reason": "需安装 prophet 包",
+            },
+        ]
+
+    recommendations = [
+        AlgorithmRecommendation(**item) for item in result
+    ]
+
+    return RecommendAlgorithmResponse(
+        recommendations=recommendations,
+        data_source_id=data_source_id,
+        note="基于数据采样分析（最近60天TOP-10分组），推荐结果仅供参考",
+    )
