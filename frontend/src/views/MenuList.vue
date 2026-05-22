@@ -32,7 +32,7 @@
           </el-tag>
         </template>
         <template #is_visible="{ row }">
-          <el-tag :type="row.is_visible ? '' : 'warning'" size="small">
+          <el-tag :type="row.is_visible ? 'success' : 'warning'" size="small">
             {{ row.is_visible ? '是' : '否' }}
           </el-tag>
         </template>
