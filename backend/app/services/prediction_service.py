@@ -749,15 +749,25 @@ class PredictionService:
         return results
 
     @staticmethod
+    def _detect_default_table(sql: str) -> bool:
+        """判断子查询是否引用了已知的默认表（列名已知，可安全替换 SELECT *）"""
+        return "ads_cockpit_fd_store_ware_d" in sql
+
+    @staticmethod
     def _fix_select_star(sql: str) -> str:
         """将子查询中的 SELECT * 替换为实际需要的列，减少 Doris I/O
 
-        只替换最外层的 SELECT *，不影响嵌套子查询。
-        若不是 SELECT * 则原样返回。
+        仅当子查询引用已知的默认表（ads_cockpit_fd_store_ware_d）时才替换，
+        对其他表跳过，避免列名不匹配导致 SQL 错误。
         """
         if not re.match(r'^\s*SELECT\s+\*\s+FROM', sql, re.IGNORECASE | re.DOTALL):
             return sql
-        # 替换 'SELECT *' → 'SELECT col1, col2, ...'（保持原有大小写风格）
+        if not PredictionService._detect_default_table(sql):
+            logger.warning(
+                "[优化] 子查询使用了 SELECT * 且非默认表，无法自动优化列选择。"
+                "建议在子查询中明确列出需要的列名以提升查询性能。"
+            )
+            return sql
         return re.sub(
             r'(?i)^(\s*SELECT)\s+\*\s+(FROM)',
             lambda m: f"{m.group(1)} {_REQUIRED_COLS_SQL} {m.group(2)}",
