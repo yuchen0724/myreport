@@ -63,6 +63,28 @@ export default {
 </script>
 
 <style>
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f0f2f5;
+  --bg-header: #409eff;
+  --bg-sidebar: #304156;
+  --text-primary: #303133;
+  --text-secondary: #606266;
+  --text-light: #ffffff;
+  --border-color: #dcdfe6;
+}
+
+html.dark {
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #141414;
+  --bg-header: #1d7cff;
+  --bg-sidebar: #1f1f1f;
+  --text-primary: #e5e5e5;
+  --text-secondary: #a3a3a3;
+  --text-light: #ffffff;
+  --border-color: #404040;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -71,6 +93,8 @@ export default {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 #app {
@@ -86,8 +110,8 @@ body {
 
 .header {
   height: 60px;
-  background: #409eff;
-  color: white;
+  background: var(--bg-header);
+  color: var(--text-light);
 }
 
 .main {
@@ -98,13 +122,13 @@ body {
 
 .sidebar {
   width: 200px;
-  background: #304156;
-  color: white;
+  background: var(--bg-sidebar);
+  color: var(--text-light);
 }
 
 .content {
   flex: 1;
   overflow-y: auto;
-  background: #f0f2f5;
+  background: var(--bg-secondary);
 }
 </style>
