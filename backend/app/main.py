@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.api import auth, data_sources, query, report, nl2sql, charts, templates, stats, async_export, users, cache, audit_logs, dashboard, menus, proxy_servers, config, alerts
 from app.api import sql_analysis as sql_analysis_api
 from app.api import scheduled_reports as scheduled_reports_api
+from app.api import model_compare as model_compare_api
 from app.api import prediction as prediction_api
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.audit_log import AuditLogMiddleware
@@ -134,6 +135,7 @@ app.include_router(config.router)
 app.include_router(alerts.router)
 app.include_router(sql_analysis_api.router)
 app.include_router(scheduled_reports_api.router)
+app.include_router(model_compare_api.router)
 # 预测路由受 prediction_enabled 控制
 if settings.prediction_enabled:
     app.include_router(prediction_api.router)

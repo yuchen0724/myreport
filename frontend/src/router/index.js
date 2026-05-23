@@ -150,6 +150,12 @@ const routes = [
     name: "ScheduledReports",
     component: () => import("@/views/ScheduledReportList.vue"),
     meta: { requiresAuth: true, roles: ["admin", "editor"] }
+  },
+  {
+    path: "/model-compare",
+    name: "ModelCompare",
+    component: () => import("@/views/ModelCompare.vue"),
+    meta: { requiresAuth: true, roles: ["admin", "editor"] }
   }
 ]
 
