@@ -9,11 +9,11 @@ from app.models.associations import role_permissions
 from app.models.task_alert import TaskAlert
 from app.models.template_version import TemplateVersion
 from app.models.template_share import TemplateShare
-from app.models.template import Template
-from app.models.dashboard_widget import DashboardWidgetConfig
+from app.models.sql_analysis import SQLAnalysisResult
+from app.models.scheduled_report import ScheduledReport, ReportDelivery
 from app.models.menu import Menu
 from app.models.prediction import PredictionResult, PredictionModel
-from app.models.sql_analysis import SQLAnalysisResult
+from app.models.dashboard_widget import DashboardWidgetConfig
 
 __all__ = [
     "User",
@@ -29,4 +29,6 @@ __all__ = [
     "PredictionModel",
     "PredictionResult",
     "SQLAnalysisResult",
+    "ScheduledReport",
+    "ReportDelivery",
 ]

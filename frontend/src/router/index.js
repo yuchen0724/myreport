@@ -144,6 +144,12 @@ const routes = [
     name: "ForecastResults",
     component: () => import("@/views/ForecastResultQuery.vue"),
     meta: { requiresAuth: true, roles: ["admin", "editor"] }
+  },
+  {
+    path: "/scheduled-reports",
+    name: "ScheduledReports",
+    component: () => import("@/views/ScheduledReportList.vue"),
+    meta: { requiresAuth: true, roles: ["admin", "editor"] }
   }
 ]
 
