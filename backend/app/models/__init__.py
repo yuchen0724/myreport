@@ -13,6 +13,7 @@ from app.models.template import Template
 from app.models.dashboard_widget import DashboardWidgetConfig
 from app.models.menu import Menu
 from app.models.prediction import PredictionResult, PredictionModel
+from app.models.sql_analysis import SQLAnalysisResult
 
 __all__ = [
     "User",
@@ -27,4 +28,5 @@ __all__ = [
     "role_permissions",
     "PredictionModel",
     "PredictionResult",
+    "SQLAnalysisResult",
 ]

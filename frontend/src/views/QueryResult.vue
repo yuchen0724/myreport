@@ -91,7 +91,11 @@
           <el-button @click="handleExportPDF" :loading="exportingPDF">导出 PDF</el-button>
         </div>
       </el-card>
-    </div></template>
+
+      <!-- SQL 复杂度分析面板 -->
+      <SQLAnalysisPanel :sql="querySql" />
+    </div>
+</template>
 
 <script>
 import { ref, computed, watch, nextTick } from 'vue'
@@ -99,11 +103,12 @@ import { ElMessage } from 'element-plus'
 import { MoreFilled } from '@element-plus/icons-vue'
 import { exportExcel, exportPDF } from '@/api/report'
 import TableToolbar from '@/components/TableToolbar.vue'
+import SQLAnalysisPanel from '@/components/SQLAnalysisPanel.vue'
 import { useTableStorage } from '@/composables/useTableStorage'
 
 export default {
   name: 'QueryResult',
-  components: { TableToolbar },
+  components: { TableToolbar, SQLAnalysisPanel },
   props: {
     dataSourceId: {
       type: Number,
