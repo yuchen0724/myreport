@@ -396,7 +396,7 @@ class NL2SQLService:
             print(f"[NL2SQL] │   └─ ❌ 无法解析 LLM 响应为 JSON", flush=True)
             raise ValueError("无法解析 LLM 响应")
 
-        sql = result.get("sql", "").strip()
+        sql = (result.get("sql") or "").strip()
         confidence = float(result.get("confidence", 0.0))
         explanation = result.get("explanation", "")
         # 提取图表配置
@@ -603,6 +603,8 @@ class NL2SQLService:
         group_id: Optional[int] = None
     ) -> str:
         """构建 NL2SQL 系统提示词"""
+        from datetime import datetime
+        today_date = datetime.now().strftime("%Y-%m-%d")
         group_context = (
             f"**{group_id}**（已确认，该用户的查询应基于此集团的数据）"
             if group_id
@@ -631,6 +633,7 @@ class NL2SQLService:
             "schema_prompt": schema_prompt,
             "group_context": group_context,
             "table_name_rule": table_name_rule,
+            "today_date": today_date,
         }
         return self._render_prompt_template(
             custom_template,
@@ -776,7 +779,7 @@ class NL2SQLService:
         if not result:
             raise ValueError("无法解析修复 SQL 响应")
 
-        sql = result.get("sql", "").strip()
+        sql = (result.get("sql") or "").strip()
         if not sql:
             raise ValueError("LLM 未返回有效的修复 SQL")
 
@@ -801,6 +804,7 @@ class NL2SQLService:
         schema_prompt: str
     ) -> Dict[str, Any]:
         """构建 NL2SQL 生成缓存上下文"""
+        from datetime import datetime
         settings = getattr(llm_client, "settings", None)
         schema_fingerprint = hashlib.sha256(schema_prompt.encode("utf-8")).hexdigest()[:16]
         llm_fingerprint_data = {
@@ -818,6 +822,7 @@ class NL2SQLService:
             "schema_fingerprint": schema_fingerprint,
             "llm_fingerprint": llm_fingerprint,
             "prompt_version": NL2SQL_PROMPT_VERSION,
+            "today_date": datetime.now().strftime("%Y-%m-%d"),
         }
 
     def _get_cached_generation(
@@ -835,6 +840,7 @@ class NL2SQLService:
                 context=cache_context["context"],
                 schema_fingerprint=cache_context["schema_fingerprint"],
                 llm_fingerprint=cache_context["llm_fingerprint"],
+                today_date=cache_context["today_date"],
                 prompt_version=cache_context["prompt_version"],
             )
             if not cached or not cached.get("sql"):
@@ -872,6 +878,7 @@ class NL2SQLService:
                 context=cache_context["context"],
                 schema_fingerprint=cache_context["schema_fingerprint"],
                 llm_fingerprint=cache_context["llm_fingerprint"],
+                today_date=cache_context["today_date"],
                 prompt_version=cache_context["prompt_version"],
             )
             if cached:

@@ -103,6 +103,7 @@ class NL2SQLCache:
         context: Optional[str] = None,
         schema_fingerprint: str = "",
         llm_fingerprint: str = "",
+        today_date: str = "",
         prompt_version: str = "v1"
     ) -> str:
         """Generate cache key hash from question, data source, and generation context.
@@ -121,6 +122,7 @@ class NL2SQLCache:
             "context": (context or "").strip(),
             "schema_fingerprint": schema_fingerprint,
             "llm_fingerprint": llm_fingerprint,
+            "today_date": today_date,
             "prompt_version": prompt_version,
         }
         key = json.dumps(key_data, ensure_ascii=False, sort_keys=True)
@@ -135,6 +137,7 @@ class NL2SQLCache:
         context: Optional[str] = None,
         schema_fingerprint: str = "",
         llm_fingerprint: str = "",
+        today_date: str = "",
         prompt_version: str = "v1"
     ) -> str:
         """Create full Redis cache key.
@@ -153,6 +156,7 @@ class NL2SQLCache:
             context=context,
             schema_fingerprint=schema_fingerprint,
             llm_fingerprint=llm_fingerprint,
+            today_date=today_date,
             prompt_version=prompt_version,
         )
         return f"nl2sql:{hash_key}"
@@ -166,6 +170,7 @@ class NL2SQLCache:
         context: Optional[str] = None,
         schema_fingerprint: str = "",
         llm_fingerprint: str = "",
+        today_date: str = "",
         prompt_version: str = "v1"
     ) -> Optional[Dict[str, Any]]:
         """Get cached SQL result.
@@ -190,6 +195,7 @@ class NL2SQLCache:
                 context=context,
                 schema_fingerprint=schema_fingerprint,
                 llm_fingerprint=llm_fingerprint,
+                today_date=today_date,
                 prompt_version=prompt_version,
             )
             cached_value = client.get(cache_key)
@@ -219,6 +225,7 @@ class NL2SQLCache:
         context: Optional[str] = None,
         schema_fingerprint: str = "",
         llm_fingerprint: str = "",
+        today_date: str = "",
         prompt_version: str = "v1"
     ) -> bool:
         """Set cache for a NL2SQL result.
@@ -245,6 +252,7 @@ class NL2SQLCache:
                 context=context,
                 schema_fingerprint=schema_fingerprint,
                 llm_fingerprint=llm_fingerprint,
+                today_date=today_date,
                 prompt_version=prompt_version,
             )
             
@@ -257,6 +265,7 @@ class NL2SQLCache:
                 "chart_config": chart_config,
                 "schema_fingerprint": schema_fingerprint,
                 "llm_fingerprint": llm_fingerprint,
+                "today_date": today_date,
                 "prompt_version": prompt_version,
             }
             
