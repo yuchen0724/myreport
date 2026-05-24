@@ -1104,38 +1104,35 @@ class NL2SQLService:
 
         # 构建连接 URL（使用解密后的密码）
         ds_type = ds.type.upper() if ds.type else ""
-        
-        # 获取代理配置
-        proxy_url = None
-        if ds.use_proxy and ds.proxy_server_id:
-            from app.core.security import decrypt_password as decrypt_proxy_pwd
-            from app.models.proxy_server import ProxyServer
-            # 使用传入的 db session
-            if self.db:
-                proxy = self.db.query(ProxyServer).filter(ProxyServer.id == ds.proxy_server_id).first()
-            else:
-                proxy = None
-            if proxy and proxy.is_active:
-                proxy_auth = ""
-                if proxy.username and proxy.password_encrypted:
-                    proxy_auth = f"{proxy.username}:{decrypt_proxy_pwd(proxy.password_encrypted)}@"
-                proxy_url = f"{proxy.proxy_type}://{proxy_auth}{proxy.host}:{proxy.port}"
-        
+
         # 构建连接参数
         connect_args = {}
         env_proxy_set = False
         old_http_proxy = None
         old_https_proxy = None
-        if proxy_url:
-            if ds_type == "MYSQL" or ds_type == "DORIS":
-                connect_args = {"proxy": proxy_url}
-            elif ds_type == "POSTGRESQL":
-                env_proxy_set = True
-                import os
-                old_http_proxy = os.environ.get('HTTP_PROXY')
-                old_https_proxy = os.environ.get('HTTPS_PROXY')
-                os.environ['HTTP_PROXY'] = proxy_url
-                os.environ['HTTPS_PROXY'] = proxy_url
+        original_socket = None
+        if ds.use_proxy and ds.proxy_server_id:
+            from app.models.proxy_server import ProxyServer
+            if self.db:
+                proxy = self.db.query(ProxyServer).filter(ProxyServer.id == ds.proxy_server_id).first()
+            else:
+                proxy = None
+            if proxy and proxy.is_active:
+                if proxy.proxy_type == "socks5":
+                    import socket as _sk
+                    import socks
+                    original_socket = _sk.socket
+                    socks.set_default_proxy(socks.SOCKS5, proxy.host, proxy.port)
+                    _sk.socket = socks.socksocket
+                elif proxy.proxy_type == "http":
+                    if ds_type == "POSTGRESQL":
+                        env_proxy_set = True
+                        import os
+                        old_http_proxy = os.environ.get('HTTP_PROXY')
+                        old_https_proxy = os.environ.get('HTTPS_PROXY')
+                        proxy_url = f"http://{proxy.host}:{proxy.port}"
+                        os.environ['HTTP_PROXY'] = proxy_url
+                        os.environ['HTTPS_PROXY'] = proxy_url
         
         if ds_type == "MYSQL":
             conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
@@ -1226,6 +1223,15 @@ class NL2SQLService:
                 engine.dispose()
             return tables_info
         finally:
+            # 恢复 SOCKS5 socket
+            if original_socket is not None:
+                import socket as _sk
+                _sk.socket = original_socket
+                try:
+                    import socks
+                    socks.set_default_proxy()
+                except Exception:
+                    pass
             if env_proxy_set:
                 import os
                 if old_http_proxy is None:
