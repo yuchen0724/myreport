@@ -125,6 +125,8 @@ class LLMClient:
     @property
     def supports_structured_output(self) -> bool:
         """当前配置是否支持结构化输出"""
+        if not self.settings.nl2sql_structured_output_enabled:
+            return False
         return (
             self.adapter == LLMAdapter.LANGCHAIN
             and self.provider == LLMProvider.OPENAI
@@ -166,12 +168,45 @@ class LLMClient:
         lc_messages = self._build_langchain_messages(messages)
         model = self._build_langchain_chat_model(temperature)
 
-        try:
-            response = model.invoke(lc_messages)
-        except Exception as e:
-            raise LLMError(f"LangChain OpenAI API error: {str(e)}", self.provider) from e
+        print(f"[LLM:LangChain] ═══════════════════════════════", flush=True)
+        logger.info("[LLM:LangChain] ═══════════════════════════════")
+        print(f"[LLM:LangChain] ├─ Model: {self.settings.llm_model or 'gpt-3.5-turbo'}", flush=True)
+        print(f"[LLM:LangChain] ├─ Base URL: {self.settings.llm_api_base}", flush=True)
+        print(f"[LLM:LangChain] ├─ Timeout: {self.timeout}s", flush=True)
+        print(f"[LLM:LangChain] ├─ Temperature: {temperature}", flush=True)
+        print(f"[LLM:LangChain] ├─ Messages: {len(lc_messages)}", flush=True)
+        print(f"[LLM:LangChain] ├─ Max Retries: {self.max_retries}", flush=True)
+        print(f"[LLM:LangChain] └─ 发送请求...", flush=True)
 
-        return self._extract_langchain_content(response)
+        for attempt in range(self.max_retries + 1):
+            try:
+                request_start = time.time()
+                response = model.invoke(lc_messages)
+                request_elapsed = (time.time() - request_start) * 1000
+
+                content = self._extract_langchain_content(response)
+                token_info = ""
+                if hasattr(response, "response_metadata") and response.response_metadata:
+                    meta = response.response_metadata
+                    if "token_usage" in meta:
+                        token_info = f", token_usage={meta['token_usage']}"
+                    elif "usage" in meta:
+                        token_info = f", usage={meta['usage']}"
+
+                print(f"[LLM:LangChain] ✅ 请求成功", flush=True)
+                print(f"[LLM:LangChain] │   ├─ 耗时: {request_elapsed:.2f}ms{token_info}", flush=True)
+                print(f"[LLM:LangChain] │   ├─ 响应长度: {len(content)} 字符", flush=True)
+                print(f"[LLM:LangChain] │   └─ 响应预览: {content[:150]}...", flush=True)
+                return content
+
+            except Exception as e:
+                msg = f"[LLM:LangChain] ❌ Attempt {attempt + 1}/{self.max_retries + 1} 失败: {type(e).__name__}: {e}"
+                print(msg, flush=True)
+                logger.warning(msg)
+                if attempt >= self.max_retries:
+                    print(f"[LLM:LangChain] └─ 达到最大重试次数，放弃", flush=True)
+                    raise LLMError(f"LangChain OpenAI API error after {self.max_retries} retries: {e}", self.provider) from e
+                print(f"[LLM:LangChain] └─ 重试... ({attempt + 1}/{self.max_retries})", flush=True)
 
     def _call_langchain_structured(
         self,
@@ -183,10 +218,28 @@ class LLMClient:
         lc_messages = self._build_langchain_messages(messages)
         model = self._build_langchain_chat_model(temperature)
 
+        print(f"[LLM:LangChain-Structured] ═════════════════════════", flush=True)
+        logger.info("[LLM:LangChain-Structured] ═════════════════════════")
+        print(f"[LLM:LangChain-Structured] ├─ Model: {self.settings.llm_model or 'gpt-3.5-turbo'}", flush=True)
+        print(f"[LLM:LangChain-Structured] ├─ Response Model: {response_model.__name__}", flush=True)
+        print(f"[LLM:LangChain-Structured] ├─ Messages: {len(lc_messages)}", flush=True)
+        print(f"[LLM:LangChain-Structured] └─ 发送请求...", flush=True)
+
         try:
+            request_start = time.time()
             structured_model = model.with_structured_output(response_model)
-            return structured_model.invoke(lc_messages)
+            result = structured_model.invoke(lc_messages)
+            request_elapsed = (time.time() - request_start) * 1000
+
+            print(f"[LLM:LangChain-Structured] ✅ 请求成功, 耗时: {request_elapsed:.2f}ms", flush=True)
+            if isinstance(result, BaseModel):
+                preview = result.model_dump_json()[:200]
+                print(f"[LLM:LangChain-Structured] └─ 响应: {preview}", flush=True)
+            return result
         except Exception as e:
+            msg = f"[LLM:LangChain-Structured] ❌ 失败: {type(e).__name__}: {e}"
+            print(msg, flush=True)
+            logger.warning(msg)
             raise LLMError(f"LangChain structured output error: {str(e)}", self.provider) from e
 
     def _build_langchain_messages(self, messages: List[Dict[str, str]]) -> List[Any]:

@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     nl2sql_temperature: float = 0.0
     nl2sql_max_retries: int = 2
     nl2sql_timeout: int = 300  # LLM 调用超时 5 分钟（可配置）
+    nl2sql_structured_output_enabled: bool = False  # 结构化输出（DeepSeek等模型不支持，默认关闭）
     nl2sql_cache_ttl: int = 3600  # 缓存 1 小时
     nl2sql_schema_retrieval_enabled: bool = True
     nl2sql_schema_retrieval_min_chars: int = 12000
