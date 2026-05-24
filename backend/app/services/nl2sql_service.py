@@ -1110,7 +1110,7 @@ class NL2SQLService:
         env_proxy_set = False
         old_http_proxy = None
         old_https_proxy = None
-        original_socket = None
+        _socks_cleanup = None
         if ds.use_proxy and ds.proxy_server_id:
             from app.models.proxy_server import ProxyServer
             if self.db:
@@ -1119,11 +1119,8 @@ class NL2SQLService:
                 proxy = None
             if proxy and proxy.is_active:
                 if proxy.proxy_type == "socks5":
-                    import socket as _sk
-                    import socks
-                    original_socket = _sk.socket
-                    socks.set_default_proxy(socks.SOCKS5, proxy.host, proxy.port)
-                    _sk.socket = socks.socksocket
+                    from app.utils.db_executor import setup_socks
+                    _socks_cleanup = setup_socks(ds, db_session=self.db, timeout=60)
                 elif proxy.proxy_type == "http":
                     if ds_type == "POSTGRESQL":
                         env_proxy_set = True
@@ -1224,14 +1221,8 @@ class NL2SQLService:
             return tables_info
         finally:
             # 恢复 SOCKS5 socket
-            if original_socket is not None:
-                import socket as _sk
-                _sk.socket = original_socket
-                try:
-                    import socks
-                    socks.set_default_proxy()
-                except Exception:
-                    pass
+            if _socks_cleanup is not None:
+                _socks_cleanup()
             if env_proxy_set:
                 import os
                 if old_http_proxy is None:
@@ -1683,7 +1674,7 @@ class NL2SQLService:
         conn_url = f"mysql+pymysql://{ds.username}:***@{ds.host}:{ds.port}/{ds.database}"
 
         # SOCKS5 代理处理
-        original_socket = None
+        _socks_cleanup = None
         if ds.use_proxy and ds.proxy_server_id:
             from app.models.proxy_server import ProxyServer
             if self.db:
@@ -1691,11 +1682,8 @@ class NL2SQLService:
             else:
                 proxy = None
             if proxy and proxy.is_active and proxy.proxy_type == "socks5":
-                import socket as _sk
-                import socks
-                original_socket = _sk.socket
-                socks.set_default_proxy(socks.SOCKS5, proxy.host, proxy.port)
-                _sk.socket = socks.socksocket
+                from app.utils.db_executor import setup_socks
+                _socks_cleanup = setup_socks(ds, db_session=self.db, timeout=60)
 
         engine = create_engine(conn_url.replace('***', password), poolclass=QueuePool, pool_size=2, max_overflow=2, pool_pre_ping=True, connect_args={"connect_timeout": 5})
 
@@ -1709,14 +1697,8 @@ class NL2SQLService:
             raise
         finally:
             engine.dispose()
-            if original_socket is not None:
-                import socket as _sk
-                _sk.socket = original_socket
-                try:
-                    import socks
-                    socks.set_default_proxy()
-                except Exception:
-                    pass
+            if _socks_cleanup is not None:
+                _socks_cleanup()
 
         # 3. 写入 Redis 缓存（TTL=1小时）
         try:

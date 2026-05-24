@@ -89,7 +89,7 @@ class DataSourceService:
         """测试数据源连接（支持 HTTP/SOCKS5 代理）"""
         try:
             ds_type = request.type.upper() if request.type else ""
-            from app.utils.db_executor import setup_proxy_for_ds, restore_socket
+            # 代理设置统一由 socks_proxy_context 处理
             
             # 测试 MySQL/Doris 连接
             if ds_type in ("MYSQL", "DORIS"):
@@ -130,16 +130,19 @@ class DataSourceService:
                     except Exception as e:
                         return DataSourceTestResponse(success=False, message=f"SOCKS5代理测试失败: {str(e)}")
                 
-                # 实际连接测试（复用 db_executor 的 setup_proxy_for_ds）
+                # 实际连接测试（统一使用 db_executor 的 socks_proxy_context）
+                from app.utils.db_executor import socks_proxy_context
+
                 # 创建临时 ds 对象以复用代理设置逻辑
                 class _TempDS:
                     pass
                 temp_ds = _TempDS()
                 temp_ds.use_proxy = use_proxy
                 temp_ds.proxy_server_id = request.proxy_server_id
-                
-                original_socket, use_socks = setup_proxy_for_ds(temp_ds)
-                try:
+                temp_ds.host = request.host
+                temp_ds.port = request.port
+
+                with socks_proxy_context(temp_ds, timeout=20) as use_socks:
                     conn = pymysql.connect(
                         host=request.host,
                         port=request.port,
@@ -157,9 +160,6 @@ class DataSourceService:
                     elif proxy_type:
                         msg += f"（通过{proxy_type.upper()}代理）"
                     return DataSourceTestResponse(success=True, message=msg)
-                finally:
-                    if use_socks and original_socket is not None:
-                        restore_socket(original_socket)
             
             # PostgreSQL 连接
             elif ds_type == "POSTGRESQL":

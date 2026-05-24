@@ -59,9 +59,9 @@ class ConnectionPoolManager:
                 connect_args["connect_timeout"] = 30
                 connect_args["read_timeout"] = 300
             
-            # SOCKS5 代理处理（连接池级别的全局 socket 替换）
-            _socks_applied = False
-            _original_socket = None
+            # SOCKS5 代理处理（连接池使用 creator 参数，不污染全局 socket）
+            socks_host = None
+            socks_port = None
             if use_proxy and proxy_server_id and ds_type.upper() in ("MYSQL", "DORIS"):
                 from app.repositories.proxy_server_repository import ProxyServerRepository
                 from app.core.database import SessionLocal
@@ -70,16 +70,24 @@ class ConnectionPoolManager:
                     prepo = ProxyServerRepository(pdb)
                     proxy = prepo.get_by_id(proxy_server_id)
                     if proxy and proxy.is_active and proxy.proxy_type == "socks5":
-                        import socket as _sk
-                        import socks
-                        _original_socket = _sk.socket
-                        socks.set_default_proxy(socks.SOCKS5, proxy.host, proxy.port)
-                        _sk.socket = socks.socksocket
-                        _socks_applied = True
+                        socks_host = proxy.host
+                        socks_port = proxy.port
                 finally:
                     pdb.close()
-            
-            engine = create_engine(
+
+            if socks_host and socks_port:
+                from app.utils.db_executor import create_socks_engine
+                engine, _ = create_socks_engine(
+                    conn_url, socks_host, socks_port,
+                    poolclass=QueuePool,
+                    pool_size=5,
+                    max_overflow=10,
+                    pool_pre_ping=True,
+                    pool_recycle=3600,
+                    connect_args=connect_args,
+                )
+            else:
+                engine = create_engine(
                 conn_url,
                 poolclass=QueuePool,
                 pool_size=5,
