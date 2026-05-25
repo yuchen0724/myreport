@@ -50,6 +50,10 @@
           <el-icon><Setting /></el-icon>
           <span>系统管理</span>
         </template>
+        <el-menu-item index="/dashboard/layouts">
+          <el-icon><Monitor /></el-icon>
+          <span>布局管理</span>
+        </el-menu-item>
         <el-menu-item index="/datasources">
           <el-icon><DataLine /></el-icon>
           <span>数据源管理</span>
@@ -117,7 +121,7 @@
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
-  House, DataLine, Document, ChatLineRound, TrendCharts, 
+  House, Monitor, DataLine, Document, ChatLineRound, TrendCharts, 
   Folder, Share, Download, Setting, Menu, Tools, Connection
 } from '@element-plus/icons-vue'
 import { useUserStore, useMenuStore } from '@/store'

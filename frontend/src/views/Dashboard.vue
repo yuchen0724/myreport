@@ -26,7 +26,7 @@
       </div>
 
       <div class="toolbar-right">
-        <el-button v-if="!currentLayout.id && layouts.length > 0" type="primary" @click="createNewLayout">
+        <el-button type="primary" @click="createNewLayout">
           + 新建布局
         </el-button>
 
