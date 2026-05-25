@@ -116,6 +116,9 @@
         <el-menu-item index="/forecast-results">
           <span>预测结果查询</span>
         </el-menu-item>
+        <el-menu-item index="/model-compare">
+          <span>模型对比</span>
+        </el-menu-item>
       </el-sub-menu>
     </el-menu>
   </div>
