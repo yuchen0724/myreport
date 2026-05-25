@@ -70,6 +70,10 @@
           <el-icon><Menu /></el-icon>
           <span>菜单管理</span>
         </el-menu-item>
+        <el-menu-item index="/scheduled-reports">
+          <el-icon><AlarmClock /></el-icon>
+          <span>定时报表</span>
+        </el-menu-item>
         <el-menu-item index="/template-share">
           <el-icon><Share /></el-icon>
           <span>模板分享</span>
@@ -122,15 +126,15 @@ import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
   House, Monitor, DataLine, Document, ChatLineRound, TrendCharts, 
-  Folder, Share, Download, Setting, Menu, Tools, Connection
+  Folder, Share, Download, Setting, Menu, Tools, Connection, AlarmClock
 } from '@element-plus/icons-vue'
 import { useUserStore, useMenuStore } from '@/store'
 
 export default {
   name: 'Sidebar',
   components: { 
-    House, DataLine, Document, ChatLineRound, TrendCharts, 
-    Folder, Share, Download, Setting, Menu, Tools, Connection
+    House, Monitor, DataLine, Document, ChatLineRound, TrendCharts, 
+    Folder, Share, Download, Setting, Menu, Tools, Connection, AlarmClock
   },
   setup() {
     const route = useRoute()
