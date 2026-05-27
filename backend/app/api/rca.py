@@ -7,7 +7,7 @@ from typing import List
 from app.core.database import get_db
 from app.core.auth_deps import get_current_user_id
 from app.schemas.rca import (
-    RcaMetricConfigCreate, RcaMetricConfigResponse,
+    RcaMetricConfigCreate, RcaMetricConfigUpdate, RcaMetricConfigResponse,
     RcaAnalyzeRequest, RcaAnomalyResponse, RcaTaskResponse,
     RcaDrillDownRequest,
 )
@@ -46,6 +46,21 @@ async def delete_config(
     if not ok:
         raise HTTPException(404, "配置不存在")
     return {"ok": True}
+
+
+@router.put("/configs/{config_id}", response_model=RcaMetricConfigResponse)
+async def update_config(
+    config_id: int,
+    payload: RcaMetricConfigUpdate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(get_current_user_id),
+):
+    """更新指标配置"""
+    data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    result = RcaService(db).update_config(config_id, data)
+    if not result:
+        raise HTTPException(404, "配置不存在")
+    return result
 
 
 @router.post("/analyze", response_model=RcaTaskResponse)

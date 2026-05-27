@@ -17,6 +17,20 @@ class RcaMetricConfigCreate(BaseModel):
     data_source_id: int
 
 
+class RcaMetricConfigUpdate(BaseModel):
+    name: Optional[str] = None
+    label: Optional[str] = None
+    metric_field: Optional[str] = None
+    source_table: Optional[str] = None
+    threshold_type: Optional[str] = None
+    threshold_value: Optional[float] = None
+    compare_type: Optional[str] = None
+    drill_dimensions: Optional[List[str]] = None
+    group_id: Optional[int] = None
+    data_source_id: Optional[int] = None
+    enabled: Optional[bool] = None
+
+
 class RcaMetricConfigResponse(BaseModel):
     id: int
     name: str

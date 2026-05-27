@@ -43,6 +43,17 @@ class RcaService:
         self.db.commit()
         return True
 
+    def update_config(self, config_id: int, data: dict) -> Optional[RcaMetricConfig]:
+        c = self.db.query(RcaMetricConfig).filter(RcaMetricConfig.id == config_id).first()
+        if not c:
+            return None
+        for k, v in data.items():
+            if v is not None:
+                setattr(c, k, v)
+        self.db.commit()
+        self.db.refresh(c)
+        return c
+
     # ── 分析任务 ──
 
     def trigger_analysis(self, request: dict, user_id: int) -> RcaAnalysisTask:

@@ -115,8 +115,9 @@
             <el-tag v-for="d in row.drill_dimensions" :key="d" size="small" style="margin: 2px">{{ d }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80">
+        <el-table-column label="操作" width="120">
           <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="handleEditConfig(row)">编辑</el-button>
             <el-popconfirm title="确认删除?" @confirm="handleDeleteConfig(row.id)">
               <template #reference>
                 <el-button type="danger" link size="small">删除</el-button>
@@ -172,6 +173,65 @@
           <el-button @click="showAddConfig = false">取消</el-button>
         </el-form-item>
       </el-form>
+
+      <!-- 编辑配置表单 -->
+      <el-form
+        v-if="editingConfig"
+        :model="editingConfig"
+        label-width="80px"
+        style="margin-top: 16px; border-top: 1px solid #eee; padding-top: 16px"
+      >
+        <h4 style="margin: 0 0 12px">编辑: {{ editingConfig.label }}</h4>
+        <el-row :gutter="12">
+          <el-col :span="8">
+            <el-form-item label="指标名">
+              <el-input v-model="editingConfig.label" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="字段名">
+              <el-input v-model="editingConfig.metric_field" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="阈值">
+              <el-input-number v-model="editingConfig.threshold_value" :min="1" :max="100" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="数据表">
+              <el-input v-model="editingConfig.source_table" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="6">
+            <el-form-item label="集团ID">
+              <el-input-number v-model="editingConfig.group_id" :min="1" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="6">
+            <el-form-item label="数据源">
+              <el-input-number v-model="editingConfig.data_source_id" :min="1" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="下钻维度">
+          <el-select v-model="editingConfig.drill_dimensions" multiple style="width: 100%">
+            <el-option label="营运类目1级" value="operation_category1_name" />
+            <el-option label="营运类目2级" value="operation_category2_name" />
+            <el-option label="采销类目1级" value="purchase_category1_name" />
+            <el-option label="门店" value="store_code" />
+            <el-option label="商品" value="matnr" />
+            <el-option label="供应商" value="supplier_name" />
+            <el-option label="品牌" value="brand_flag" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleUpdateConfig">保存修改</el-button>
+          <el-button @click="editingConfig = null">取消</el-button>
+        </el-form-item>
+      </el-form>
     </el-dialog>
   </div>
 </template>
@@ -180,7 +240,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  getRcaConfigs, createRcaConfig, deleteRcaConfig,
+  getRcaConfigs, createRcaConfig, updateRcaConfig, deleteRcaConfig,
   getRcaTasks, triggerRcaAnalyze
 } from '@/api/rca'
 
@@ -190,6 +250,7 @@ const loadingTasks = ref(false)
 const analyzing = ref(false)
 const showConfigDialog = ref(false)
 const showAddConfig = ref(false)
+const editingConfig = ref(null)  // 编辑中的配置
 
 const analyzeForm = ref({
   metric_config_id: null,
@@ -252,6 +313,24 @@ const handleAddConfig = async () => {
     await loadData()
   } catch (e) {
     ElMessage.error('创建失败: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+const handleEditConfig = (row) => {
+  editingConfig.value = { ...row }
+  showAddConfig.value = false
+}
+
+const handleUpdateConfig = async () => {
+  const cfg = { ...editingConfig.value }
+  cfg.name = cfg.label
+  try {
+    await updateRcaConfig(cfg.id, cfg)
+    ElMessage.success('配置已更新')
+    editingConfig.value = null
+    await loadData()
+  } catch (e) {
+    ElMessage.error('更新失败: ' + (e.response?.data?.detail || e.message))
   }
 }
 

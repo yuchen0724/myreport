@@ -8,6 +8,10 @@ export function createRcaConfig(data) {
   return request({ url: "/rca/configs", method: "post", data })
 }
 
+export function updateRcaConfig(id, data) {
+  return request({ url: `/rca/configs/${id}`, method: "put", data })
+}
+
 export function deleteRcaConfig(id) {
   return request({ url: `/rca/configs/${id}`, method: "delete" })
 }
