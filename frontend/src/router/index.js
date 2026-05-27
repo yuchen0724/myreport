@@ -208,6 +208,18 @@ const routes = [
     name: "AIAnalyst",
     component: () => import("@/views/AIAnalyst.vue"),
     meta: { requiresAuth: true, roles: ["admin", "editor", "user"] }
+  },
+  {
+    path: "/rca",
+    name: "RcaDashboard",
+    component: () => import("@/views/RcaDashboard.vue"),
+    meta: { requiresAuth: true, roles: ["admin", "editor"] }
+  },
+  {
+    path: "/rca/:taskId",
+    name: "RcaAnomalies",
+    component: () => import("@/views/RcaAnomalies.vue"),
+    meta: { requiresAuth: true, roles: ["admin", "editor"] }
   }
 ]
 

@@ -216,6 +216,7 @@ import DashboardWidget from "@/components/DashboardWidget.vue"
 import ReportLayout from "@/components/ReportLayout.vue"
 import WidgetAddPanel from "@/components/WidgetAddPanel.vue"
 import WidgetEditorDialog from "@/components/WidgetEditorDialog.vue"
+import DrilldownPanel from "@/components/DrilldownPanel.vue"
 import {
   getLayoutList, getLayoutDetail, createLayout, updateLayout, deleteLayout, saveWidgetBatch,
   getWidgetConfig, saveWidgetConfig, getDashboardData, updateWidget,
@@ -242,7 +243,7 @@ export default {
   components: {
     DashboardWidget, ReportLayout, WidgetAddPanel, draggable,
     Sort, View, Hide, Plus, Edit, Delete, Setting,
-    WidgetEditorDialog,
+    WidgetEditorDialog, DrilldownPanel,
   },
   setup() {
     const loading = ref(true)
@@ -262,6 +263,25 @@ export default {
     const renameValue = ref("")
     const showWidgetEditor = ref(false)
     const editingWidgetRef = ref(null)
+
+    // ===== 钻取面板 =====
+    const drilldownVisible = ref(false)
+    const drilldownWidgetId = ref(null)
+    const drilldownTemplateId = ref(null)
+    const drilldownClickData = ref(null)
+    const drilldownParams = ref(null)
+
+    const handleDrillDown = (payload) => {
+      drilldownWidgetId.value = payload.widgetId
+      drilldownTemplateId.value = payload.templateId
+      drilldownClickData.value = payload.clickData
+      drilldownParams.value = payload.params || null
+      drilldownVisible.value = true
+    }
+
+    const closeDrilldown = () => {
+      drilldownVisible.value = false
+    }
 
     // ===== 旧版兼容 =====
     const widgets = ref([])
@@ -617,6 +637,9 @@ export default {
       saveLegacyWidgets, resetLegacyLayout,
       layoutKey,
       Sort, View, Hide,
+      drilldownVisible, drilldownWidgetId, drilldownTemplateId,
+      drilldownClickData, drilldownParams,
+      handleDrillDown, closeDrilldown,
     }
   },
 }

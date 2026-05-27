@@ -97,6 +97,15 @@ class Settings(BaseSettings):
     prediction_task_time_limit: int = 1800
     prediction_task_batch_timeout: int = 120  # 单批超时（秒），超时则跳过该批
 
+    # RCA 根因分析
+    rca_enabled: bool = True
+    rca_default_group_id: int = 123
+    rca_max_drill_levels: int = 4
+    rca_anomaly_threshold: float = 10.0        # 默认异常阈值（百分比）
+    rca_task_soft_time_limit: int = 300
+    rca_task_time_limit: int = 600
+    rca_task_max_retries: int = 1
+
     # SQL 优化器（LLM 驱动，可选）
     sql_optimizer_enabled: bool = True  # 启用 LLM 驱动 SQL 优化（需要 LLM_API_KEY）
     sql_optimizer_prompt_path: Optional[str] = "prompts/sql_optimizer.md"

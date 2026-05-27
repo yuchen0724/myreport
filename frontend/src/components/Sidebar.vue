@@ -136,6 +136,17 @@
           <span>模型对比</span>
         </el-menu-item>
       </el-sub-menu>
+
+      <!-- RCA 根因分析 -->
+      <el-sub-menu index="rca">
+        <template #title>
+          <el-icon><Search /></el-icon>
+          <span>根因分析</span>
+        </template>
+        <el-menu-item index="/rca">
+          <span>分析总览</span>
+        </el-menu-item>
+      </el-sub-menu>
     </el-menu>
   </div>
 </template>
@@ -145,7 +156,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
   House, Monitor, DataLine, Document, ChatLineRound, TrendCharts, 
-  Folder, Share, Download, Setting, Menu, Tools, Connection, AlarmClock, Star, Bell, MagicStick
+  Folder, Share, Download, Setting, Menu, Tools, Connection, AlarmClock, Star, Bell, MagicStick, Search
 } from '@element-plus/icons-vue'
 import { useUserStore, useMenuStore } from '@/store'
 
@@ -153,7 +164,7 @@ export default {
   name: 'Sidebar',
   components: { 
     House, Monitor, DataLine, Document, ChatLineRound, TrendCharts, 
-    Folder, Share, Download, Setting, Menu, Tools, Connection, AlarmClock, Star, Bell, MagicStick
+    Folder, Share, Download, Setting, Menu, Tools, Connection, AlarmClock, Star, Bell, MagicStick, Search
   },
   setup() {
     const route = useRoute()
