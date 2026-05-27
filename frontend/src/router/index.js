@@ -1,6 +1,12 @@
 import { createRouter, createWebHistory } from "vue-router"
 import { useUserStore } from "@/store"
 
+// 移动端路由检测
+function isMobileDevice() {
+  if (typeof window === 'undefined') return false
+  return window.innerWidth < 768
+}
+
 const routes = [
   {
     path: "/login",
@@ -10,7 +16,13 @@ const routes = [
   {
     path: "/",
     name: "Dashboard",
-    component: () => import("@/views/Dashboard.vue"),
+    component: () => {
+      // 移动端自动重定向到移动视图
+      if (isMobileDevice()) {
+        return import("@/views/mobile/MobileDashboard.vue")
+      }
+      return import("@/views/Dashboard.vue")
+    },
     meta: { requiresAuth: true }
   },
   {
@@ -58,7 +70,12 @@ const routes = [
   {
     path: "/query",
     name: "QueryEditor",
-    component: () => import("@/views/QueryEditor.vue"),
+    component: () => {
+      if (isMobileDevice()) {
+        return import("@/views/mobile/MobileQuery.vue")
+      }
+      return import("@/views/QueryEditor.vue")
+    },
     meta: { requiresAuth: true, roles: ["admin", "editor", "user"] }
   },
   {
@@ -76,7 +93,12 @@ const routes = [
   {
     path: "/templates",
     name: "Templates",
-    component: () => import("@/views/TemplateList.vue"),
+    component: () => {
+      if (isMobileDevice()) {
+        return import("@/views/mobile/MobileTemplates.vue")
+      }
+      return import("@/views/TemplateList.vue")
+    },
     meta: { requiresAuth: true }
   },
   {
@@ -122,6 +144,12 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: "/favorites",
+    name: "Favorites",
+    component: () => import("@/views/Favorites.vue"),
+    meta: { requiresAuth: true }
+  },
+  {
     path: "/menus",
     name: "MenuList",
     component: () => import("@/views/MenuList.vue"),
@@ -152,10 +180,34 @@ const routes = [
     meta: { requiresAuth: true, roles: ["admin", "editor"] }
   },
   {
+    path: "/subscriptions",
+    name: "Subscriptions",
+    component: () => import("@/views/SubscriptionList.vue"),
+    meta: { requiresAuth: true, roles: ["admin", "editor", "user"] }
+  },
+  {
+    path: "/sql-reviews",
+    name: "SqlReviews",
+    component: () => import("@/views/SqlReviewList.vue"),
+    meta: { requiresAuth: true, roles: ["admin", "editor", "user"] }
+  },
+  {
     path: "/model-compare",
     name: "ModelCompare",
     component: () => import("@/views/ModelCompare.vue"),
     meta: { requiresAuth: true, roles: ["admin", "editor"] }
+  },
+  {
+    path: "/pool-monitor",
+    name: "PoolMonitor",
+    component: () => import("@/views/PoolMonitor.vue"),
+    meta: { requiresAuth: true, roles: ["admin"] }
+  },
+  {
+    path: "/ai-analyst",
+    name: "AIAnalyst",
+    component: () => import("@/views/AIAnalyst.vue"),
+    meta: { requiresAuth: true, roles: ["admin", "editor", "user"] }
   }
 ]
 
@@ -173,19 +225,19 @@ router.beforeEach((to, from, next) => {
     next("/")
     return
   }
-  
+
   // 检查登录状态（但登录页不需要）
   if (to.meta.requiresAuth && !hasToken) {
     next("/login")
     return
   }
-  
+
   // 检查角色权限
   if (to.meta.roles && !userStore.hasRole(to.meta.roles)) {
     next("/")
     return
   }
-  
+
   next()
 })
 

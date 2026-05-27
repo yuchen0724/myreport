@@ -9,12 +9,34 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import decode_access_token
+from app.core.token_blacklist import is_blacklisted
 from app.models.user import User
+from app.models.role import Role
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/api/auth/login",
     auto_error=True,
 )
+
+
+def _decode_and_validate_token(token: str) -> dict:
+    """解码并验证 token，包括黑名单检查"""
+    # 先检查黑名单
+    if is_blacklisted(token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="令牌已失效，请重新登录",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    # 再解码 JWT
+    payload = decode_access_token(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无效的认证令牌",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return payload
 
 
 def get_current_user_id(
@@ -28,13 +50,7 @@ def get_current_user_id(
         async def handler(current_user_id: int = Depends(get_current_user_id)):
             ...
     """
-    payload = decode_access_token(token)
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="无效的认证令牌",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    payload = _decode_and_validate_token(token)
 
     user_id: int | None = payload.get("user_id")
     if user_id is None:
@@ -56,13 +72,7 @@ def get_current_user(
     比 get_current_user_id 多一次 DB 查询，
     仅在需要用户角色/权限检查时使用。
     """
-    payload = decode_access_token(token)
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="无效的认证令牌",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    payload = _decode_and_validate_token(token)
 
     user_id: int | None = payload.get("user_id")
     if user_id is None:
@@ -88,16 +98,19 @@ def get_current_user(
 
 def get_current_admin_user(
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> User:
     """验证当前用户是否为管理员，是则返回 User 对象。
 
     用于需要管理员权限的 API 端点。
-    管理员通过 role_id=1 标识（对应 roles 表中 name='admin' 的角色）。
+    通过查询 roles 表中 name='admin' 的角色进行验证。
 
     Raises:
         HTTPException 403: 非管理员用户
     """
-    if current_user.role_id != 1:
+    # 查询 roles 表获取 admin 角色的 ID
+    admin_role = db.query(Role).filter(Role.name == "admin").first()
+    if admin_role is None or current_user.role_id != admin_role.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="需要管理员权限",

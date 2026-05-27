@@ -6,7 +6,7 @@ from app.schemas.nl2sql import GeneratedSQLResult
 from app.utils.llm_client import LLMClient, LLMError
 
 
-def make_settings(adapter="raw", provider="openai", api_mode="chat"):
+def make_settings(adapter="raw", provider="openai", api_mode="chat", structured_output=True):
     return SimpleNamespace(
         llm_adapter=adapter,
         llm_provider=provider,
@@ -19,6 +19,7 @@ def make_settings(adapter="raw", provider="openai", api_mode="chat"):
         azure_openai_endpoint=None,
         azure_openai_deployment=None,
         ollama_base_url="http://localhost:11434",
+        nl2sql_structured_output_enabled=structured_output,
     )
 
 

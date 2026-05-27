@@ -120,8 +120,8 @@ def _get_duration_seconds(r, key: str) -> str:
             started_dt = datetime.fromisoformat(started_str)
             elapsed = (datetime.now(timezone.utc) - started_dt).total_seconds()
             return f"{elapsed:.1f}"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.exception("未知异常: {}", e)
     return "0.0"
 
 
@@ -234,8 +234,8 @@ def _train_with_progress(
                 try:
                     service.model_repo.update_status(
                         model_record.id, "failed", error_message=str(e))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.exception("模型状态更新: {}", e)
                 try:
                     r = _get_redis()
                     key = _progress_key(task_id)
@@ -244,8 +244,8 @@ def _train_with_progress(
                         "error": str(e), "percent": "0", "phase": "失败", "detail": str(e),
                     })
                     r.expire(key, _PROGRESS_TTL)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.exception("Redis写入: {}", e)
                 raise
 
         # ── LightGBM 增量训练路径 ──────────
@@ -381,8 +381,8 @@ def _train_with_progress(
                 model_record.id, "failed",
                 error_message=str(e),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception("模型状态更新: {}", e)
         # 写入失败状态到 Redis
         try:
             r = _get_redis()
@@ -396,8 +396,8 @@ def _train_with_progress(
                 "detail": str(e),
             })
             r.expire(key, _PROGRESS_TTL)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception("Redis写入: {}", e)
         raise
     finally:
         db.close()
@@ -469,8 +469,8 @@ def _train_and_predict_with_progress(
                         _update_progress(task_id, "分批处理",
                                          f"断点续训：跳过前 {start_batch} 批",
                                          model_record.id, percent=9)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.exception("未知异常: {}", e)
 
             result_count = 0
 
@@ -502,8 +502,8 @@ def _train_and_predict_with_progress(
                 try:
                     r = _get_redis()
                     r.hset(_progress_key(task_id), "completed_batches", str(batch_no))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.exception("Redis操作: {}", e)
 
             try:
                 batch_model, metrics, result_count = service._batch_train_predict(
@@ -523,8 +523,8 @@ def _train_and_predict_with_progress(
                 try:
                     service.model_repo.update_status(
                         model_record.id, "failed", error_message=str(e))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.exception("模型状态更新: {}", e)
                 r = _get_redis()
                 key = _progress_key(task_id)
                 r.hset(key, mapping={
@@ -630,8 +630,8 @@ def _train_and_predict_with_progress(
                 try:
                     r = _get_redis()
                     r.hset(_progress_key(task_id), "completed_batches", str(batch_no))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.exception("Redis操作: {}", e)
             except Exception as e:
                 import traceback
                 logger.info(f"[训练+预测] 批次 {batch_no} 预测失败: {e}\n{traceback.format_exc()}")
@@ -757,8 +757,8 @@ def _train_and_predict_with_progress(
                 "detail": str(e),
             })
             r.expire(key, _PROGRESS_TTL)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception("Redis写入: {}", e)
         raise
     finally:
         db.close()
@@ -856,8 +856,8 @@ def train_prediction_model_async(
                     alert_db.commit()
                 finally:
                     alert_db.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.exception("告警通知: {}", e)
         raise self.retry(exc=e, countdown=300)
 
 
@@ -958,13 +958,13 @@ def train_and_predict_prediction_async(
                             alert_message=f"训练+预测任务最终失败（重试用尽）: {str(e)[:200]}",
                             user_id=user_id,
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.exception("告警通知: {}", e)
                     fh_db.commit()
                 finally:
                     fh_db.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.exception("未知异常: {}", e)
         else:
             # 还有重试机会，确保 Redis 状态是 running
             r = _get_redis()
@@ -1068,8 +1068,8 @@ def _predict_with_progress(
                 error_message=str(e),
                 created_by=None,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception("未知异常: {}", e)
         try:
             r = _get_redis()
             pk = _progress_key(task_id)
@@ -1082,8 +1082,8 @@ def _predict_with_progress(
                 "detail": str(e),
             })
             r.expire(pk, _PROGRESS_TTL)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception("Redis写入: {}", e)
         raise
     finally:
         db.close()
@@ -1130,8 +1130,8 @@ def predict_prediction_model_async(
                     alert_db.commit()
                 finally:
                     alert_db.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.exception("告警通知: {}", e)
         raise self.retry(exc=e, countdown=300)
 
 
@@ -1196,8 +1196,8 @@ def get_async_task_progress(task_id: str) -> dict:
                         "status": "failed", "model_id": None,
                         "error": err_msg, "percent": 0, "phase": "失败", "detail": err_msg,
                     }
-            except Exception:
-                pass
+            except Exception as e:
+                logger.exception("未知异常: {}", e)
         # 读取 started_at，实时计算已耗时（不再依赖 _update_progress 写入的 elapsed_seconds）
         _started_at = data.get("started_at") or None
         if isinstance(_started_at, bytes):
@@ -1207,8 +1207,8 @@ def get_async_task_progress(task_id: str) -> dict:
             try:
                 _started_dt = datetime.fromisoformat(_started_at)
                 _elapsed = (datetime.now(timezone.utc) - _started_dt).total_seconds()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.exception("未知异常: {}", e)
         # duration_seconds 优先取 Redis 中记录的固定值（任务完成时写入），
         # 没有的话也实时计算
         _duration_raw = data.get("duration_seconds") or data.get("elapsed_seconds") or None
@@ -1338,8 +1338,8 @@ def _mark_progress_failed(r, key: str, error: str):
             "detail": error[:200],
             "error": error[:200],
         })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.exception("未知异常: {}", e)
 
 
 def _mark_db_model_failed(task_id: str, error: str):
@@ -1353,5 +1353,5 @@ def _mark_db_model_failed(task_id: str, error: str):
             db.commit()
         finally:
             db.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.exception("未知异常: {}", e)

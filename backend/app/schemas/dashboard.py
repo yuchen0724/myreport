@@ -1,4 +1,4 @@
-from pydantic import ConfigDict, BaseModel
+from pydantic import ConfigDict, BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -36,6 +36,7 @@ class WidgetConfigResponse(BaseModel):
     position: int = 0
     visible: bool = True
     extra_config: Optional[Dict[str, Any]] = None
+    drilldown_config: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -50,6 +51,7 @@ class WidgetConfigCreate(BaseModel):
     grid_h: int = 2
     visible: bool = True
     extra_config: Optional[Dict[str, Any]] = None
+    drilldown_config: Optional[Dict[str, Any]] = None
 
 
 class WidgetConfigUpdate(BaseModel):
@@ -60,6 +62,7 @@ class WidgetConfigUpdate(BaseModel):
     grid_h: Optional[int] = None
     visible: Optional[bool] = None
     extra_config: Optional[Dict[str, Any]] = None
+    drilldown_config: Optional[Dict[str, Any]] = None
 
 
 class DashboardLayoutDetail(DashboardLayoutResponse):
@@ -98,3 +101,29 @@ class DashboardDataResponse(BaseModel):
     chart_export_trend: List[dict] = []
     chart_template_pie: List[dict] = []
     chart_duration_scatter: List[dict] = []
+
+
+# ==================== 钻取相关 Schema ====================
+
+class DrilldownClickData(BaseModel):
+    """图表点击数据"""
+    field: str = Field(..., description="点击的字段名")
+    value: Any = Field(..., description="点击的值")
+    label: Optional[str] = Field(None, description="显示标签")
+
+
+class DrilldownRequest(BaseModel):
+    """钻取请求"""
+    widget_id: int = Field(..., description="Widget ID（获取钻取配置）")
+    template_id: int = Field(..., description="目标模板 ID")
+    click_data: DrilldownClickData = Field(..., description="图表点击数据")
+    params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="附加参数")
+
+
+class DrilldownResponse(BaseModel):
+    """钻取响应"""
+    columns: List[str]
+    rows: List[List[Any]]
+    total: int
+    execution_time_ms: int
+    title: Optional[str] = Field(None, description="下钻标题")

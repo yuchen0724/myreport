@@ -25,6 +25,11 @@ wheels/
 .installed.cfg
 *.egg
 
+# ML/Data artifacts
+*.pkl
+*.model
+models/
+
 # Database
 *.db
 *.sqlite

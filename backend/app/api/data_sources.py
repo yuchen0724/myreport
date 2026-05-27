@@ -49,7 +49,7 @@ async def get_data_source(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id)
 ):
-    """获取数据源详情（包含解密密码，方便编辑测试）"""
+    """获取数据源详情（不包含密码）"""
     ds_service = DataSourceService(db)
     ds = ds_service.get_data_source(ds_id)
     if not ds:
@@ -57,35 +57,44 @@ async def get_data_source(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="数据源不存在",
         )
-    # 返回包含解密密码的响应
-    from app.core.security import decrypt_password
-    from sqlalchemy import select
+    return ds
+
+
+@router.get("/{ds_id}/password")
+async def get_data_source_password(
+    ds_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id)
+):
+    """获取数据源解密密码
+
+    仅所有者或管理员可访问。此接口有审计日志记录。
+    """
+    ds_service = DataSourceService(db)
     from app.models.data_source import DataSource
-    
-    # 重新查询获取原始数据库对象
-    db_ds = db.execute(select(DataSource).where(DataSource.id == ds_id)).scalar_one_or_none()
+    db_ds = db.query(DataSource).filter(DataSource.id == ds_id).first()
     if not db_ds:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="数据源不存在",
         )
-    
+
+    # 权限检查：所有者或管理员
+    from app.models.user import User
+    user = db.query(User).filter(User.id == current_user_id).first()
+    is_owner = db_ds.created_by and db_ds.created_by == current_user_id
+    is_admin = user and user.role_id == 1
+    if not is_owner and not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="您没有权限查看此数据源的密码",
+        )
+
+    from app.core.security import decrypt_password
     return {
         "id": db_ds.id,
         "name": db_ds.name,
-        "type": db_ds.type,
-        "host": db_ds.host,
-        "port": db_ds.port,
-        "database": db_ds.database,
-        "username": db_ds.username,
         "password_decrypted": decrypt_password(db_ds.password_encrypted),
-        "use_proxy": db_ds.use_proxy,
-        "proxy_server_id": db_ds.proxy_server_id,
-        "is_active": db_ds.is_active,
-        "load_group": db_ds.load_group,
-        "created_by": db_ds.created_by,
-        "created_at": db_ds.created_at,
-        "updated_at": db_ds.updated_at,
     }
 
 

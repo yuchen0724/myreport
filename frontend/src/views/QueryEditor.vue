@@ -50,6 +50,14 @@
               </el-select>
             </el-form-item>
 
+            <el-form-item label="SQL 方言">
+              <DialectSelector
+                v-model="queryForm.dialect"
+                placeholder="选择 SQL 方言"
+                width="240px"
+              />
+            </el-form-item>
+
             <el-form-item label="SQL">
               <el-input
                 ref="sqlInputRef"
@@ -211,11 +219,12 @@ import { executeSQL, getQueryHistory } from '@/api/query'
 import { exportExcel, exportPDF } from '@/api/report'
 import EnhancedTable from '@/components/EnhancedTable.vue'
 import SQLAnalysisPanel from '@/components/SQLAnalysisPanel.vue'
+import DialectSelector from '@/components/DialectSelector.vue'
 import { useFormPersistence } from '@/composables/useFormPersistence'
 
 export default {
   name: 'QueryEditor',
-  components: { EnhancedTable, SQLAnalysisPanel },
+  components: { EnhancedTable, SQLAnalysisPanel, DialectSelector },
   setup() {
     const loading = ref(false)
     const dataSources = ref([])
@@ -226,7 +235,8 @@ export default {
     // ---- 表单持久化 ----
     const { loadStored, saveToStorage } = useFormPersistence('query_editor_form', {
       data_source_id: null,
-      sql: ''
+      sql: '',
+      dialect: ''
     })
     const queryForm = ref(loadStored())
     const saveForm = () => saveToStorage(queryForm.value)
@@ -293,6 +303,11 @@ export default {
           sql,
           page: page || 1,
           page_size: pageSizeVal || pageSize.value
+        }
+
+        // 如果选择了方言，传递给后端
+        if (queryForm.value.dialect) {
+          payload.dialect = queryForm.value.dialect
         }
 
         result.value = await executeSQL(payload)

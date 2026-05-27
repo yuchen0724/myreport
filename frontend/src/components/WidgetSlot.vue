@@ -25,6 +25,8 @@
       :data="chartData"
       :config="chartConfig"
       :show-toolbox="true"
+      :drill-config="drillConfig"
+      @drillDown="onDrillDown"
     />
     <QueryResult
       v-else-if="type === 'table'"
@@ -61,7 +63,7 @@ export default {
     dashboardData: { type: Object, default: () => ({}) },
     extraConfig: { type: Object, default: () => ({}) },
   },
-  emits: ["edit", "remove"],
+  emits: ["edit", "remove", "drillDown"],
   setup(props) {
     // ——— 图表数据 ———
     const chartData = ref(props.extraConfig?.chartData || [])
@@ -204,6 +206,29 @@ export default {
 
     const iframeUrl = computed(() => props.extraConfig?.url || "")
 
+    // ——— 钻取配置 ———
+    const drillConfig = computed(() => {
+      const dc = props.extraConfig?.drilldown_config || props.widget?.drilldown_config
+      if (dc && dc.enabled) {
+        return {
+          enabled: true,
+          path: [],
+        }
+      }
+      return { enabled: false, path: [] }
+    })
+
+    const onDrillDown = (clickInfo) => {
+      const dc = props.extraConfig?.drilldown_config || props.widget?.drilldown_config
+      if (dc && dc.enabled) {
+        emit('drillDown', {
+          widgetId: props.widget?.id,
+          templateId: dc.target_template_id,
+          clickData: clickInfo,
+        })
+      }
+    }
+
     return {
       effectiveChartType,
       chartData: finalChartData,
@@ -211,6 +236,8 @@ export default {
       tableResult,
       tableLoading,
       iframeUrl,
+      drillConfig,
+      onDrillDown,
       Setting, Delete,
     }
   },

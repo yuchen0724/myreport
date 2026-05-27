@@ -35,7 +35,8 @@ class ExportTaskBase(Task):
     # 默认重试配置（子类可覆盖）
     max_retries = 3
     default_retry_delay = 60  # 首次重试延迟（秒）
-    autoretry_for = (Exception,)
+    # 注意：不设 autoretry_for，由 on_failure 中手动 self.retry() 控制重试
+    # 否则 autoretry_for=(Exception,) + self.retry() 会导致双重重试
 
     def _get_task_id_from_request(self) -> str:
         """从任务参数中提取 task_id（第一个位置参数）"""

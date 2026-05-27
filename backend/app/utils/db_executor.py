@@ -195,9 +195,9 @@ def execute_query(ds, sql: str) -> tuple:
     encoded_password = quote_plus(password)
 
     if ds_type == "POSTGRESQL":
-        conn_url = f"postgresql://{ds.username}:***@{ds.host}:{ds.port}/{ds.database}"
+        conn_url = f"postgresql://{ds.username}:{encoded_password}@{ds.host}:{ds.port}/{ds.database}"
     elif ds_type in ("MYSQL", "DORIS"):
-        conn_url = f"mysql+pymysql://{ds.username}:***@{ds.host}:{ds.port}/{ds.database}"
+        conn_url = f"mysql+pymysql://{ds.username}:{encoded_password}@{ds.host}:{ds.port}/{ds.database}"
     elif ds_type == "HIVE":
         conn_url = f"hive://{ds.username}:{encoded_password}@{ds.host}:{ds.port}/{ds.database}"
     else:

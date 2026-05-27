@@ -1,6 +1,8 @@
 """限流中间件
 
-基于 IP 地址的请求频率限制。
+基于 IP 地址或用户 ID + 路径的请求频率限制。
+- 已认证用户：使用 user_id + path_hash 作为限流键
+- 未认证用户：使用 client_ip + path_hash 作为限流键
 支持内存模式和 Redis 模式（生产环境推荐）。
 当 Redis 可用时自动切换至 Redis 后端以支持多 worker 场景。
 """
@@ -16,6 +18,7 @@ from starlette.responses import JSONResponse
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
 from app.config import get_settings
+from app.core.security import decode_access_token
 
 
 _PATH_GROUPS = {
@@ -165,7 +168,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
 
         client_ip = self._get_client_ip(request)
-        key = f"rate_limit:{client_ip}"
+        path_hash = hash(request.url.path) % 100
+        user_id = self._get_user_id_from_request(request)
+        if user_id is not None:
+            key = f"rate_limit:user:{user_id}:{path_hash}"
+        else:
+            key = f"rate_limit:ip:{client_ip}:{path_hash}"
 
         if not self._backend.is_allowed(key, request.url.path):
             limit = self._backend.get_limit(request.url.path)
@@ -202,3 +210,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if real_ip:
             return real_ip
         return request.client.host if request.client else "unknown"
+
+    def _get_user_id_from_request(self, request: Request) -> Optional[int]:
+        """从 Authorization: Bearer <token> 中提取 user_id，失败时返回 None"""
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return None
+        token = auth_header[len("Bearer "):]
+        payload = decode_access_token(token)
+        if payload is None:
+            return None
+        user_id = payload.get("user_id")
+        return user_id if isinstance(user_id, int) else None

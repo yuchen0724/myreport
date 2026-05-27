@@ -41,3 +41,4 @@ celery_app = create_celery_app()
 # 导入任务模块以向该 celery_app 注册任务
 from app.tasks import export_tasks  # noqa: E402, F401
 from app.tasks import prediction_tasks  # noqa: E402, F401
+from app.tasks import subscription_tasks  # noqa: E402, F401

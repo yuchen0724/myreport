@@ -83,11 +83,11 @@ start_postgresql() {
 # 启动Redis
 start_redis() {
     echo -e "${GREEN}[2/5] 启动 Redis 服务...${NC}"
-    
+
     if check_port $REDIS_PORT "Redis"; then
         redis-server --daemonize yes --port $REDIS_PORT --logfile "$LOG_DIR/redis.log"
         sleep 2
-        
+
         if redis-cli -p $REDIS_PORT ping >/dev/null 2>&1; then
             echo -e "${GREEN}✓ Redis 启动成功 (端口: $REDIS_PORT)${NC}"
             echo $! > $REDIS_PID
@@ -103,16 +103,16 @@ start_redis() {
 # 启动Celery Worker
 start_celery() {
     echo -e "${GREEN}[3/5] 启动 Celery Worker...${NC}"
-    
+
     cd $BACKEND_DIR
     export PYTHONPATH=$BACKEND_DIR:$PYTHONPATH
-    
+
     # 使用 venv 中的 celery（确保 lightgbm 等依赖可用）
     CELERY_BIN="$BACKEND_DIR/.venv/bin/celery"
     if [ ! -f "$CELERY_BIN" ]; then
         CELERY_BIN="celery"
     fi
-    
+
     # 检查是否已有celery进程
     if pgrep -f "celery.*worker" > /dev/null; then
         echo -e "${YELLOW}Celery Worker 已在运行${NC}"
@@ -121,9 +121,9 @@ start_celery() {
         nohup $CELERY_BIN -A celery_config worker --loglevel=info --concurrency=2 -Q export,celery -B \
             > "$LOG_DIR/celery.log" 2>&1 &
         echo $! > $CELERY_PID
-        
+
         sleep 3
-        
+
         if pgrep -f "celery.*worker" > /dev/null; then
             echo -e "${GREEN}✓ Celery Worker 启动成功${NC}"
         else
@@ -137,29 +137,29 @@ start_celery() {
 # 启动后端服务
 start_backend() {
     echo -e "${GREEN}[4/5] 启动后端服务...${NC}"
-    
+
     if check_port $BACKEND_PORT "后端服务"; then
         cd $BACKEND_DIR
-        
+
         # 使用 venv 中的 uvicorn
         UVICORN_BIN="$BACKEND_DIR/.venv/bin/uvicorn"
         if [ ! -f "$UVICORN_BIN" ]; then
             UVICORN_BIN="uvicorn"
         fi
-        
+
         # 根据 DEBUG 环境变量决定是否启用 --reload（生产环境应设置 DEBUG=false）
-        RELOAD_FLAG=""
+        RELOAD_FLAG="--reload"
         if [ "${DEBUG:-true}" = "true" ]; then
             RELOAD_FLAG=""
             echo -e "${YELLOW}⚠ 开发模式: 启用 --reload (生产环境请设置 DEBUG=false)${NC}"
         fi
-        
+
                 nohup env PYTHONPATH="$BACKEND_DIR:$PYTHONPATH" $UVICORN_BIN app.main:app --host 0.0.0.0 --port $BACKEND_PORT $RELOAD_FLAG \
             > "$LOG_DIR/backend.log" 2>&1 &
         echo $! > $BACKEND_PID
-        
+
         sleep 5
-        
+
         if curl -s http://localhost:$BACKEND_PORT/health > /dev/null 2>&1; then
             echo -e "${GREEN}✓ 后端服务启动成功 (端口: $BACKEND_PORT)${NC}"
         else
@@ -175,14 +175,14 @@ start_backend() {
 # 启动前端服务
 start_frontend() {
     echo -e "${GREEN}[5/5] 启动前端服务...${NC}"
-    
+
     if check_port $FRONTEND_PORT "前端服务"; then
         cd $FRONTEND_DIR
         nohup npm run dev > "$LOG_DIR/frontend.log" 2>&1 &
         echo $! > $FRONTEND_PID
-        
+
         sleep 5
-        
+
         if curl -s http://localhost:$FRONTEND_PORT > /dev/null 2>&1; then
             echo -e "${GREEN}✓ 前端服务启动成功 (端口: $FRONTEND_PORT)${NC}"
         else
@@ -198,32 +198,32 @@ start_frontend() {
 # 停止所有服务
 stop_all() {
     echo -e "${YELLOW}停止所有服务...${NC}"
-    
+
     # ===== 强制停止占用端口的进程 =====
-    
+
     # 前端 - 强制杀掉占用 3000 端口的进程
     echo -e "${YELLOW}停止前端服务 (端口: $FRONTEND_PORT)...${NC}"
     fuser -k $FRONTEND_PORT/tcp 2>/dev/null || true
     pkill -f "vite.*$FRONTEND_PORT" || true
     pkill -f "npm.*dev" || true
     pkill -f "node.*vite" || true
-    
+
     # 后端 - 强制杀掉占用 8000 端口的进程
     echo -e "${YELLOW}停止后端服务 (端口: $BACKEND_PORT)...${NC}"
     fuser -k $BACKEND_PORT/tcp 2>/dev/null || true
     pkill -f "uvicorn.*main:app" || true
     pkill -f "python.*uvicorn" || true
-    
+
     # Celery
     echo -e "${YELLOW}停止 Celery Worker...${NC}"
     pkill -f "celery.*worker" || true
     pkill -9 -f "celery" || true
-    
+
     # Redis
     echo -e "${YELLOW}停止 Redis 服务...${NC}"
     redis-cli -p $REDIS_PORT shutdown 2>/dev/null || true
     fuser -k $REDIS_PORT/tcp 2>/dev/null || true
-    
+
     # PostgreSQL
     if pg_isready -q -p $PG_PORT 2>/dev/null; then
         echo -e "${YELLOW}停止 PostgreSQL...${NC}"
@@ -240,10 +240,10 @@ stop_all() {
             sleep 2
         fi
     fi
-    
+
     # ===== 等待端口释放 =====
     sleep 2
-    
+
     # 验证端口已释放
     for port in $FRONTEND_PORT $BACKEND_PORT $REDIS_PORT; do
         if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
@@ -251,10 +251,10 @@ stop_all() {
             fuser -k -9 $port/tcp 2>/dev/null || true
         fi
     done
-    
+
     # 清理 PID 文件
     rm -f "$FRONTEND_PID" "$BACKEND_PID" "$CELERY_PID" "$REDIS_PID"
-    
+
     sleep 1
     echo -e "${GREEN}✓ 所有服务已停止${NC}"
 }
@@ -278,28 +278,28 @@ status() {
     else
         echo -e "${RED}✗ Redis${NC} - 未运行"
     fi
-    
+
     # Celery
     if pgrep -f "celery.*worker" > /dev/null; then
         echo -e "${GREEN}✓ Celery Worker${NC} - 运行中"
     else
         echo -e "${RED}✗ Celery Worker${NC} - 未运行"
     fi
-    
+
     # 后端
     if curl -s http://localhost:$BACKEND_PORT/health > /dev/null 2>&1; then
         echo -e "${GREEN}✓ 后端服务${NC} - 运行中 (端口: $BACKEND_PORT)"
     else
         echo -e "${RED}✗ 后端服务${NC} - 未运行"
     fi
-    
+
     # 前端
     if curl -s http://localhost:$FRONTEND_PORT > /dev/null 2>&1; then
         echo -e "${GREEN}✓ 前端服务${NC} - 运行中 (端口: $FRONTEND_PORT)"
     else
         echo -e "${RED}✗ 前端服务${NC} - 未运行"
     fi
-    
+
     echo ""
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}  访问地址${NC}"
@@ -312,7 +312,7 @@ status() {
 # 查看日志
 logs() {
     local service=$1
-    
+
     case $service in
         postgresql|pg)
             journalctl -u postgresql@$PG_VERSION-main -f --no-pager 2>/dev/null || \

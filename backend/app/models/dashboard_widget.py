@@ -30,6 +30,7 @@ class DashboardWidgetConfig(Base):
     position = Column(Integer, nullable=False, default=0)
     visible = Column(Boolean, default=True)
     extra_config = Column(JSON, default={})
+    drilldown_config = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

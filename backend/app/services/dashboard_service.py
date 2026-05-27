@@ -90,6 +90,7 @@ class DashboardService:
             position=data.get("position", 0),
             visible=True,
             extra_config=data.get("extra_config", {}),
+            drilldown_config=data.get("drilldown_config"),
         )
         self.db.add(config)
         self.db.commit()
@@ -104,7 +105,7 @@ class DashboardService:
         )
         if not widget:
             return None
-        for field in ("title", "grid_x", "grid_y", "grid_w", "grid_h", "visible", "extra_config", "widget_subtype"):
+        for field in ("title", "grid_x", "grid_y", "grid_w", "grid_h", "visible", "extra_config", "widget_subtype", "drilldown_config"):
             if field in data:
                 setattr(widget, field, data[field])
         self.db.commit()
@@ -146,6 +147,7 @@ class DashboardService:
                 position=i,
                 visible=w.get("visible", True),
                 extra_config=w.get("extra_config", {}),
+                drilldown_config=w.get("drilldown_config"),
             )
             self.db.add(config)
             new_configs.append(config)

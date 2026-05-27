@@ -66,6 +66,10 @@
           <el-icon><Folder /></el-icon>
           <span>模板管理</span>
         </el-menu-item>
+        <el-menu-item index="/favorites">
+          <el-icon><Star /></el-icon>
+          <span>我的收藏</span>
+        </el-menu-item>
         <el-menu-item index="/menus" v-if="isAdmin">
           <el-icon><Menu /></el-icon>
           <span>菜单管理</span>
@@ -74,9 +78,17 @@
           <el-icon><AlarmClock /></el-icon>
           <span>定时报表</span>
         </el-menu-item>
+        <el-menu-item index="/subscriptions">
+          <el-icon><Bell /></el-icon>
+          <span>订阅推送</span>
+        </el-menu-item>
         <el-menu-item index="/template-share">
           <el-icon><Share /></el-icon>
           <span>模板分享</span>
+        </el-menu-item>
+        <el-menu-item index="/pool-monitor" v-if="isAdmin">
+          <el-icon><Monitor /></el-icon>
+          <span>连接池监控</span>
         </el-menu-item>
       </el-sub-menu>
       
@@ -101,6 +113,10 @@
         <el-menu-item index="/async-export">
           <el-icon><Download /></el-icon>
           <span>异步导出</span>
+        </el-menu-item>
+        <el-menu-item index="/ai-analyst">
+          <el-icon><MagicStick /></el-icon>
+          <span>AI 分析师</span>
         </el-menu-item>
       </el-sub-menu>
 
@@ -129,7 +145,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
   House, Monitor, DataLine, Document, ChatLineRound, TrendCharts, 
-  Folder, Share, Download, Setting, Menu, Tools, Connection, AlarmClock
+  Folder, Share, Download, Setting, Menu, Tools, Connection, AlarmClock, Star, Bell, MagicStick
 } from '@element-plus/icons-vue'
 import { useUserStore, useMenuStore } from '@/store'
 
@@ -137,7 +153,7 @@ export default {
   name: 'Sidebar',
   components: { 
     House, Monitor, DataLine, Document, ChatLineRound, TrendCharts, 
-    Folder, Share, Download, Setting, Menu, Tools, Connection, AlarmClock
+    Folder, Share, Download, Setting, Menu, Tools, Connection, AlarmClock, Star, Bell, MagicStick
   },
   setup() {
     const route = useRoute()

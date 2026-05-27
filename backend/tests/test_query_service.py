@@ -134,7 +134,8 @@ class TestSQLValidator:
         """验证非 SELECT/WITH 开头的 SQL"""
         is_valid, message = SQLValidator.validate("SHOW TABLES")
         assert is_valid is False
-        assert "只允许 SELECT" in message
+        # SHOW 是危险关键字，会先被拒绝
+        assert "SHOW" in message or "只允许 SELECT" in message
 
     def test_semicolon_injection(self):
         """验证分号多语句注入"""
@@ -154,8 +155,9 @@ class TestSQLValidator:
 
     def test_sql_too_long(self):
         """验证超长 SQL"""
-        long_sql = "SELECT * FROM users WHERE 1=1 " + "AND x=1 " * 2000
-        assert len(long_sql) > 10000
+        # MAX_SQL_LENGTH 是 50000，需要生成超过这个长度的 SQL
+        long_sql = "SELECT * FROM users WHERE 1=1 " + "AND x=1 " * 6250
+        assert len(long_sql) > 50000
         is_valid, message = SQLValidator.validate(long_sql)
         assert is_valid is False
         assert "过长" in message

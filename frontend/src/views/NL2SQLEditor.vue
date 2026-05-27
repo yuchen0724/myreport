@@ -20,6 +20,14 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item label="SQL 方言">
+          <DialectSelector
+            v-model="form.dialect"
+            placeholder="选择 SQL 方言"
+            width="240px"
+          />
+        </el-form-item>
+
         <el-form-item v-if="showGroupSelect" label="集团（选填）">
           <el-select v-model="form.group_id" placeholder="选择集团（自动从 dim_store 加载）" clearable filterable :loading="groupLoading" style="width: 320px">
             <el-option
@@ -202,6 +210,7 @@ import { getDataSourceList } from '@/api/data_source'
 import ChartRenderer from '@/components/ChartRenderer.vue'
 import { formatSQL } from '@/utils/sqlFormat'
 import EnhancedTable from '@/components/EnhancedTable.vue'
+import DialectSelector from '@/components/DialectSelector.vue'
 import { useFormPersistence } from '@/composables/useFormPersistence'
 
 // 表单持久化
@@ -209,6 +218,7 @@ const { loadStored, saveToStorage } = useFormPersistence('nl2sql_form', {
   data_source_id: null,
   question: '',
   group_id: null,
+  dialect: '',
   chartType: 'bar',
   chartColorTheme: 'blue',
   chartHeight: '350px',
@@ -219,7 +229,8 @@ const stored = loadStored()
 const form = ref({
   data_source_id: stored.data_source_id ? Number(stored.data_source_id) : null,
   question: stored.question,
-  group_id: stored.group_id ? Number(stored.group_id) : null
+  group_id: stored.group_id ? Number(stored.group_id) : null,
+  dialect: stored.dialect || ''
 })
 
 // 将索引数组 rows 转换为对象数组

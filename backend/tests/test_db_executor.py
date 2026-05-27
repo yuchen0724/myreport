@@ -512,19 +512,22 @@ class TestProxyFunctions:
 
 class TestExecuteQueryWithProxy:
 
-    @patch("app.utils.db_executor.setup_proxy_for_ds")
+    @patch("app.utils.db_executor.socks_proxy_context")
     @patch("app.utils.db_executor.create_engine")
     @patch("app.utils.db_executor.decrypt_password", return_value="pwd")
     def test_execute_with_proxy(
-        self, mock_decrypt, mock_create_engine, mock_setup_proxy,
+        self, mock_decrypt, mock_create_engine, mock_socks_context,
         mock_ds_with_proxy, mock_engine_connection
     ):
         """使用代理时的完整执行流程"""
         mock_engine, mock_conn, mock_result = mock_engine_connection
         mock_create_engine.return_value = mock_engine
 
-        # 模拟代理设置返回 (original_socket, True)
-        mock_setup_proxy.return_value = (_socket.socket, True)
+        # 模拟 socks_proxy_context 上下文管理器返回 True
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=True)
+        mock_context.__exit__ = MagicMock(return_value=False)
+        mock_socks_context.return_value = mock_context
 
         from app.utils.db_executor import execute_query
 
@@ -533,15 +536,15 @@ class TestExecuteQueryWithProxy:
         assert columns == ["id", "name", "age"]
         assert rows == [[1, "Alice", 30], [2, "Bob", 25]]
 
-        # 验证 setup_proxy_for_ds 被调用
-        mock_setup_proxy.assert_called_once()
-        assert mock_setup_proxy.call_args[0][0] == mock_ds_with_proxy
+        # 验证 socks_proxy_context 被调用
+        mock_socks_context.assert_called_once()
+        assert mock_socks_context.call_args[0][0] == mock_ds_with_proxy
 
-    @patch("app.utils.db_executor.setup_proxy_for_ds")
+    @patch("app.utils.db_executor.socks_proxy_context")
     @patch("app.utils.db_executor.create_engine")
     @patch("app.utils.db_executor.decrypt_password", return_value="pwd")
     def test_execute_with_proxy_restore_on_error(
-        self, mock_decrypt, mock_create_engine, mock_setup_proxy,
+        self, mock_decrypt, mock_create_engine, mock_socks_context,
         mock_ds_with_proxy
     ):
         """代理场景下查询失败时仍会恢复 socket"""
@@ -549,8 +552,11 @@ class TestExecuteQueryWithProxy:
         mock_engine.connect.side_effect = OperationalError("mock", "mock", "mock")
         mock_create_engine.return_value = mock_engine
 
-        original_socket = _socket.socket
-        mock_setup_proxy.return_value = (original_socket, True)
+        # 模拟 socks_proxy_context 上下文管理器返回 True
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=True)
+        mock_context.__exit__ = MagicMock(return_value=False)
+        mock_socks_context.return_value = mock_context
 
         from app.utils.db_executor import execute_query
 
@@ -558,13 +564,13 @@ class TestExecuteQueryWithProxy:
             execute_query(mock_ds_with_proxy, "SELECT 1")
 
         # 代理被 setup
-        mock_setup_proxy.assert_called_once()
+        mock_socks_context.assert_called_once()
 
-    @patch("app.utils.db_executor.setup_proxy_for_ds")
+    @patch("app.utils.db_executor.socks_proxy_context")
     @patch("app.utils.db_executor.create_engine")
     @patch("app.utils.db_executor.decrypt_password", return_value="pwd")
     def test_execute_without_proxy_no_restore(
-        self, mock_decrypt, mock_create_engine, mock_setup_proxy,
+        self, mock_decrypt, mock_create_engine, mock_socks_context,
         mock_ds, mock_engine_connection
     ):
         """不使用代理时不会调用 restore_socket"""
@@ -572,7 +578,10 @@ class TestExecuteQueryWithProxy:
         mock_create_engine.return_value = mock_engine
 
         # 未使用代理
-        mock_setup_proxy.return_value = (None, False)
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=False)
+        mock_context.__exit__ = MagicMock(return_value=False)
+        mock_socks_context.return_value = mock_context
 
         from app.utils.db_executor import execute_query
         # 需要 patch restore_socket 来验证它没有被调用

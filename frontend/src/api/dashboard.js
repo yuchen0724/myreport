@@ -57,3 +57,13 @@ export function saveWidgetConfig(data) {
 export function getDashboardData() {
   return request({ url: "/dashboard/data", method: "get" })
 }
+
+// ==================== 钻取 API ====================
+
+export function executeDrilldown(data) {
+  return request({ url: "/drilldown/execute", method: "post", data })
+}
+
+export function getDrilldownConfig(widgetId) {
+  return request({ url: `/drilldown/config/${widgetId}`, method: "get" })
+}

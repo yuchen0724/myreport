@@ -17,8 +17,11 @@ class DataSourceService:
         return db_ds
 
     def _check_owner(self, ds, user_id: int) -> None:
-        """校验当前用户是否为数据源所有者，不是则抛出 AuthorizationError"""
-        if ds.created_by and ds.created_by != user_id:
+        """校验当前用户是否为数据源所有者
+
+        created_by 为 NULL 时也拒绝，防止未标记所有者的数据源被任何人访问。
+        """
+        if not ds.created_by or ds.created_by != user_id:
             raise AuthorizationError("您没有权限操作此数据源")
 
     def create_data_source(self, ds_data: DataSourceCreate, user_id: int) -> DataSourceResponse:

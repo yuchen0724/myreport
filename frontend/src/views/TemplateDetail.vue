@@ -41,6 +41,12 @@
           </el-button>
           <el-button @click="handleVersions">查看版本历史</el-button>
           <el-button @click="handleShare" v-if="!isReadOnly">分享模板</el-button>
+          <el-button 
+            :type="isFavorited ? 'warning' : 'info'" 
+            @click="toggleFavorite"
+          >
+            {{ isFavorited ? '取消收藏' : '添加收藏' }}
+          </el-button>
         </div>
 
         <!-- 查询结果预览 -->
@@ -89,6 +95,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getTemplate } from '@/api/template'
 import { executeQuery } from '@/api/query'
+import { checkFavorite, addFavorite, removeFavoriteByTemplate } from '@/api/favorite'
 import EnhancedTable from '@/components/EnhancedTable.vue'
 
 // 将索引数组 rows 转换为对象数组
@@ -108,11 +115,14 @@ const previewing = ref(false)
 const queryResult = ref(null)
 const currentPage = ref(1)
 const pageSize = ref(50)
+const isFavorited = ref(false)
+const favoriteId = ref(null)
 
 const isReadOnly = computed(() => route.query.readOnly === 'true')
 
 onMounted(async () => {
   await loadTemplate()
+  await checkIsFavorited()
 })
 
 const loadTemplate = async () => {
@@ -198,6 +208,34 @@ const handleVersions = () => {
 
 const handleShare = () => {
   router.push(`/template-share?templateId=${template.value.id}`)
+}
+
+const checkIsFavorited = async () => {
+  try {
+    const res = await checkFavorite(route.params.id)
+    isFavorited.value = res.is_favorited
+  } catch (error) {
+    console.error('检查收藏状态失败', error)
+  }
+}
+
+const toggleFavorite = async () => {
+  try {
+    if (isFavorited.value) {
+      await removeFavoriteByTemplate(parseInt(route.params.id))
+      isFavorited.value = false
+      ElMessage.success('已取消收藏')
+    } else {
+      await addFavorite({
+        template_id: parseInt(route.params.id),
+        category: '默认'
+      })
+      isFavorited.value = true
+      ElMessage.success('收藏成功')
+    }
+  } catch (error) {
+    ElMessage.error('操作失败')
+  }
 }
 </script>
 

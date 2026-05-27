@@ -34,6 +34,7 @@
           :extra-config="item.extra_config"
           @edit="$emit('editWidget', item)"
           @remove="$emit('removeWidget', item)"
+          @drillDown="$emit('drillDown', $event)"
         />
       </grid-item>
     </grid-layout>
@@ -54,7 +55,7 @@ export default {
     rowHeight: { type: Number, default: 100 },
     dashboardData: { type: Object, default: () => ({}) },
   },
-  emits: ["update:layoutItems", "editWidget", "removeWidget"],
+  emits: ["update:layoutItems", "editWidget", "removeWidget", "drillDown"],
   setup(props, { emit }) {
     // grid-layout-plus 的 layout.sync 要求 layout 可响应式
     // 父组件通过 v-model:layoutItems 绑定

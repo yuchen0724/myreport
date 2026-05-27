@@ -93,6 +93,17 @@
           :dashboard-data="dashboardData"
           @remove-widget="removeWidget"
           @edit-widget="editWidget"
+          @drillDown="handleDrillDown"
+        />
+
+        <!-- 钻取面板 -->
+        <DrilldownPanel
+          :visible="drilldownVisible"
+          :widget-id="drilldownWidgetId"
+          :template-id="drilldownTemplateId"
+          :click-data="drilldownClickData"
+          :params="drilldownParams"
+          @close="closeDrilldown"
         />
       </div>
     </div>

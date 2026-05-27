@@ -14,6 +14,8 @@ from app.models.scheduled_report import ScheduledReport, ReportDelivery
 from app.models.menu import Menu
 from app.models.prediction import PredictionResult, PredictionModel
 from app.models.dashboard_widget import DashboardWidgetConfig
+from app.models.subscription import QuerySubscription, SubscriptionExecution
+from app.models.sql_review import SqlReview
 
 __all__ = [
     "User",
@@ -31,4 +33,7 @@ __all__ = [
     "SQLAnalysisResult",
     "ScheduledReport",
     "ReportDelivery",
+    "QuerySubscription",
+    "SubscriptionExecution",
+    "SqlReview",
 ]
