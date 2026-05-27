@@ -109,6 +109,19 @@ async def get_task(
     return task
 
 
+@router.delete("/tasks/{task_id}")
+async def delete_task(
+    task_id: str,
+    db: Session = Depends(get_db),
+    uid: int = Depends(get_current_user_id),
+):
+    """删除分析任务及关联异常"""
+    ok = RcaService(db).delete_task(task_id)
+    if not ok:
+        raise HTTPException(404, "任务不存在")
+    return {"ok": True}
+
+
 @router.get("/tasks/{task_id}/anomalies", response_model=List[RcaAnomalyResponse])
 async def get_anomalies(
     task_id: str,

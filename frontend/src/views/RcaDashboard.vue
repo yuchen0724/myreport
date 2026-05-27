@@ -83,7 +83,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 'completed'"
@@ -94,6 +94,11 @@
             >
               查看异常
             </el-button>
+            <el-popconfirm title="确认删除此分析记录?" @confirm="handleDeleteTask(row.task_id)">
+              <template #reference>
+                <el-button type="danger" link size="small">删除</el-button>
+              </template>
+            </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
@@ -241,7 +246,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   getRcaConfigs, createRcaConfig, updateRcaConfig, deleteRcaConfig,
-  getRcaTasks, triggerRcaAnalyze
+  getRcaTasks, deleteRcaTask, triggerRcaAnalyze
 } from '@/api/rca'
 
 const configs = ref([])
@@ -337,6 +342,16 @@ const handleUpdateConfig = async () => {
 const handleDeleteConfig = async (id) => {
   try {
     await deleteRcaConfig(id)
+    ElMessage.success('已删除')
+    await loadData()
+  } catch (e) {
+    ElMessage.error('删除失败')
+  }
+}
+
+const handleDeleteTask = async (taskId) => {
+  try {
+    await deleteRcaTask(taskId)
     ElMessage.success('已删除')
     await loadData()
   } catch (e) {

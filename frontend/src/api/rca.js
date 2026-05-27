@@ -24,6 +24,10 @@ export function getRcaTasks(params) {
   return request({ url: "/rca/tasks", method: "get", params })
 }
 
+export function deleteRcaTask(taskId) {
+  return request({ url: `/rca/tasks/${taskId}`, method: "delete" })
+}
+
 export function getRcaTask(taskId) {
   return request({ url: `/rca/tasks/${taskId}`, method: "get" })
 }

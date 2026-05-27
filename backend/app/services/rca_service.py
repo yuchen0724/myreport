@@ -197,6 +197,20 @@ class RcaService:
             .all()
         )
 
+    def delete_task(self, task_id: str) -> bool:
+        task = (
+            self.db.query(RcaAnalysisTask)
+            .filter(RcaAnalysisTask.task_id == task_id)
+            .first()
+        )
+        if not task:
+            return False
+        # 先删关联的异常记录
+        self.db.query(RcaAnomaly).filter(RcaAnomaly.task_id == task_id).delete()
+        self.db.delete(task)
+        self.db.commit()
+        return True
+
     def drill_down(self, request: dict) -> List[dict]:
         """手动下钻查询"""
         task = (
