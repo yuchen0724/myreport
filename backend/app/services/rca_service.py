@@ -209,6 +209,13 @@ class RcaService:
             .all()
         )
 
+    def get_task(self, task_id: str) -> Optional[RcaAnalysisTask]:
+        return (
+            self.db.query(RcaAnalysisTask)
+            .filter(RcaAnalysisTask.task_id == task_id)
+            .first()
+        )
+
     def delete_task(self, task_id: str) -> bool:
         task = (
             self.db.query(RcaAnalysisTask)

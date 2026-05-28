@@ -39,3 +39,7 @@ export function getRcaAnomalies(taskId) {
 export function rcaDrillDown(data) {
   return request({ url: "/rca/drill-down", method: "post", data })
 }
+
+export function rcaAiAnalysis(taskId) {
+  return fetch(`/api/rca/tasks/${taskId}/ai-analysis`)
+}

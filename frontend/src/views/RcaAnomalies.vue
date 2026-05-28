@@ -54,6 +54,32 @@
       <div ref="chartRef" style="width: 100%; height: 400px"></div>
     </el-card>
 
+    <!-- AI 解读 -->
+    <el-card v-if="anomalies.length && !aiAnalysis" style="margin-bottom: 16px">
+      <el-button
+        type="primary"
+        :loading="aiLoading"
+        @click="handleAiAnalysis"
+        icon="MagicStick"
+      >
+        {{ aiLoading ? 'AI 分析中...' : 'AI 智能解读' }}
+      </el-button>
+      <span style="margin-left: 12px; color: #909399; font-size: 13px">
+        基于当前异常数据生成业务解读报告
+      </span>
+    </el-card>
+
+    <!-- AI 解读结果 -->
+    <el-card v-if="aiAnalysis" style="margin-bottom: 16px">
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <span>🤖 AI 业务解读</span>
+          <el-button size="small" text @click="aiAnalysis = ''">关闭</el-button>
+        </div>
+      </template>
+      <div v-html="renderMarkdown(aiAnalysis)" style="line-height: 1.8; color: #303133"></div>
+    </el-card>
+
     <!-- 异常列表 - 按维度分组 -->
     <div v-if="selectedDim" style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px">
       <el-tag type="info" closable @close="clearFilter">
@@ -150,7 +176,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { getRcaTask, getRcaAnomalies, rcaDrillDown, getRcaConfigs } from '@/api/rca'
+import { getRcaTask, getRcaAnomalies, rcaDrillDown, getRcaConfigs, rcaAiAnalysis } from '@/api/rca'
 import * as echarts from 'echarts/core'
 import { BarChart, TreemapChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
@@ -165,6 +191,8 @@ const task = ref(null)
 const anomalies = ref([])
 const loading = ref(false)
 const drillDimensions = ref([])  // 从配置获取的下钻维度列表
+const aiLoading = ref(false)
+const aiAnalysis = ref('')
 
 const dimLabel = {
   operation_category1_name: '品类异常',
@@ -198,6 +226,51 @@ const groupedAnomalies = computed(() => {
 })
 
 const clearFilter = () => { selectedDim.value = null }
+
+// AI 解读
+const handleAiAnalysis = async () => {
+  aiLoading.value = true
+  aiAnalysis.value = ''
+  try {
+    const res = await rcaAiAnalysis(taskId)
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = decoder.decode(value)
+      const lines = chunk.split('\n')
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6)
+          if (data === '[DONE]') break
+          if (data.startsWith('[ERROR]')) {
+            ElMessage.error('AI 分析失败: ' + data.slice(8))
+            break
+          }
+          aiAnalysis.value += data
+        }
+      }
+    }
+  } catch (e) {
+    ElMessage.error('AI 分析请求失败: ' + (e.message || e))
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+const renderMarkdown = (text) => {
+  if (!text) return ''
+  return text
+    .replace(/^### (.+)$/gm, '<h3 style="margin: 16px 0 8px; color: #303133">$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2 style="margin: 20px 0 10px; color: #303133; border-bottom: 1px solid #eee; padding-bottom: 6px">$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1 style="margin: 24px 0 12px; color: #303133">$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/^- (.+)$/gm, '<li style="margin: 4px 0; margin-left: 20px">$1</li>')
+    .replace(/^(\d+)\. (.+)$/gm, '<li style="margin: 4px 0; margin-left: 20px">$2</li>')
+    .replace(/\n{2,}/g, '<br/>')
+    .replace(/\n/g, '<br/>')
+}
 
 const formatVal = (v) => {
   if (v == null) return '-'
