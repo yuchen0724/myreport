@@ -154,10 +154,16 @@ const handleExpand = async (row, expanded) => {
   row._drillLoading = true
   try {
     const dim = Object.keys(row.dimension_path)[0]
+    const dimVal = row.dimension_path[dim]
+    // 自动选下一个下钻维度
+    const dims = ['operation_category1_name', 'store_code', 'matnr']
+    const curIdx = dims.indexOf(dim)
+    const nextDim = curIdx >= 0 && curIdx < dims.length - 1 ? dims[curIdx + 1] : 'matnr'
     const res = await rcaDrillDown({
       task_id: taskId,
       metric_name: row.metric_name,
-      dimension: dim,
+      dimension: nextDim,
+      filters: { [dim]: dimVal },
     })
     row._drillData = (res.data || res).rows || []
   } catch (e) {
