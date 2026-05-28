@@ -35,12 +35,20 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>异常贡献分析</span>
-          <el-radio-group v-model="chartType" size="small" @change="renderChart">
-            <el-radio-button value="waterfall">瀑布图</el-radio-button>
-            <el-radio-button value="compare">对比柱状图</el-radio-button>
-            <el-radio-button value="rank">下降排名</el-radio-button>
-            <el-radio-button value="treemap">树图</el-radio-button>
-          </el-radio-group>
+          <div style="display: flex; gap: 12px; align-items: center">
+            <el-select v-model="chartDimFilter" size="small" style="width: 120px" @change="renderChart">
+              <el-option label="全部维度" value="all" />
+              <el-option label="品类" value="operation_category1_name" />
+              <el-option label="门店" value="store_code" />
+              <el-option label="商品" value="matnr" />
+            </el-select>
+            <el-radio-group v-model="chartType" size="small" @change="renderChart">
+              <el-radio-button value="waterfall">瀑布图</el-radio-button>
+              <el-radio-button value="compare">对比柱状图</el-radio-button>
+              <el-radio-button value="rank">下降排名</el-radio-button>
+              <el-radio-button value="treemap">树图</el-radio-button>
+            </el-radio-group>
+          </div>
         </div>
       </template>
       <div ref="chartRef" style="width: 100%; height: 400px"></div>
@@ -199,6 +207,7 @@ const formatVal = (v) => {
 // 图表
 const chartRef = ref(null)
 const chartType = ref('waterfall')
+const chartDimFilter = ref('all')
 const selectedDim = ref(null)  // 点击图表选中的维度
 let chartInstance = null
 
@@ -209,7 +218,14 @@ const getChartLabels = (a) => {
 }
 
 const getSorted = () => {
-  return [...anomalies.value]
+  let list = anomalies.value
+  if (chartDimFilter.value !== 'all') {
+    list = list.filter(a => {
+      const dim = Object.keys(a.dimension_path).find(k => k !== 'name')
+      return dim === chartDimFilter.value
+    })
+  }
+  return [...list]
     .sort((a, b) => Math.abs(b.change_pct || 0) - Math.abs(a.change_pct || 0))
     .slice(0, 10)
 }
