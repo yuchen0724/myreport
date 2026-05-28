@@ -32,8 +32,18 @@
 
     <!-- 瀑布图 -->
     <el-card v-if="anomalies.length" style="margin-bottom: 16px">
-      <template #header><span>异常贡献瀑布图</span></template>
-      <div ref="waterfallRef" style="width: 100%; height: 400px"></div>
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <span>异常贡献分析</span>
+          <el-radio-group v-model="chartType" size="small" @change="renderChart">
+            <el-radio-button value="waterfall">瀑布图</el-radio-button>
+            <el-radio-button value="compare">对比柱状图</el-radio-button>
+            <el-radio-button value="rank">下降排名</el-radio-button>
+            <el-radio-button value="treemap">树图</el-radio-button>
+          </el-radio-group>
+        </div>
+      </template>
+      <div ref="chartRef" style="width: 100%; height: 400px"></div>
     </el-card>
 
     <!-- 异常列表 - 按维度分组 -->
@@ -128,11 +138,11 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getRcaTask, getRcaAnomalies, rcaDrillDown, getRcaConfigs } from '@/api/rca'
 import * as echarts from 'echarts/core'
-import { BarChart } from 'echarts/charts'
+import { BarChart, TreemapChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
-echarts.use([BarChart, GridComponent, TooltipComponent, CanvasRenderer])
+echarts.use([BarChart, TreemapChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 const route = useRoute()
 const taskId = route.params.taskId
@@ -172,94 +182,127 @@ const formatVal = (v) => {
   return (v / 10000).toFixed(2) + '万'
 }
 
-// 瀑布图
-const waterfallRef = ref(null)
+// 图表
+const chartRef = ref(null)
+const chartType = ref('waterfall')
 let chartInstance = null
 
-const renderWaterfall = () => {
-  if (!waterfallRef.value || !anomalies.value.length) return
-  if (chartInstance) chartInstance.dispose()
-  chartInstance = echarts.init(waterfallRef.value)
+const getChartLabels = (a) => {
+  const dim = Object.keys(a.dimension_path).find(k => k !== 'name')
+  const name = a.dimension_path.name || a.dimension_path[dim]
+  return name.length > 10 ? name.slice(0, 10) + '…' : name
+}
 
-  // 按贡献度排序，取 top 10
-  const sorted = [...anomalies.value]
-    .sort((a, b) => (a.contribution_pct || 0) - (b.contribution_pct || 0))
+const getSorted = () => {
+  return [...anomalies.value]
+    .sort((a, b) => Math.abs(b.change_pct || 0) - Math.abs(a.change_pct || 0))
     .slice(0, 10)
+}
 
-  const names = sorted.map(a => {
-    const dim = Object.keys(a.dimension_path).find(k => k !== 'name')
-    const name = a.dimension_path.name || a.dimension_path[dim]
-    return name.length > 8 ? name.slice(0, 8) + '…' : name
-  })
-  const values = sorted.map(a => Math.abs(a.change_pct || 0))
+const tooltipFormatter = (sorted) => (params) => {
+  const p = Array.isArray(params) ? params[0] : params
+  const idx = p.dataIndex ?? p.treePathInfo?.[1]?.dataIndex
+  if (idx == null || !sorted[idx]) return ''
+  const a = sorted[idx]
+  const dim = Object.keys(a.dimension_path).find(k => k !== 'name')
+  return `<b>${a.dimension_path.name || a.dimension_path[dim]}</b><br/>`
+    + `变化: ${a.change_pct}%<br/>`
+    + `贡献度: ${a.contribution_pct}%<br/>`
+    + `当前: ${formatVal(a.current_value)}<br/>`
+    + `基线: ${formatVal(a.baseline_value)}`
+}
 
-  // 瀑布图：透明底座 + 实际值
-  let cumulative = 0
-  const baseData = []
-  const barData = []
-  for (const v of values) {
-    baseData.push(cumulative)
-    barData.push(v)
-    cumulative += v
+const renderChart = () => {
+  if (!chartRef.value || !anomalies.value.length) return
+  if (chartInstance) chartInstance.dispose()
+  chartInstance = echarts.init(chartRef.value)
+
+  const sorted = getSorted()
+  const names = sorted.map(getChartLabels)
+
+  const optFn = { waterfall: optWaterfall, compare: optCompare, rank: optRank, treemap: optTreemap }
+  chartInstance.setOption((optFn[chartType.value] || optWaterfall)(sorted, names))
+}
+
+function optWaterfall(sorted, names) {
+  let cum = 0
+  const baseData = [], barData = []
+  for (const a of sorted) {
+    baseData.push(cum)
+    barData.push(Math.abs(a.change_pct || 0))
+    cum += Math.abs(a.change_pct || 0)
   }
-
-  chartInstance.setOption({
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      formatter: (params) => {
-        const bar = params.find(p => p.seriesName === '下降幅度')
-        if (!bar) return ''
-        const a = sorted[bar.dataIndex]
-        const dim = Object.keys(a.dimension_path).find(k => k !== 'name')
-        return `<b>${a.dimension_path.name || a.dimension_path[dim]}</b><br/>`
-          + `变化: ${a.change_pct}%<br/>`
-          + `贡献度: ${a.contribution_pct}%<br/>`
-          + `当前: ${formatVal(a.current_value)}<br/>`
-          + `基线: ${formatVal(a.baseline_value)}`
-      }
-    },
-    grid: { left: 80, right: 30, top: 20, bottom: 60 },
-    xAxis: {
-      type: 'category',
-      data: names,
-      axisLabel: { rotate: 30, fontSize: 11 },
-    },
-    yAxis: {
-      type: 'value',
-      name: '累计下降 %',
-      axisLabel: { formatter: '{value}%' },
-    },
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: tooltipFormatter(sorted) },
+    grid: { left: 80, right: 30, top: 20, bottom: 80 },
+    xAxis: { type: 'category', data: names, axisLabel: { rotate: 30, fontSize: 11 } },
+    yAxis: { type: 'value', name: '累计下降 %', axisLabel: { formatter: '{value}%' } },
     series: [
-      {
-        name: '底座',
-        type: 'bar',
-        stack: 'waterfall',
-        itemStyle: { color: 'transparent' },
-        data: baseData,
-        emphasis: { itemStyle: { color: 'transparent' } },
-      },
-      {
-        name: '下降幅度',
-        type: 'bar',
-        stack: 'waterfall',
-        itemStyle: {
-          color: (params) => {
-            const v = sorted[params.dataIndex]
-            return v && Math.abs(v.change_pct) >= 30 ? '#f56c6c' : '#e6a23c'
-          },
-          borderRadius: [4, 4, 0, 0],
-        },
-        label: {
-          show: true,
-          position: 'top',
-          formatter: (p) => `-${p.value.toFixed(1)}%`,
-          fontSize: 11,
-        },
-        data: barData,
-      },
+      { name: '底座', type: 'bar', stack: 'w', itemStyle: { color: 'transparent' }, data: baseData, emphasis: { itemStyle: { color: 'transparent' } } },
+      { name: '下降', type: 'bar', stack: 'w', itemStyle: { color: p => Math.abs(sorted[p.dataIndex]?.change_pct) >= 30 ? '#f56c6c' : '#e6a23c', borderRadius: [4, 4, 0, 0] },
+        label: { show: true, position: 'top', formatter: p => `-${p.value.toFixed(1)}%`, fontSize: 11 }, data: barData },
     ],
-  })
+  }
+}
+
+function optCompare(sorted, names) {
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: tooltipFormatter(sorted) },
+    legend: { data: ['当前值', '基线值'], bottom: 0 },
+    grid: { left: 80, right: 30, top: 20, bottom: 50 },
+    xAxis: { type: 'category', data: names, axisLabel: { rotate: 30, fontSize: 11 } },
+    yAxis: { type: 'value', name: '万元', axisLabel: { formatter: v => (v / 10000).toFixed(0) } },
+    series: [
+      { name: '当前值', type: 'bar', barWidth: '30%', itemStyle: { color: '#409eff', borderRadius: [4, 4, 0, 0] },
+        data: sorted.map(a => a.current_value || 0) },
+      { name: '基线值', type: 'bar', barWidth: '30%', itemStyle: { color: '#909399', borderRadius: [4, 4, 0, 0] },
+        data: sorted.map(a => a.baseline_value || 0) },
+    ],
+  }
+}
+
+function optRank(sorted, names) {
+  const reversed = [...sorted].reverse()
+  const rNames = reversed.map(getChartLabels)
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: params => {
+      const p = params[0]
+      const a = reversed[p.dataIndex]
+      const dim = Object.keys(a.dimension_path).find(k => k !== 'name')
+      return `<b>${a.dimension_path.name || a.dimension_path[dim]}</b><br/>变化: ${a.change_pct}%`
+    }},
+    grid: { left: 120, right: 40, top: 10, bottom: 20 },
+    xAxis: { type: 'value', axisLabel: { formatter: v => `${v}%` } },
+    yAxis: { type: 'category', data: rNames, axisLabel: { fontSize: 11 } },
+    series: [{
+      type: 'bar', barWidth: '60%',
+      itemStyle: { color: p => Math.abs(reversed[p.dataIndex]?.change_pct) >= 30 ? '#f56c6c' : '#e6a23c', borderRadius: [0, 4, 4, 0] },
+      label: { show: true, position: 'right', formatter: p => `${reversed[p.dataIndex]?.change_pct}%`, fontSize: 11 },
+      data: reversed.map(a => Math.abs(a.change_pct || 0)),
+    }],
+  }
+}
+
+function optTreemap(sorted) {
+  return {
+    tooltip: { formatter: params => {
+      const a = sorted.find(s => getChartLabels(s) === params.name)
+      if (!a) return ''
+      const dim = Object.keys(a.dimension_path).find(k => k !== 'name')
+      return `<b>${a.dimension_path.name || a.dimension_path[dim]}</b><br/>`
+        + `变化: ${a.change_pct}%<br/>贡献度: ${a.contribution_pct}%`
+    }},
+    series: [{
+      type: 'treemap', roam: false,
+      breadcrumb: { show: false },
+      label: { formatter: p => `${p.name}\n${p.value}%`, fontSize: 12 },
+      data: sorted.map(a => ({
+        name: getChartLabels(a),
+        value: Math.abs(a.contribution_pct || 0.01),
+        itemStyle: { color: Math.abs(a.change_pct) >= 30 ? '#f56c6c' : '#e6a23c' },
+      })),
+    }],
+  }
 }
 
 const loadData = async () => {
@@ -279,7 +322,7 @@ const loadData = async () => {
     const cfg = configs.find(c => c.id === task.value?.metric_config_id)
     drillDimensions.value = cfg?.drill_dimensions || ['operation_category1_name', 'store_code', 'matnr']
     await nextTick()
-    renderWaterfall()
+    renderChart()
   } catch (e) {
     console.error('Load anomalies failed:', e)
   } finally {
