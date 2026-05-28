@@ -128,8 +128,7 @@ const drillDimensions = ref([])  // 从配置获取的下钻维度列表
 
 const formatVal = (v) => {
   if (v == null) return '-'
-  if (Math.abs(v) >= 10000) return (v / 10000).toFixed(1) + '万'
-  return v.toFixed(2)
+  return (v / 10000).toFixed(2) + '万'
 }
 
 const loadData = async () => {
