@@ -105,22 +105,23 @@
     </el-card>
 
     <!-- 配置管理弹窗 -->
-    <el-dialog v-model="showConfigDialog" title="指标配置管理" width="800px">
+    <el-dialog v-model="showConfigDialog" title="指标配置管理" width="960px" :style="{ maxHeight: '80vh' }" class="config-dialog">
+      <div class="config-dialog-body">
       <el-button type="primary" size="small" style="margin-bottom: 12px" @click="showAddConfig = true">
         新增配置
       </el-button>
-      <el-table :data="configs" style="width: 100%">
-        <el-table-column prop="label" label="指标名" width="120" />
-        <el-table-column prop="metric_field" label="字段" width="200" show-overflow-tooltip />
-        <el-table-column prop="source_table" label="数据表" width="250" show-overflow-tooltip />
-        <el-table-column prop="threshold_value" label="阈值" width="80" />
+      <el-table :data="configs" style="width: 100%" :max-height="320">
+        <el-table-column prop="label" label="指标名" width="100" />
+        <el-table-column prop="metric_field" label="字段" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="source_table" label="数据表" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="threshold_value" label="阈值" width="70" />
         <el-table-column prop="compare_type" label="对比方式" width="80" />
-        <el-table-column label="下钻维度" width="200">
+        <el-table-column label="下钻维度" min-width="160">
           <template #default="{ row }">
             <el-tag v-for="d in row.drill_dimensions" :key="d" size="small" style="margin: 2px">{{ d }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120">
+        <el-table-column label="操作" width="110" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="handleEditConfig(row)">编辑</el-button>
             <el-popconfirm title="确认删除?" @confirm="handleDeleteConfig(row.id)">
@@ -133,110 +134,115 @@
       </el-table>
 
       <!-- 新增配置表单 -->
-      <el-form
-        v-if="showAddConfig"
-        :model="newConfig"
-        label-width="80px"
-        style="margin-top: 16px; border-top: 1px solid #eee; padding-top: 16px"
-      >
-        <el-row :gutter="12">
-          <el-col :span="8">
-            <el-form-item label="指标名">
-              <el-input v-model="newConfig.label" placeholder="如: 实销金额" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="字段名">
-              <el-input v-model="newConfig.metric_field" placeholder="如: actual_sale_untaxed_amt" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="阈值">
-              <el-input-number v-model="newConfig.threshold_value" :min="1" :max="100" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="12">
-          <el-col :span="12">
-            <el-form-item label="数据表">
-              <el-input v-model="newConfig.source_table" placeholder="Doris 全表名" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="6">
-            <el-form-item label="集团ID">
-              <el-input-number v-model="newConfig.group_id" :min="1" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="6">
-            <el-form-item label="数据源">
-              <el-input-number v-model="newConfig.data_source_id" :min="1" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item>
-          <el-button type="primary" @click="handleAddConfig">保存</el-button>
-          <el-button @click="showAddConfig = false">取消</el-button>
-        </el-form-item>
-      </el-form>
+      <el-collapse-transition>
+        <el-form
+          v-if="showAddConfig"
+          :model="newConfig"
+          label-width="80px"
+          style="margin-top: 16px; border-top: 1px solid #eee; padding-top: 16px"
+        >
+          <el-row :gutter="16">
+            <el-col :span="8">
+              <el-form-item label="指标名">
+                <el-input v-model="newConfig.label" placeholder="如: 实销金额" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="字段名">
+                <el-input v-model="newConfig.metric_field" placeholder="如: actual_sale_untaxed_amt" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="阈值">
+                <el-input-number v-model="newConfig.threshold_value" :min="1" :max="100" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-form-item label="数据表">
+                <el-input v-model="newConfig.source_table" placeholder="Doris 全表名" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="6">
+              <el-form-item label="集团ID">
+                <el-input-number v-model="newConfig.group_id" :min="1" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="6">
+              <el-form-item label="数据源">
+                <el-input-number v-model="newConfig.data_source_id" :min="1" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-form-item>
+            <el-button type="primary" @click="handleAddConfig">保存</el-button>
+            <el-button @click="showAddConfig = false">取消</el-button>
+          </el-form-item>
+        </el-form>
+      </el-collapse-transition>
 
       <!-- 编辑配置表单 -->
-      <el-form
-        v-if="editingConfig"
-        :model="editingConfig"
-        label-width="80px"
-        style="margin-top: 16px; border-top: 1px solid #eee; padding-top: 16px"
-      >
-        <h4 style="margin: 0 0 12px">编辑: {{ editingConfig.label }}</h4>
-        <el-row :gutter="12">
-          <el-col :span="8">
-            <el-form-item label="指标名">
-              <el-input v-model="editingConfig.label" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="字段名">
-              <el-input v-model="editingConfig.metric_field" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="阈值">
-              <el-input-number v-model="editingConfig.threshold_value" :min="1" :max="100" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="12">
-          <el-col :span="12">
-            <el-form-item label="数据表">
-              <el-input v-model="editingConfig.source_table" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="6">
-            <el-form-item label="集团ID">
-              <el-input-number v-model="editingConfig.group_id" :min="1" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="6">
-            <el-form-item label="数据源">
-              <el-input-number v-model="editingConfig.data_source_id" :min="1" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item label="下钻维度">
-          <el-select v-model="editingConfig.drill_dimensions" multiple style="width: 100%">
-            <el-option label="营运类目1级" value="operation_category1_name" />
-            <el-option label="营运类目2级" value="operation_category2_name" />
-            <el-option label="采销类目1级" value="purchase_category1_name" />
-            <el-option label="门店" value="store_code" />
-            <el-option label="商品" value="matnr" />
-            <el-option label="供应商" value="supplier_name" />
-            <el-option label="品牌" value="brand_flag" />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="handleUpdateConfig">保存修改</el-button>
-          <el-button @click="editingConfig = null">取消</el-button>
-        </el-form-item>
-      </el-form>
+      <el-collapse-transition>
+        <el-form
+          v-if="editingConfig"
+          :model="editingConfig"
+          label-width="80px"
+          style="margin-top: 16px; border-top: 1px solid #eee; padding-top: 16px"
+        >
+          <h4 style="margin: 0 0 12px">编辑: {{ editingConfig.label }}</h4>
+          <el-row :gutter="16">
+            <el-col :span="8">
+              <el-form-item label="指标名">
+                <el-input v-model="editingConfig.label" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="字段名">
+                <el-input v-model="editingConfig.metric_field" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="阈值">
+                <el-input-number v-model="editingConfig.threshold_value" :min="1" :max="100" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-form-item label="数据表">
+                <el-input v-model="editingConfig.source_table" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="6">
+              <el-form-item label="集团ID">
+                <el-input-number v-model="editingConfig.group_id" :min="1" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="6">
+              <el-form-item label="数据源">
+                <el-input-number v-model="editingConfig.data_source_id" :min="1" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-form-item label="下钻维度">
+            <el-select v-model="editingConfig.drill_dimensions" multiple style="width: 100%">
+              <el-option label="营运类目1级" value="operation_category1_name" />
+              <el-option label="营运类目2级" value="operation_category2_name" />
+              <el-option label="采销类目1级" value="purchase_category1_name" />
+              <el-option label="门店" value="store_code" />
+              <el-option label="商品" value="matnr" />
+              <el-option label="供应商" value="supplier_name" />
+              <el-option label="品牌" value="brand_flag" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="handleUpdateConfig">保存修改</el-button>
+            <el-button @click="editingConfig = null">取消</el-button>
+          </el-form-item>
+        </el-form>
+      </el-collapse-transition>
+      </div>
     </el-dialog>
   </div>
 </template>
@@ -373,5 +379,15 @@ onMounted(loadData)
 .text-success {
   color: #67c23a;
   font-weight: bold;
+}
+</style>
+<style>
+.config-dialog .el-dialog__body {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+.config-dialog-body {
+  min-height: 200px;
 }
 </style>
