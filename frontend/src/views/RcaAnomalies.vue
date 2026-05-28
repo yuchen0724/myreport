@@ -77,7 +77,7 @@
           <el-button size="small" text @click="aiAnalysis = ''">关闭</el-button>
         </div>
       </template>
-      <div v-html="renderMarkdown(aiAnalysis)" style="line-height: 1.8; color: #303133"></div>
+      <div v-html="renderMarkdown(aiAnalysis)" style="line-height: 1.8; color: #303133; max-width: 900px"></div>
     </el-card>
 
     <!-- 异常列表 - 按维度分组 -->
@@ -261,15 +261,61 @@ const handleAiAnalysis = async () => {
 
 const renderMarkdown = (text) => {
   if (!text) return ''
-  return text
-    .replace(/^### (.+)$/gm, '<h3 style="margin: 16px 0 8px; color: #303133">$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2 style="margin: 20px 0 10px; color: #303133; border-bottom: 1px solid #eee; padding-bottom: 6px">$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1 style="margin: 24px 0 12px; color: #303133">$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-    .replace(/^- (.+)$/gm, '<li style="margin: 4px 0; margin-left: 20px">$1</li>')
-    .replace(/^(\d+)\. (.+)$/gm, '<li style="margin: 4px 0; margin-left: 20px">$2</li>')
-    .replace(/\n{2,}/g, '<br/>')
-    .replace(/\n/g, '<br/>')
+  let html = text
+    // 标题
+    .replace(/^#### (.+)$/gm, '<h4 style="margin: 12px 0 6px; color: #606266; font-size: 14px">$1</h4>')
+    .replace(/^### (.+)$/gm, '<h3 style="margin: 16px 0 8px; color: #303133; font-size: 15px">$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2 style="margin: 20px 0 10px; color: #303133; font-size: 16px; border-bottom: 1px solid #ebeef5; padding-bottom: 6px">$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1 style="margin: 24px 0 12px; color: #303133; font-size: 18px">$1</h1>')
+    // 加粗和行内代码
+    .replace(/\*\*(.+?)\*\*/g, '<b style="color: #303133">$1</b>')
+    .replace(/`(.+?)`/g, '<code style="background: #f5f7fa; padding: 2px 6px; border-radius: 3px; font-size: 13px; color: #e6a23c">$1</code>')
+    // 引用块
+    .replace(/^> (.+)$/gm, '<div style="border-left: 3px solid #409eff; padding: 6px 12px; margin: 8px 0; background: #ecf5ff; color: #409eff; border-radius: 0 4px 4px 0">$1</div>')
+    // 分割线
+    .replace(/^---+$/gm, '<hr style="border: none; border-top: 1px solid #ebeef5; margin: 16px 0">')
+
+  // 处理列表
+  const lines = html.split('\n')
+  let result = []
+  let inList = false
+  let listType = ''
+
+  for (const line of lines) {
+    const ulMatch = line.match(/^- (.+)$/)
+    const olMatch = line.match(/^(\d+)\. (.+)$/)
+
+    if (ulMatch) {
+      if (!inList || listType !== 'ul') {
+        if (inList) result.push(`</${listType}>`)
+        result.push('<ul style="margin: 6px 0; padding-left: 24px; list-style: disc">')
+        inList = true
+        listType = 'ul'
+      }
+      result.push(`<li style="margin: 3px 0; line-height: 1.6">${ulMatch[1]}</li>`)
+    } else if (olMatch) {
+      if (!inList || listType !== 'ol') {
+        if (inList) result.push(`</${listType}>`)
+        result.push('<ol style="margin: 6px 0; padding-left: 24px">')
+        inList = true
+        listType = 'ol'
+      }
+      result.push(`<li style="margin: 3px 0; line-height: 1.6">${olMatch[2]}</li>`)
+    } else {
+      if (inList) {
+        result.push(`</${listType}>`)
+        inList = false
+      }
+      if (line.trim() === '') {
+        result.push('<br/>')
+      } else {
+        result.push(`<p style="margin: 4px 0; line-height: 1.8">${line}</p>`)
+      }
+    }
+  }
+  if (inList) result.push(`</${listType}>`)
+
+  return result.join('')
 }
 
 const formatVal = (v) => {
