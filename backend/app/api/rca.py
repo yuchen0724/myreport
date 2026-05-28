@@ -1,4 +1,5 @@
 """RCA 根因分析 API"""
+import os
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -153,33 +154,20 @@ async def ai_analysis(
 
     summary = "\n".join(summary_lines)
 
-    system_prompt = (
-        "你是一位资深的零售业务数据分析师。请根据以下 RCA 根因分析结果，生成一份专业的业务解读报告。\n\n"
-        "报告格式要求（严格使用 Markdown）：\n"
-        "1. 用 # 标题写报告标题\n"
-        "2. 用 ## 标题划分章节（总体概况、维度分析、TOP3 深度分析、建议）\n"
-        "3. 用 **加粗** 标注关键数字和结论\n"
-        "4. 用 - 无序列表列出要点\n"
-        "5. 用 1. 2. 3. 有序列表列出步骤或建议\n"
-        "6. 用 `代码格式` 标注指标名称和字段名\n"
-        "7. 用 > 引用块标注核心结论或警示\n"
-        "8. 每个章节之间用 --- 分割线分隔\n\n"
-        "内容要求：\n"
-        "- 概述总体变化趋势和严重程度\n"
-        "- 按维度（品类/门店/商品）分析主要异常原因\n"
-        "- 找出贡献度最大的 TOP 3 异常项并深入分析\n"
-        "- 给出 3-5 条可执行的业务建议\n"
-        "- 语言简洁专业，适合管理层阅读\n"
-    )
+    # 读取提示词模板
+    prompts_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'prompts')
+    with open(os.path.join(prompts_dir, 'rca_analysis_system.md'), 'r', encoding='utf-8') as f:
+        system_prompt = f.read().strip()
+    with open(os.path.join(prompts_dir, 'rca_analysis_user.md'), 'r', encoding='utf-8') as f:
+        user_template = f.read().strip()
 
-    user_prompt = (
-        f"指标：{metric_name}\n"
-        f"分析日期：{task.analysis_date}\n"
-        f"对比周期：{task.period_days}天\n"
-        f"总体变化：{task.summary.get('total_change_pct', 0) if task.summary else 0}%\n"
-        f"异常总数：{len(anomalies)}\n\n"
-        f"异常明细：\n{summary}\n\n"
-        f"请生成详细解读报告："
+    user_prompt = user_template.format(
+        metric_name=metric_name,
+        analysis_date=task.analysis_date,
+        period_days=task.period_days,
+        total_change_pct=task.summary.get('total_change_pct', 0) if task.summary else 0,
+        anomaly_count=len(anomalies),
+        anomaly_details=summary,
     )
 
     llm = get_llm_client()
