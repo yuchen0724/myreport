@@ -77,7 +77,7 @@
           <el-button size="small" text @click="aiAnalysis = ''">关闭</el-button>
         </div>
       </template>
-      <div v-html="renderMarkdown(aiAnalysis)" style="line-height: 1.8; color: #303133; max-width: 900px"></div>
+      <div class="ai-report" v-html="renderMarkdown(aiAnalysis)"></div>
     </el-card>
 
     <!-- 异常列表 - 按维度分组 -->
@@ -259,76 +259,14 @@ const handleAiAnalysis = async () => {
   }
 }
 
-const renderMarkdown = (text) => {
-  if (!text) return ''
-  // 先处理多行元素（标题、列表、分割线、引用块）
-  const lines = text.split('\n')
-  let result = []
-  let inUl = false, inOl = false
-
-  const closeLists = () => {
-    if (inUl) { result.push('</ul>'); inUl = false }
-    if (inOl) { result.push('</ol>'); inOl = false }
-  }
-
-  for (const line of lines) {
-    const trimmed = line.trim()
-
-    // 分割线
-    if (/^---+$/.test(trimmed)) {
-      closeLists()
-      result.push('<hr style="border:none;border-top:1px solid #dcdfe6;margin:20px 0">')
-      continue
-    }
-    // 标题
-    const hMatch = trimmed.match(/^(#{1,4})\s+(.+)$/)
-    if (hMatch) {
-      closeLists()
-      const level = hMatch[1].length
-      const fontSize = [20, 17, 15, 14][level - 1]
-      const mb = [16, 14, 12, 10][level - 1]
-      result.push(`<h${level} style="margin:${mb}px 0 8px;color:#303133;font-size:${fontSize}px;font-weight:600;${level <= 2 ? 'border-bottom:1px solid #ebeef5;padding-bottom:6px' : ''}">${inlineFormat(hMatch[2])}</h${level}>`)
-      continue
-    }
-    // 引用块
-    if (/^>\s/.test(trimmed)) {
-      closeLists()
-      const content = inlineFormat(trimmed.replace(/^>\s*/, ''))
-      result.push(`<div style="border-left:3px solid #409eff;padding:10px 16px;margin:10px 0;background:#ecf5ff;color:#409eff;border-radius:0 4px 4px 0;font-size:14px">${content}</div>`)
-      continue
-    }
-    // 无序列表
-    if (/^[-*]\s/.test(trimmed)) {
-      if (!inUl) { closeLists(); result.push('<ul style="margin:8px 0;padding-left:24px">'); inUl = true }
-      result.push(`<li style="margin:5px 0;line-height:1.7;font-size:14px">${inlineFormat(trimmed.replace(/^[-*]\s/, ''))}</li>`)
-      continue
-    }
-    // 有序列表
-    const olMatch = trimmed.match(/^(\d+)[.)]\s+(.+)$/)
-    if (olMatch) {
-      if (!inOl) { closeLists(); result.push('<ol style="margin:8px 0;padding-left:24px">'); inOl = true }
-      result.push(`<li style="margin:5px 0;line-height:1.7;font-size:14px">${inlineFormat(olMatch[2])}</li>`)
-      continue
-    }
-
-    closeLists()
-    // 空行 → 段落间距
-    if (trimmed === '') {
-      result.push('<div style="height:8px"></div>')
-    } else {
-      result.push(`<p style="margin:6px 0;line-height:1.8;font-size:14px;color:#606266">${inlineFormat(trimmed)}</p>`)
-    }
-  }
-  closeLists()
-  return result.join('')
-}
-
-// 行内格式：加粗、行内代码
-function inlineFormat(text) {
-  return text
-    .replace(/\*\*(.+?)\*\*/g, '<b style="color:#303133;font-weight:600">$1</b>')
-    .replace(/`(.+?)`/g, '<code style="background:#f5f7fa;padding:2px 6px;border-radius:3px;font-size:13px;color:#e6a23c;font-family:monospace">$1</code>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+const renderMarkdown = (html) => {
+  // LLM 直接输出 HTML，前端只做安全清理
+  if (!html) return ''
+  return html
+    // 移除 script 标签防止 XSS
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    // 移除 onclick 等事件属性
+    .replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, '')
 }
 
 const formatVal = (v) => {
@@ -563,5 +501,47 @@ onUnmounted(() => {
 .text-success {
   color: #67c23a;
   font-weight: bold;
+}
+</style>
+<style>
+.ai-report {
+  line-height: 1.8;
+  color: #303133;
+  max-width: 900px;
+  font-size: 14px;
+}
+.ai-report h2 {
+  margin: 20px 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+  color: #303133;
+  border-bottom: 1px solid #ebeef5;
+  padding-bottom: 6px;
+}
+.ai-report h3 {
+  margin: 16px 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+.ai-report p {
+  margin: 6px 0;
+}
+.ai-report ul, .ai-report ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+.ai-report li {
+  margin: 4px 0;
+  line-height: 1.7;
+}
+.ai-report b {
+  color: #303133;
+  font-weight: 600;
+}
+.ai-report hr {
+  border: none;
+  border-top: 1px solid #ebeef5;
+  margin: 20px 0;
 }
 </style>
