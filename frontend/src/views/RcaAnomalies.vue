@@ -261,61 +261,74 @@ const handleAiAnalysis = async () => {
 
 const renderMarkdown = (text) => {
   if (!text) return ''
-  let html = text
-    // 标题
-    .replace(/^#### (.+)$/gm, '<h4 style="margin: 12px 0 6px; color: #606266; font-size: 14px">$1</h4>')
-    .replace(/^### (.+)$/gm, '<h3 style="margin: 16px 0 8px; color: #303133; font-size: 15px">$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2 style="margin: 20px 0 10px; color: #303133; font-size: 16px; border-bottom: 1px solid #ebeef5; padding-bottom: 6px">$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1 style="margin: 24px 0 12px; color: #303133; font-size: 18px">$1</h1>')
-    // 加粗和行内代码
-    .replace(/\*\*(.+?)\*\*/g, '<b style="color: #303133">$1</b>')
-    .replace(/`(.+?)`/g, '<code style="background: #f5f7fa; padding: 2px 6px; border-radius: 3px; font-size: 13px; color: #e6a23c">$1</code>')
-    // 引用块
-    .replace(/^> (.+)$/gm, '<div style="border-left: 3px solid #409eff; padding: 6px 12px; margin: 8px 0; background: #ecf5ff; color: #409eff; border-radius: 0 4px 4px 0">$1</div>')
-    // 分割线
-    .replace(/^---+$/gm, '<hr style="border: none; border-top: 1px solid #ebeef5; margin: 16px 0">')
-
-  // 处理列表
-  const lines = html.split('\n')
+  // 先处理多行元素（标题、列表、分割线、引用块）
+  const lines = text.split('\n')
   let result = []
-  let inList = false
-  let listType = ''
+  let inUl = false, inOl = false
+
+  const closeLists = () => {
+    if (inUl) { result.push('</ul>'); inUl = false }
+    if (inOl) { result.push('</ol>'); inOl = false }
+  }
 
   for (const line of lines) {
-    const ulMatch = line.match(/^- (.+)$/)
-    const olMatch = line.match(/^(\d+)\. (.+)$/)
+    const trimmed = line.trim()
 
-    if (ulMatch) {
-      if (!inList || listType !== 'ul') {
-        if (inList) result.push(`</${listType}>`)
-        result.push('<ul style="margin: 6px 0; padding-left: 24px; list-style: disc">')
-        inList = true
-        listType = 'ul'
-      }
-      result.push(`<li style="margin: 3px 0; line-height: 1.6">${ulMatch[1]}</li>`)
-    } else if (olMatch) {
-      if (!inList || listType !== 'ol') {
-        if (inList) result.push(`</${listType}>`)
-        result.push('<ol style="margin: 6px 0; padding-left: 24px">')
-        inList = true
-        listType = 'ol'
-      }
-      result.push(`<li style="margin: 3px 0; line-height: 1.6">${olMatch[2]}</li>`)
+    // 分割线
+    if (/^---+$/.test(trimmed)) {
+      closeLists()
+      result.push('<hr style="border:none;border-top:1px solid #dcdfe6;margin:20px 0">')
+      continue
+    }
+    // 标题
+    const hMatch = trimmed.match(/^(#{1,4})\s+(.+)$/)
+    if (hMatch) {
+      closeLists()
+      const level = hMatch[1].length
+      const fontSize = [20, 17, 15, 14][level - 1]
+      const mb = [16, 14, 12, 10][level - 1]
+      result.push(`<h${level} style="margin:${mb}px 0 8px;color:#303133;font-size:${fontSize}px;font-weight:600;${level <= 2 ? 'border-bottom:1px solid #ebeef5;padding-bottom:6px' : ''}">${inlineFormat(hMatch[2])}</h${level}>`)
+      continue
+    }
+    // 引用块
+    if (/^>\s/.test(trimmed)) {
+      closeLists()
+      const content = inlineFormat(trimmed.replace(/^>\s*/, ''))
+      result.push(`<div style="border-left:3px solid #409eff;padding:10px 16px;margin:10px 0;background:#ecf5ff;color:#409eff;border-radius:0 4px 4px 0;font-size:14px">${content}</div>`)
+      continue
+    }
+    // 无序列表
+    if (/^[-*]\s/.test(trimmed)) {
+      if (!inUl) { closeLists(); result.push('<ul style="margin:8px 0;padding-left:24px">'); inUl = true }
+      result.push(`<li style="margin:5px 0;line-height:1.7;font-size:14px">${inlineFormat(trimmed.replace(/^[-*]\s/, ''))}</li>`)
+      continue
+    }
+    // 有序列表
+    const olMatch = trimmed.match(/^(\d+)[.)]\s+(.+)$/)
+    if (olMatch) {
+      if (!inOl) { closeLists(); result.push('<ol style="margin:8px 0;padding-left:24px">'); inOl = true }
+      result.push(`<li style="margin:5px 0;line-height:1.7;font-size:14px">${inlineFormat(olMatch[2])}</li>`)
+      continue
+    }
+
+    closeLists()
+    // 空行 → 段落间距
+    if (trimmed === '') {
+      result.push('<div style="height:8px"></div>')
     } else {
-      if (inList) {
-        result.push(`</${listType}>`)
-        inList = false
-      }
-      if (line.trim() === '') {
-        result.push('<br/>')
-      } else {
-        result.push(`<p style="margin: 4px 0; line-height: 1.8">${line}</p>`)
-      }
+      result.push(`<p style="margin:6px 0;line-height:1.8;font-size:14px;color:#606266">${inlineFormat(trimmed)}</p>`)
     }
   }
-  if (inList) result.push(`</${listType}>`)
-
+  closeLists()
   return result.join('')
+}
+
+// 行内格式：加粗、行内代码
+function inlineFormat(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<b style="color:#303133;font-weight:600">$1</b>')
+    .replace(/`(.+?)`/g, '<code style="background:#f5f7fa;padding:2px 6px;border-radius:3px;font-size:13px;color:#e6a23c;font-family:monospace">$1</code>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
 }
 
 const formatVal = (v) => {
