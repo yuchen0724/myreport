@@ -50,10 +50,10 @@
                 <el-table :data="row._drillData" size="small" border>
                   <el-table-column prop="dim_val" label="维度值" width="200" />
                   <el-table-column label="当前值" width="120">
-                    <template #default="{ row: r }">{{ formatVal(r.current_val) }}</template>
+                    <template #default="{ row: r }">{{ formatVal(r.current_value ?? r.current_val) }}</template>
                   </el-table-column>
                   <el-table-column label="基线值" width="120">
-                    <template #default="{ row: r }">{{ formatVal(r.baseline_value) }}</template>
+                    <template #default="{ row: r }">{{ formatVal(r.baseline_value ?? r.baseline_val) }}</template>
                   </el-table-column>
                   <el-table-column label="变化" width="100">
                     <template #default="{ row: r }">

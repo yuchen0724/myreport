@@ -93,8 +93,8 @@ class RcaSqlBuilder:
             CASE WHEN baseline_val > 0
                  THEN ROUND((current_val - baseline_val) / baseline_val * 100, 2)
                  ELSE 0 END AS change_pct,
-            CASE WHEN SUM(abs_diff) OVER () > 0
-                 THEN ROUND(abs_diff / SUM(abs_diff) OVER () * 100, 2)
+            CASE WHEN SUM(abs_diff) OVER () != 0
+                 THEN ROUND(ABS(abs_diff) / SUM(ABS(abs_diff)) OVER () * 100, 2)
                  ELSE 0 END AS contribution_pct
         FROM diff
         WHERE abs_diff < 0
