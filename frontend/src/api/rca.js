@@ -41,5 +41,8 @@ export function rcaDrillDown(data) {
 }
 
 export function rcaAiAnalysis(taskId) {
-  return fetch(`/api/rca/tasks/${taskId}/ai-analysis`)
+  const token = sessionStorage.getItem('token') || ''
+  return fetch(`/api/rca/tasks/${taskId}/ai-analysis`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  })
 }
