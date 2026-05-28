@@ -48,7 +48,11 @@
               <div v-if="row._drillLoading">加载中...</div>
               <div v-else-if="row._drillData && row._drillData.length">
                 <el-table :data="row._drillData" size="small" border>
-                  <el-table-column prop="dim_val" label="维度值" width="200" />
+                  <el-table-column label="维度值" min-width="200">
+                    <template #default="{ row: r }">
+                      {{ r.dim_name ? r.dim_name + ' (' + r.dim_val + ')' : r.dim_val }}
+                    </template>
+                  </el-table-column>
                   <el-table-column label="当前值" width="120">
                     <template #default="{ row: r }">{{ formatVal(r.current_value ?? r.current_val) }}</template>
                   </el-table-column>
@@ -75,7 +79,7 @@
         <el-table-column label="维度" min-width="200">
           <template #default="{ row }">
             <el-tag v-for="(v, k) in row.dimension_path" :key="k" size="small" style="margin: 2px">
-              {{ k }}: {{ v }}
+              {{ k === 'name' ? v : k + ': ' + v }}
             </el-tag>
           </template>
         </el-table-column>

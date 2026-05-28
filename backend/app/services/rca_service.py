@@ -141,13 +141,25 @@ class RcaService:
                     continue
 
                 col_map = {c: i for i, c in enumerate(cols)}
-                for row in rows[:5]:
+                # 去重：dim_name 可能因 JOIN 产生重复，取第一个
+                seen = set()
+                for row in rows:
+                    if len(seen) >= 5:
+                        break
+                    dim_val = row[col_map["dim_val"]]
+                    if dim_val in seen:
+                        continue
+                    seen.add(dim_val)
                     change_pct = row[col_map.get("change_pct", 0)] or 0
                     if abs(change_pct) >= config.threshold_value:
+                        dim_path = {dim: dim_val}
+                        dim_name = row[col_map.get("dim_name")] if "dim_name" in col_map else None
+                        if dim_name:
+                            dim_path["name"] = dim_name
                         a = RcaAnomaly(
                             task_id=task_id_str,
                             metric_name=config.name,
-                            dimension_path={dim: row[col_map["dim_val"]]},
+                            dimension_path=dim_path,
                             current_value=row[col_map.get("current_val", 0)],
                             baseline_value=row[col_map.get("baseline_val", 0)],
                             change_pct=change_pct,
