@@ -47,6 +47,12 @@
     </el-card>
 
     <!-- 异常列表 - 按维度分组 -->
+    <div v-if="selectedDim" style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px">
+      <el-tag type="info" closable @close="clearFilter">
+        已筛选：{{ selectedDim.dimVal }}
+      </el-tag>
+      <el-button size="small" text @click="clearFilter">清除筛选</el-button>
+    </div>
     <el-card v-for="(group, dimType) in groupedAnomalies" :key="dimType" style="margin-bottom: 16px">
       <template #header>
         <span>{{ dimLabel[dimType] || dimType }}（{{ group.length }}）</span>
@@ -160,7 +166,13 @@ const dimLabel = {
 
 const groupedAnomalies = computed(() => {
   const groups = {}
-  for (const a of anomalies.value) {
+  const list = selectedDim.value
+    ? anomalies.value.filter(a => {
+        const dim = Object.keys(a.dimension_path).find(k => k !== 'name')
+        return dim === selectedDim.value.dimType && a.dimension_path[dim] === selectedDim.value.dimVal
+      })
+    : anomalies.value
+  for (const a of list) {
     const dim = Object.keys(a.dimension_path).find(k => k !== 'name') || 'unknown'
     if (!groups[dim]) groups[dim] = []
     groups[dim].push(a)
@@ -177,6 +189,8 @@ const groupedAnomalies = computed(() => {
   return sorted
 })
 
+const clearFilter = () => { selectedDim.value = null }
+
 const formatVal = (v) => {
   if (v == null) return '-'
   return (v / 10000).toFixed(2) + '万'
@@ -185,6 +199,7 @@ const formatVal = (v) => {
 // 图表
 const chartRef = ref(null)
 const chartType = ref('waterfall')
+const selectedDim = ref(null)  // 点击图表选中的维度
 let chartInstance = null
 
 const getChartLabels = (a) => {
@@ -222,6 +237,22 @@ const renderChart = () => {
 
   const optFn = { waterfall: optWaterfall, compare: optCompare, rank: optRank, treemap: optTreemap }
   chartInstance.setOption((optFn[chartType.value] || optWaterfall)(sorted, names))
+
+  // 点击联动
+  chartInstance.off('click')
+  chartInstance.on('click', (params) => {
+    const idx = params.dataIndex ?? params.treePathInfo?.[1]?.dataIndex
+    if (idx == null || !sorted[idx]) return
+    const a = sorted[idx]
+    const dim = Object.keys(a.dimension_path).find(k => k !== 'name')
+    const dimVal = a.dimension_path[dim]
+    // 再次点击同一项则取消过滤
+    if (selectedDim.value?.dimType === dim && selectedDim.value?.dimVal === dimVal) {
+      selectedDim.value = null
+    } else {
+      selectedDim.value = { dimType: dim, dimVal }
+    }
+  })
 }
 
 function optWaterfall(sorted, names) {
