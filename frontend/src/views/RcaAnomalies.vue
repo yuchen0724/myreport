@@ -30,12 +30,13 @@
       </el-descriptions>
     </el-card>
 
-    <!-- 异常列表 -->
-    <el-card>
-      <template #header><span>异常发现</span></template>
-
+    <!-- 异常列表 - 按维度分组 -->
+    <el-card v-for="(group, dimType) in groupedAnomalies" :key="dimType" style="margin-bottom: 16px">
+      <template #header>
+        <span>{{ dimLabel[dimType] || dimType }}（{{ group.length }}）</span>
+      </template>
       <el-table
-        :data="anomalies"
+        :data="group"
         v-loading="loading"
         style="width: 100%"
         row-key="id"
@@ -76,11 +77,14 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="维度" min-width="200">
+        <el-table-column label="名称" min-width="200">
           <template #default="{ row }">
-            <el-tag v-for="(v, k) in row.dimension_path" :key="k" size="small" style="margin: 2px">
-              {{ k === 'name' ? v : k + ': ' + v }}
-            </el-tag>
+            {{ row.dimension_path.name || row.dimension_path[dimType] }}
+          </template>
+        </el-table-column>
+        <el-table-column label="编码" width="120">
+          <template #default="{ row }">
+            {{ row.dimension_path[dimType] }}
           </template>
         </el-table-column>
         <el-table-column label="当前值" width="120">
@@ -107,14 +111,14 @@
           </template>
         </el-table-column>
       </el-table>
-
-      <el-empty v-if="!loading && anomalies.length === 0" description="未发现异常" />
     </el-card>
+
+    <el-empty v-if="!loading && anomalies.length === 0" description="未发现异常" />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { getRcaTask, getRcaAnomalies, rcaDrillDown, getRcaConfigs } from '@/api/rca'
 
@@ -125,6 +129,31 @@ const task = ref(null)
 const anomalies = ref([])
 const loading = ref(false)
 const drillDimensions = ref([])  // 从配置获取的下钻维度列表
+
+const dimLabel = {
+  operation_category1_name: '品类异常',
+  store_code: '门店异常',
+  matnr: '商品异常',
+}
+
+const groupedAnomalies = computed(() => {
+  const groups = {}
+  for (const a of anomalies.value) {
+    const dim = Object.keys(a.dimension_path).find(k => k !== 'name') || 'unknown'
+    if (!groups[dim]) groups[dim] = []
+    groups[dim].push(a)
+  }
+  // 按维度层级排序：品类 → 门店 → 商品
+  const order = ['operation_category1_name', 'store_code', 'matnr']
+  const sorted = {}
+  for (const k of order) {
+    if (groups[k]) sorted[k] = groups[k]
+  }
+  for (const k of Object.keys(groups)) {
+    if (!sorted[k]) sorted[k] = groups[k]
+  }
+  return sorted
+})
 
 const formatVal = (v) => {
   if (v == null) return '-'
