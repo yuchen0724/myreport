@@ -116,7 +116,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { getRcaTask, getRcaAnomalies, rcaDrillDown } from '@/api/rca'
+import { getRcaTask, getRcaAnomalies, rcaDrillDown, getRcaConfigs } from '@/api/rca'
 
 const route = useRoute()
 const taskId = route.params.taskId
@@ -124,6 +124,7 @@ const taskId = route.params.taskId
 const task = ref(null)
 const anomalies = ref([])
 const loading = ref(false)
+const drillDimensions = ref([])  // 从配置获取的下钻维度列表
 
 const formatVal = (v) => {
   if (v == null) return '-'
@@ -134,13 +135,19 @@ const formatVal = (v) => {
 const loadData = async () => {
   loading.value = true
   try {
-    const [taskRes, anomalyRes] = await Promise.all([getRcaTask(taskId), getRcaAnomalies(taskId)])
+    const [taskRes, anomalyRes, cfgRes] = await Promise.all([
+      getRcaTask(taskId), getRcaAnomalies(taskId), getRcaConfigs()
+    ])
     task.value = taskRes.data || taskRes
     anomalies.value = (anomalyRes.data || anomalyRes).map(a => ({
       ...a,
       _drillData: null,
       _drillLoading: false,
     }))
+    // 获取当前任务对应的配置的下钻维度
+    const configs = cfgRes.data || cfgRes
+    const cfg = configs.find(c => c.id === task.value?.metric_config_id)
+    drillDimensions.value = cfg?.drill_dimensions || ['operation_category1_name', 'store_code', 'matnr']
   } catch (e) {
     console.error('Load anomalies failed:', e)
   } finally {
@@ -155,10 +162,14 @@ const handleExpand = async (row, expanded) => {
   try {
     const dim = Object.keys(row.dimension_path)[0]
     const dimVal = row.dimension_path[dim]
-    // 自动选下一个下钻维度
-    const dims = ['operation_category1_name', 'store_code', 'matnr']
+    // 从配置的维度列表中选下一个
+    const dims = drillDimensions.value
     const curIdx = dims.indexOf(dim)
-    const nextDim = curIdx >= 0 && curIdx < dims.length - 1 ? dims[curIdx + 1] : 'matnr'
+    const nextDim = curIdx >= 0 && curIdx < dims.length - 1 ? dims[curIdx + 1] : null
+    if (!nextDim) {
+      row._drillData = []
+      return
+    }
     const res = await rcaDrillDown({
       task_id: taskId,
       metric_name: row.metric_name,

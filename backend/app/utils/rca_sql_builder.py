@@ -79,8 +79,8 @@ class RcaSqlBuilder:
         if name_info:
             join_table, name_col = name_info
             if join_table:
-                # 需要 JOIN 维表（如 dim_store）
-                name_join = f"LEFT JOIN {join_table} n ON diff.dim_val = n.{dimension}"
+                # 需要 JOIN 维表（如 dim_store），用 MIN 去重避免一对多产生重复行
+                name_join = f"LEFT JOIN (SELECT {dimension}, MIN({name_col}) AS {name_col} FROM {join_table} GROUP BY {dimension}) n ON diff.dim_val = n.{dimension}"
                 name_select = f", n.{name_col} AS dim_name"
             else:
                 # 名称字段在主表中（如 ware_name），CTE 已带上
