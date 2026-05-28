@@ -74,7 +74,10 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>🤖 AI 业务解读</span>
-          <el-button size="small" text @click="aiAnalysis = ''">关闭</el-button>
+          <div style="display: flex; gap: 8px">
+            <el-button size="small" type="primary" plain @click="downloadReport">下载报告</el-button>
+            <el-button size="small" text @click="aiAnalysis = ''">关闭</el-button>
+          </div>
         </div>
       </template>
       <div class="ai-report" v-html="renderMarkdown(aiAnalysis)"></div>
@@ -273,6 +276,42 @@ const renderMarkdown = (html) => {
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     // 移除 onclick 等事件属性
     .replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, '')
+}
+
+const downloadReport = () => {
+  const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>RCA 业务解读报告</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #303133; line-height: 1.8; }
+h2 { font-size: 18px; border-bottom: 1px solid #eee; padding-bottom: 6px; margin: 24px 0 12px; }
+h3 { font-size: 16px; margin: 18px 0 8px; }
+p { margin: 8px 0; }
+ul, ol { margin: 8px 0; padding-left: 24px; }
+li { margin: 4px 0; }
+b { font-weight: 600; }
+hr { border: none; border-top: 1px solid #eee; margin: 24px 0; }
+code { background: #f5f7fa; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+</style>
+</head>
+<body>
+${aiAnalysis.value}
+<hr>
+<p style="color:#909399;font-size:12px;margin-top:32px">生成时间：${new Date().toLocaleString('zh-CN')} | 指标：${task.value?.summary?.metric_name || '实销金额'} | 分析日期：${task.value?.analysis_date || ''}</p>
+</body>
+</html>`
+
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `RCA解读报告_${task.value?.analysis_date || 'report'}.html`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
 
 const formatVal = (v) => {
