@@ -384,10 +384,13 @@ const handleExpand = async (row, expanded) => {
   try {
     const dim = Object.keys(row.dimension_path)[0]
     const dimVal = row.dimension_path[dim]
-    // 从配置的维度列表中选下一个
-    const dims = drillDimensions.value
-    const curIdx = dims.indexOf(dim)
-    const nextDim = curIdx >= 0 && curIdx < dims.length - 1 ? dims[curIdx + 1] : null
+    // 下钻维度映射：支持正向和反向
+    const nextDimMap = {
+      operation_category1_name: 'store_code',
+      store_code: 'matnr',
+      matnr: 'store_code',  // 商品反向下钻到门店
+    }
+    const nextDim = nextDimMap[dim]
     if (!nextDim) {
       row._drillData = []
       return
