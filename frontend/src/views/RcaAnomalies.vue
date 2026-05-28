@@ -235,18 +235,24 @@ const handleAiAnalysis = async () => {
     const res = await rcaAiAnalysis(taskId)
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
+    let buffer = ''
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
-      const chunk = decoder.decode(value)
-      const lines = chunk.split('\n')
+      buffer += decoder.decode(value, { stream: true })
+      // 逐行解析 SSE，只提取 data 内容
+      const lines = buffer.split('\n')
+      buffer = lines.pop() // 保留未完成的行
       for (const line of lines) {
         if (line.startsWith('data: ')) {
-          const data = line.slice(6)
-          if (data === '[DONE]') break
+          const data = line.slice(6).trimEnd()
+          if (data === '[DONE]') {
+            aiAnalysis.value = aiAnalysis.value.trim()
+            return
+          }
           if (data.startsWith('[ERROR]')) {
             ElMessage.error('AI 分析失败: ' + data.slice(8))
-            break
+            return
           }
           aiAnalysis.value += data
         }

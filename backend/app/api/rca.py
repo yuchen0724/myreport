@@ -178,11 +178,12 @@ async def ai_analysis(
             {"role": "user", "content": user_prompt},
         ]
         try:
-            # 用普通 chat 生成完整结果，再逐块输出模拟流式
+            # 用普通 chat 生成完整结果，按行输出
             result = llm.chat(messages, temperature=0.3)
-            chunk_size = 20
-            for i in range(0, len(result), chunk_size):
-                yield f"data: {result[i:i+chunk_size]}\n\n"
+            lines = result.split('\n')
+            for i, line in enumerate(lines):
+                suffix = '\n' if i < len(lines) - 1 else ''
+                yield f"data: {line + suffix}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
             yield f"data: [ERROR] {str(e)}\n\n"
