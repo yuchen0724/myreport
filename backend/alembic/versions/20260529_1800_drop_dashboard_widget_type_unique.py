@@ -14,7 +14,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_constraint("uq_user_widget_type", "dashboard_widget_configs", type_="unique")
+    op.execute(
+        "ALTER TABLE dashboard_widget_configs "
+        "DROP CONSTRAINT IF EXISTS uq_user_widget_type"
+    )
 
 
 def downgrade() -> None:
