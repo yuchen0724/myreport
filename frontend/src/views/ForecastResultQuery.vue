@@ -230,7 +230,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } 
 import { ElMessage } from 'element-plus'
 import { getDataSourceList } from '@/api/data_source'
 import { getForecast, getMyTrainTasks, exportForecastExcel } from '@/api/prediction'
-import * as echarts from 'echarts'
+import echarts from '@/utils/echarts'
 import EnhancedTable from '@/components/EnhancedTable.vue'
 import { useFormPersistence } from '@/composables/useFormPersistence'
 

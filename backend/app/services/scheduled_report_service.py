@@ -3,7 +3,7 @@
 管理定时报表的创建、查询、启停和调度
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from croniter import croniter
@@ -12,6 +12,10 @@ from sqlalchemy.orm import Session
 from app.models.scheduled_report import ScheduledReport, ReportDelivery
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class ScheduledReportService:
@@ -133,7 +137,7 @@ class ScheduledReportService:
 
     def get_enabled_with_next(self) -> List[ScheduledReport]:
         """获取所有启用且需要执行的定时报表"""
-        now = datetime.utcnow()
+        now = _utc_now_naive()
         return (
             self.db.query(ScheduledReport)
             .filter(
@@ -149,7 +153,7 @@ class ScheduledReportService:
         report = self.get(report_id)
         if not report:
             return None
-        report.last_run_at = datetime.utcnow()
+        report.last_run_at = _utc_now_naive()
         self._update_next_run(report)
         self.db.commit()
         self.db.refresh(report)
@@ -167,7 +171,7 @@ class ScheduledReportService:
     @staticmethod
     def _update_next_run(report: ScheduledReport):
         try:
-            cron = croniter(report.cron_expression, datetime.utcnow())
+            cron = croniter(report.cron_expression, _utc_now_naive())
             report.next_run_at = cron.get_next(datetime)
         except Exception:
             pass
@@ -176,7 +180,7 @@ class ScheduledReportService:
     def next_run_time(cron_expression: str) -> Optional[str]:
         """计算 cron 表达式的下次执行时间"""
         try:
-            cron = croniter(cron_expression, datetime.utcnow())
+            cron = croniter(cron_expression, _utc_now_naive())
             next_time = cron.get_next(datetime)
             return next_time.strftime("%Y-%m-%d %H:%M:%S")
         except Exception:

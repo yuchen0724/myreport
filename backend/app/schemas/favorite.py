@@ -1,5 +1,5 @@
 # backend/app/schemas/favorite.py
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
 
@@ -16,12 +16,11 @@ class FavoriteUpdate(BaseModel):
     note: Optional[str] = None
 
 class FavoriteResponse(FavoriteBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int
     created_at: datetime
     # 可选：返回模板信息
     template_name: Optional[str] = None
     template_description: Optional[str] = None
-
-    class Config:
-        from_attributes = True

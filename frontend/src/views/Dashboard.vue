@@ -141,7 +141,7 @@
           :animation="200"
           ghost-class="ghost"
         >
-          <template #item="{ element, index }">
+          <template #item="{ element }">
             <div class="edit-item">
               <div class="drag-handle"><el-icon><Sort /></el-icon></div>
               <div class="edit-item-preview">

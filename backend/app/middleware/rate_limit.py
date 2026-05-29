@@ -133,7 +133,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """限流中间件"""
 
     SKIP_PATHS = {
-        "/health", "/metrics", "/api/stats/metrics",
+        "/health", "/health/live", "/health/ready", "/metrics", "/api/stats/metrics",
         "/docs", "/openapi.json", "/redoc",
         "/api/auth/login", "/api/auth/register",
         "/login", "/register",

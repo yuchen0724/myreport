@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -33,7 +33,3 @@ class DashboardWidgetConfig(Base):
     drilldown_config = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("user_id", "widget_type", name="uq_user_widget_type"),
-    )

@@ -13,6 +13,7 @@ class RcaMetricConfig(Base):
     label = Column(String(200), nullable=False, comment="展示名，如 实销金额")
     metric_field = Column(String(200), nullable=False, comment="Doris 表字段名")
     source_table = Column(String(300), nullable=False, comment="Doris 表全名")
+    semantic_metric_key = Column(String(100), nullable=True, index=True, comment="绑定的语义指标 key")
     threshold_type = Column(String(50), nullable=False, default="percent_change",
                             comment="阈值类型: percent_change / absolute / zscore")
     threshold_value = Column(Float, nullable=False, default=10.0, comment="阈值")

@@ -184,6 +184,7 @@ import * as echarts from 'echarts/core'
 import { BarChart, TreemapChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
+import { sanitizeHtml } from '@/utils/sanitizeHtml'
 
 echarts.use([BarChart, TreemapChart, GridComponent, TooltipComponent, CanvasRenderer])
 
@@ -269,13 +270,7 @@ const handleAiAnalysis = async () => {
 }
 
 const renderMarkdown = (html) => {
-  // LLM 直接输出 HTML，前端只做安全清理
-  if (!html) return ''
-  return html
-    // 移除 script 标签防止 XSS
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    // 移除 onclick 等事件属性
-    .replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, '')
+  return sanitizeHtml(html)
 }
 
 const downloadReport = () => {
@@ -297,7 +292,7 @@ code { background: #f5f7fa; padding: 2px 6px; border-radius: 3px; font-size: 13p
 </style>
 </head>
 <body>
-${aiAnalysis.value}
+${sanitizeHtml(aiAnalysis.value)}
 <hr>
 <p style="color:#909399;font-size:12px;margin-top:32px">生成时间：${new Date().toLocaleString('zh-CN')} | 指标：${task.value?.summary?.metric_name || '实销金额'} | 分析日期：${task.value?.analysis_date || ''}</p>
 </body>

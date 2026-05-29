@@ -9,6 +9,15 @@ from typing import List, Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+PLACEHOLDER_SECRETS = {
+    "changeme",
+    "your-secret-key",
+    "your-encryption-key",
+    "change-me-in-production-please",
+    "change-this-secret-key-in-production",
+    "change-this-encryption-key-in-production",
+}
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment/.env."""
@@ -41,7 +50,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 1440
 
     # Encryption for data source passwords
-    # 生产环境务必通过 .env 或环境变量设置！生成命令: openssl rand -hex 32
+    # 生产环境务必通过 .env 或环境变量设置！
+    # 生成命令: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     password_encryption_key: str = ""
 
     # CORS
@@ -116,7 +126,7 @@ class Settings(BaseSettings):
         """Validate required fields are not empty or placeholder."""
         if not v:
             raise ValueError("Config value cannot be empty")
-        if v in ("changeme", "your-secret-key", "your-encryption-key", "change-me-in-production-please"):
+        if v in PLACEHOLDER_SECRETS:
             # 生产环境拒绝启动，开发环境仅警告（由 main.py 负责）
             if not info.data.get("debug", True):
                 raise ValueError(f"Config value is a placeholder: {v}")
@@ -134,8 +144,10 @@ class Settings(BaseSettings):
             if not info.data.get("debug", True):
                 raise ValueError(
                     "password_encryption_key must be set in production. "
-                    "Generate via: openssl rand -hex 32"
+                    "Generate via: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
                 )
+        if v in PLACEHOLDER_SECRETS and not info.data.get("debug", True):
+            raise ValueError("password_encryption_key is still a placeholder")
         return v
 
     @field_validator("llm_api_key")

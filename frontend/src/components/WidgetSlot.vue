@@ -50,10 +50,11 @@ import StatCard from "./DashboardWidget.vue"
 import ChartRenderer from "./ChartRenderer.vue"
 import QueryResult from "@/views/QueryResult.vue"
 import { executeSQL } from "@/api/query"
+import { executeSemanticMetricQuery } from "@/api/semanticMetric"
 
 export default {
   name: "WidgetSlot",
-  components: { StatCard, ChartRenderer, QueryResult, Setting, Delete },
+  components: { StatCard, ChartRenderer, QueryResult },
   props: {
     widget: { type: Object, required: true },
     type: { type: String, required: true },
@@ -64,7 +65,7 @@ export default {
     extraConfig: { type: Object, default: () => ({}) },
   },
   emits: ["edit", "remove", "drillDown"],
-  setup(props) {
+  setup(props, { emit }) {
     // ——— 图表数据 ———
     const chartData = ref(props.extraConfig?.chartData || [])
     const customChartData = ref([])
@@ -74,7 +75,14 @@ export default {
       return props.subtype === '__custom_sql__' && props.extraConfig?.customSql && props.extraConfig?.dataSourceId
     })
 
+    const isSemanticMetricWidget = computed(() => {
+      return !!props.extraConfig?.semanticMetricQuery
+    })
+
     const effectiveChartType = computed(() => {
+      if (isSemanticMetricWidget.value) {
+        return props.extraConfig?.chartSubType || 'bar'
+      }
       if (isCustomSqlChart.value) {
         return props.extraConfig?.chartSubType || 'bar'
       }
@@ -105,6 +113,11 @@ export default {
     const fetchCustomSqlData = async () => {
       const extra = props.extraConfig || {}
 
+      if (isSemanticMetricWidget.value) {
+        await fetchSemanticMetricData()
+        return
+      }
+
       if (!extra.dataSourceId || !extra.customSql) {
         return
       }
@@ -129,8 +142,6 @@ export default {
           // 找到 x 和 y 列的索引
           const xIdx = cols.indexOf(xAxis)
           const yIdx = cols.indexOf(yAxis)
-          const rowIdx = cols.indexOf('row') !== -1 ? cols.indexOf('row') : -1
-
           if (xIdx !== -1 && yIdx !== -1) {
             customChartData.value = rows.map(row => ({
               x: row[xIdx] !== null && row[xIdx] !== undefined ? String(row[xIdx]) : '',
@@ -168,19 +179,64 @@ export default {
       }
     }
 
+    const fetchSemanticMetricData = async () => {
+      const query = props.extraConfig?.semanticMetricQuery
+      if (!query) return
+
+      try {
+        const res = await executeSemanticMetricQuery(query)
+        const data = res.query || {}
+        const rows = data.rows || []
+        const cols = data.columns || []
+
+        if (props.type === 'chart') {
+          const xAxis = props.extraConfig?.xAxis || cols.find(col => col !== 'metric_value') || cols[0]
+          const yAxis = props.extraConfig?.yAxis || 'metric_value'
+          const xIdx = cols.indexOf(xAxis)
+          const yIdx = cols.indexOf(yAxis)
+          if (xIdx !== -1 && yIdx !== -1) {
+            customChartData.value = rows.map(row => ({
+              x: row[xIdx] !== null && row[xIdx] !== undefined ? String(row[xIdx]) : '',
+              y: Number(row[yIdx]) || 0,
+            }))
+          }
+          chartDataLoaded.value = true
+        } else if (props.type === 'table') {
+          tableResult.value = {
+            columns: cols,
+            rows,
+            total: data.total || 0,
+          }
+        }
+      } catch (e) {
+        console.error(`[WidgetSlot] 语义指标查询失败 (${props.type}):`, e)
+        if (props.type === 'table') {
+          tableResult.value = {
+            columns: [],
+            rows: [],
+            error: e?.response?.data?.detail || e?.message || '查询失败',
+          }
+        }
+      } finally {
+        if (props.type === 'table') {
+          tableLoading.value = false
+        }
+      }
+    }
+
     // ——— 监控 extraConfig 变化 ———
     watch(
       () => props.extraConfig,
       (val) => {
         chartData.value = val?.chartData || []
-        if (props.type === 'chart' && !isCustomSqlChart.value) {
+        if (props.type === 'chart' && !isCustomSqlChart.value && !isSemanticMetricWidget.value) {
           // 非自定义 SQL 的图表：保留从 dashboardData 注入的 chartData
           customChartData.value = []
           chartDataLoaded.value = false
         }
 
         // 自定义 SQL 变化时重新查询
-        if (isCustomSqlChart.value || isCustomSqlTable.value) {
+        if (isCustomSqlChart.value || isCustomSqlTable.value || isSemanticMetricWidget.value) {
           if (props.type === 'table') {
             tableLoading.value = true
           }
@@ -192,7 +248,7 @@ export default {
 
     // ——— 初始加载 ———
     onMounted(() => {
-      if (isCustomSqlChart.value || isCustomSqlTable.value) {
+      if (isCustomSqlChart.value || isCustomSqlTable.value || isSemanticMetricWidget.value) {
         if (props.type === 'table') {
           tableLoading.value = true
         }
@@ -202,7 +258,7 @@ export default {
 
     // ——— 返回值 ———
     // 如果是自定义 SQL 图表，chartData 用 customChartData
-    const finalChartData = computed(() => isCustomSqlChart.value ? customChartData.value : chartData.value)
+    const finalChartData = computed(() => (isCustomSqlChart.value || isSemanticMetricWidget.value) ? customChartData.value : chartData.value)
 
     const iframeUrl = computed(() => props.extraConfig?.url || "")
 

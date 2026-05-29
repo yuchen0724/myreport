@@ -204,6 +204,12 @@ const routes = [
     meta: { requiresAuth: true, roles: ["admin"] }
   },
   {
+    path: "/semantic-metrics",
+    name: "SemanticMetrics",
+    component: () => import("@/views/SemanticMetricList.vue"),
+    meta: { requiresAuth: true, roles: ["admin", "editor"] }
+  },
+  {
     path: "/ai-analyst",
     name: "AIAnalyst",
     component: () => import("@/views/AIAnalyst.vue"),

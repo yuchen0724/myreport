@@ -14,7 +14,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """请求日志和性能监控中间件"""
     
     # 跳过日志的路径
-    SKIP_PATHS = {"/health", "/metrics", "/api/stats/metrics"}
+    SKIP_PATHS = {"/health", "/health/live", "/health/ready", "/metrics", "/api/stats/metrics"}
     
     # 需要脱敏的响应字段
     MASK_FIELDS = {"password", "token", "secret", "api_key"}

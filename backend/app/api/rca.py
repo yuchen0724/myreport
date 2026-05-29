@@ -42,7 +42,7 @@ async def update_config(
     db: Session = Depends(get_db),
     uid: int = Depends(get_current_user_id),
 ):
-    return RcaService(db).update_config(config_id, payload.model_dump())
+    return RcaService(db).update_config(config_id, payload.model_dump(), uid)
 
 
 @router.delete("/configs/{config_id}")

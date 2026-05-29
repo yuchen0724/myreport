@@ -18,7 +18,9 @@ from app.utils.sql_validator import SQLValidator
 from app.services.query_service import QueryService
 from app.schemas.query import SQLQueryRequest
 from app.repositories.data_source_repository import DataSourceRepository
+from app.repositories.semantic_metric_repository import SemanticMetricRepository
 from app.core.security import decrypt_password
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +79,12 @@ class NL2SQLService:
             logger.info(f"[NL2SQL] ├─ LLM 客户端初始化完成, timeout={llm_client.timeout}")
             
             sql, confidence, explanation, chart_config = self._generate_sql_with_llm(
-                llm_client, request.question, request.data_source_id, group_id=request.group_id, context=request.context
+                llm_client,
+                request.question,
+                request.data_source_id,
+                group_id=request.group_id,
+                context=request.context,
+                user_id=user_id,
             )
             used_llm = True
             logger.info(f"[NL2SQL] ✅ LLM 生成 SQL 成功:")
@@ -238,6 +245,7 @@ class NL2SQLService:
                 data_source_id=request.data_source_id,
                 group_id=request.group_id,
                 context=request.context,
+                user_id=user_id,
             )
         except Exception as repair_error:
             logger.warning(f"[NL2SQL] ⚠️ SQL 自动修复失败: {repair_error}")
@@ -296,7 +304,8 @@ class NL2SQLService:
     def _generate_sql_with_llm(
         self, llm_client: LLMClient, question: str, data_source_id: int,
         group_id: Optional[int] = None,
-        context: Optional[str] = None
+        context: Optional[str] = None,
+        user_id: Optional[int] = None,
     ) -> Tuple[str, float, str, Optional[Dict[str, Any]]]:
         """
         使用 LLM 生成 SQL
@@ -327,12 +336,15 @@ class NL2SQLService:
         schema_prompt = self.build_schema_prompt(data_source_id)
         schema_prompt = self._select_relevant_schema_prompt(question, schema_prompt)
         logger.info(f"[NL2SQL] │   └─ Schema 长度: {len(schema_prompt)} 字符")
+        semantic_metrics_prompt = self._build_semantic_metrics_prompt(data_source_id, user_id)
+        logger.info(f"[NL2SQL] │   └─ 语义指标上下文长度: {len(semantic_metrics_prompt)} 字符")
 
         cache_context = self._build_generation_cache_context(
             llm_client=llm_client,
             group_id=group_id,
             context=context,
             schema_prompt=schema_prompt,
+            semantic_metrics_prompt=semantic_metrics_prompt,
         )
         cached_generation = self._get_cached_generation(question, data_source_id, cache_context)
         if cached_generation:
@@ -347,6 +359,7 @@ class NL2SQLService:
             db_limitations=db_limitations,
             schema_prompt=schema_prompt,
             group_id=group_id,
+            semantic_metrics_prompt=semantic_metrics_prompt,
         )
         print(f"[NL2SQL] │   └─ System prompt 长度: {len(system_prompt)} 字符", flush=True)
         print(f"[NL2SQL] │   └─ Schema preview: {schema_prompt[:200]}...", flush=True)
@@ -595,12 +608,58 @@ class NL2SQLService:
                 score += max(1, len(term))
         return score
 
+    def _build_semantic_metrics_prompt(self, data_source_id: int, user_id: Optional[int] = None) -> str:
+        """构建当前用户在数据源下可用的语义指标上下文。"""
+        if not self.db or user_id is None:
+            return "无可用语义指标。"
+
+        try:
+            user = self.db.query(User).filter(User.id == user_id).first()
+            is_admin = bool(user and user.role and user.role.name == "admin")
+            metrics = SemanticMetricRepository(self.db).list_visible_for_data_source(
+                data_source_id=data_source_id,
+                user_id=user_id,
+                is_admin=is_admin,
+                limit=20,
+                active_only=True,
+            )
+        except Exception as e:
+            logger.warning(f"[NL2SQL] 构建语义指标上下文失败: {e}")
+            return "无可用语义指标。"
+
+        if not metrics:
+            return "无可用语义指标。"
+
+        lines = [
+            "以下是当前用户可用的统一业务指标。用户问题命中指标名称、metric_key 或描述时，优先使用这些指标口径；",
+            "必须严格使用指标的 base_sql、metric_expression、time_column 和允许维度，不要自行改写业务口径。",
+        ]
+        for metric in metrics:
+            dimensions = ", ".join(metric.dimensions or []) or "无"
+            description = metric.description or "无"
+            base_sql = " ".join((metric.base_sql or "").split())
+            if len(base_sql) > 500:
+                base_sql = base_sql[:500] + "..."
+            lines.extend(
+                [
+                    f"- metric_key: {metric.metric_key}",
+                    f"  名称: {metric.name}",
+                    f"  描述: {description}",
+                    f"  指标表达式: {metric.metric_expression}",
+                    f"  时间字段: {metric.time_column}",
+                    f"  可用维度: {dimensions}",
+                    f"  base_sql: {base_sql}",
+                ]
+            )
+        return "\n".join(lines)
+
     def _build_system_prompt(
         self,
         db_type: str,
         db_limitations: str,
         schema_prompt: str,
-        group_id: Optional[int] = None
+        group_id: Optional[int] = None,
+        semantic_metrics_prompt: Optional[str] = None,
     ) -> str:
         """构建 NL2SQL 系统提示词"""
         from datetime import datetime
@@ -631,6 +690,7 @@ class NL2SQLService:
             "db_type": db_type,
             "db_limitations": db_limitations,
             "schema_prompt": schema_prompt,
+            "semantic_metrics_prompt": semantic_metrics_prompt or "无可用语义指标。",
             "group_context": group_context,
             "table_name_rule": table_name_rule,
             "today_date": today_date,
@@ -737,6 +797,7 @@ class NL2SQLService:
         data_source_id: int,
         group_id: Optional[int] = None,
         context: Optional[str] = None,
+        user_id: Optional[int] = None,
     ) -> Tuple[str, float, str, Optional[Dict[str, Any]]]:
         """基于执行错误让 LLM 修复 SQL，返回候选 SQL"""
         ds = self.ds_repo.get_by_id(data_source_id) if self.ds_repo else None
@@ -747,11 +808,13 @@ class NL2SQLService:
             f"{question}\n{failed_sql}\n{error_msg}",
             schema_prompt,
         )
+        semantic_metrics_prompt = self._build_semantic_metrics_prompt(data_source_id, user_id)
         system_prompt = self._build_system_prompt(
             db_type=db_type,
             db_limitations=db_limitations,
             schema_prompt=schema_prompt,
             group_id=group_id,
+            semantic_metrics_prompt=semantic_metrics_prompt,
         )
         repair_prompt = self._build_repair_prompt(
             question=question,
@@ -801,12 +864,25 @@ class NL2SQLService:
         llm_client: LLMClient,
         group_id: Optional[int],
         context: Optional[str],
-        schema_prompt: str
+        schema_prompt: str,
+        semantic_metrics_prompt: str = "",
     ) -> Dict[str, Any]:
         """构建 NL2SQL 生成缓存上下文"""
         from datetime import datetime
         settings = getattr(llm_client, "settings", None)
-        schema_fingerprint = hashlib.sha256(schema_prompt.encode("utf-8")).hexdigest()[:16]
+        schema_fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "schema_prompt": schema_prompt,
+                    "semantic_metrics_prompt": semantic_metrics_prompt,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()[:16]
+        semantic_metrics_fingerprint = hashlib.sha256(
+            semantic_metrics_prompt.encode("utf-8")
+        ).hexdigest()[:16]
         llm_fingerprint_data = {
             "adapter": getattr(llm_client, "adapter", ""),
             "provider": getattr(llm_client, "provider", ""),
@@ -820,6 +896,7 @@ class NL2SQLService:
             "group_id": group_id,
             "context": context,
             "schema_fingerprint": schema_fingerprint,
+            "semantic_metrics_fingerprint": semantic_metrics_fingerprint,
             "llm_fingerprint": llm_fingerprint,
             "prompt_version": NL2SQL_PROMPT_VERSION,
             "today_date": datetime.now().strftime("%Y-%m-%d"),

@@ -1,7 +1,7 @@
 """RCA 请求/响应 Schema"""
 from datetime import date, datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RcaMetricConfigCreate(BaseModel):
@@ -9,6 +9,7 @@ class RcaMetricConfigCreate(BaseModel):
     label: str
     metric_field: str
     source_table: str
+    semantic_metric_key: Optional[str] = None
     threshold_type: str = "percent_change"
     threshold_value: float = 10.0
     compare_type: str = "mom"
@@ -22,6 +23,7 @@ class RcaMetricConfigUpdate(BaseModel):
     label: Optional[str] = None
     metric_field: Optional[str] = None
     source_table: Optional[str] = None
+    semantic_metric_key: Optional[str] = None
     threshold_type: Optional[str] = None
     threshold_value: Optional[float] = None
     compare_type: Optional[str] = None
@@ -32,11 +34,14 @@ class RcaMetricConfigUpdate(BaseModel):
 
 
 class RcaMetricConfigResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     label: str
     metric_field: str
     source_table: str
+    semantic_metric_key: Optional[str] = None
     threshold_type: str
     threshold_value: float
     compare_type: str
@@ -45,9 +50,6 @@ class RcaMetricConfigResponse(BaseModel):
     data_source_id: int
     enabled: bool
     created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
 
 
 class RcaAnalyzeRequest(BaseModel):
@@ -65,6 +67,8 @@ class RcaDrillDownRequest(BaseModel):
 
 
 class RcaAnomalyResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     task_id: str
     metric_name: str
@@ -78,11 +82,10 @@ class RcaAnomalyResponse(BaseModel):
     drill_details: Optional[Dict[str, Any]] = None
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
-
 
 class RcaTaskResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     task_id: str
     metric_config_id: int
@@ -94,6 +97,3 @@ class RcaTaskResponse(BaseModel):
     error_message: Optional[str] = None
     created_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True

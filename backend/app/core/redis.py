@@ -3,7 +3,14 @@ from app.config import get_settings
 
 settings = get_settings()
 
-redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+
+def _build_redis_url() -> str:
+    if settings.redis_url:
+        return settings.redis_url
+    return f"redis://{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+
+
+redis_client = redis.from_url(_build_redis_url(), decode_responses=True)
 
 
 def get_redis():

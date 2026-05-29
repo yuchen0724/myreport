@@ -1,10 +1,13 @@
 import warnings
 import logging
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from sqlalchemy import text
 from app.config import get_settings
-from app.api import auth, data_sources, query, report, nl2sql, charts, templates, stats, async_export, users, cache, audit_logs, dashboard, menus, proxy_servers, config, alerts, drilldown, favorites
+from app.core.database import engine
+from app.api import auth, data_sources, query, report, nl2sql, charts, templates, stats, async_export, users, cache, audit_logs, dashboard, menus, proxy_servers, config, alerts, drilldown, favorites, semantic_metrics
 from app.api import sql_analysis as sql_analysis_api
 from app.api import scheduled_reports as scheduled_reports_api
 from app.api import model_compare as model_compare_api
@@ -22,21 +25,29 @@ from app.middleware.request_logging import RequestLoggingMiddleware
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+PLACEHOLDER_SECRETS = {
+    "changeme",
+    "your-secret-key",
+    "your-encryption-key",
+    "change-me-in-production-please",
+    "change-this-secret-key-in-production",
+    "change-this-encryption-key-in-production",
+}
 
 # --- 启动安全检查 ---
 if not settings.debug:
     # 生产环境强制检查
-    if settings.secret_key == "change-me-in-production-please":
+    if settings.secret_key in PLACEHOLDER_SECRETS:
         raise RuntimeError(
-            "FATAL: SECRET_KEY is still the default placeholder. "
+            "FATAL: SECRET_KEY is still a default placeholder. "
             "Set SECRET_KEY via environment variable or .env file. "
             "Generate a secure key: openssl rand -hex 32"
         )
-    if not settings.password_encryption_key:
+    if not settings.password_encryption_key or settings.password_encryption_key in PLACEHOLDER_SECRETS:
         raise RuntimeError(
-            "FATAL: PASSWORD_ENCRYPTION_KEY is empty. "
+            "FATAL: PASSWORD_ENCRYPTION_KEY is empty or still a default placeholder. "
             "Set PASSWORD_ENCRYPTION_KEY via environment variable or .env file. "
-            "Generate a secure key: openssl rand -hex 32"
+            "Generate a Fernet key: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
         )
     if not settings.llm_api_key:
         raise RuntimeError(
@@ -45,9 +56,9 @@ if not settings.debug:
         )
 else:
     # 开发环境仅警告
-    if settings.secret_key == "change-me-in-production-please":
+    if settings.secret_key in PLACEHOLDER_SECRETS:
         warnings.warn("⚠️  SECRET_KEY 仍使用默认值！生产部署前务必修改。")
-    if not settings.password_encryption_key:
+    if not settings.password_encryption_key or settings.password_encryption_key in PLACEHOLDER_SECRETS:
         warnings.warn("⚠️  PASSWORD_ENCRYPTION_KEY 为空！生产部署前务必设置。")
     if not settings.llm_api_key:
         warnings.warn("⚠️  LLM_API_KEY 为空！NL2SQL 功能将不可用。")
@@ -145,6 +156,7 @@ app.include_router(scheduled_reports_api.router)
 app.include_router(model_compare_api.router)
 app.include_router(subscriptions_api.router)
 app.include_router(favorites.router)
+app.include_router(semantic_metrics.router)
 app.include_router(sql_reviews_api.router)
 app.include_router(pool_metrics_api.router)
 app.include_router(dialects_api.router)
@@ -167,4 +179,37 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    return {"status": "healthy", "checks": {"app": "ok"}}
+
+
+@app.get("/health/live")
+async def health_live():
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+async def health_ready():
+    checks = {}
+    healthy = True
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as exc:
+        healthy = False
+        checks["database"] = f"error: {type(exc).__name__}"
+
+    try:
+        from app.core.redis import redis_client
+        redis_client.ping()
+        checks["redis"] = "ok"
+    except Exception as exc:
+        healthy = False
+        checks["redis"] = f"error: {type(exc).__name__}"
+
+    status_code = 200 if healthy else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": "ready" if healthy else "not_ready", "checks": checks},
+    )

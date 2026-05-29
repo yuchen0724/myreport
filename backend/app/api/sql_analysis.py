@@ -6,7 +6,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -67,6 +67,8 @@ class SQLAnalyzeResponse(BaseModel):
 
 
 class SQLAnalysisHistoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     sql_hash: str
     complexity_score: int
@@ -74,9 +76,6 @@ class SQLAnalysisHistoryResponse(BaseModel):
     issues_count: int
     suggestions_count: int
     created_at: str
-
-    class Config:
-        from_attributes = True
 
 
 # ── API 端点 ──

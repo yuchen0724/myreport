@@ -51,6 +51,7 @@ async def chat(
             data_source_id=request.data_source_id,
             conversation_id=request.conversation_id,
             group_id=request.group_id,
+            user_id=current_user_id,
         )
         return response
     except Exception as e:
@@ -84,6 +85,7 @@ async def chat_stream(
                 data_source_id=request.data_source_id,
                 conversation_id=request.conversation_id,
                 group_id=request.group_id,
+                user_id=current_user_id,
             ):
                 event_type = chunk.get("type", "token")
                 data = json.dumps(chunk, ensure_ascii=False, default=str)

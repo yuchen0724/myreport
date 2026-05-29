@@ -18,9 +18,13 @@ from app.config import get_settings
 from app.utils.llm_client import LLMClient, LLMError, get_llm_client
 from app.services.query_service import QueryService
 from app.repositories.data_source_repository import DataSourceRepository
+from app.repositories.semantic_metric_repository import SemanticMetricRepository
 from app.utils.sql_validator import SQLValidator
 from app.schemas.query import SQLQueryRequest
 from app.schemas.ai_analyst import AIAnalystChatResponse, AIAnalystMessage, AIAnalystToolCall
+from app.schemas.semantic_metric import SemanticMetricQueryRequest
+from app.services.semantic_metric_query_service import SemanticMetricQueryService
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +57,20 @@ class AIAnalystService:
    - 当用户需要对查询结果进行统计分析、趋势分析、异常检测等时使用
    - 会自动对已有数据进行分析并给出洞察
 
+5. **list_metrics** - 查看当前用户可用的统一业务指标
+   - 当用户提到销售额、成交金额、订单数等业务指标时，优先用此工具查找可用指标
+
+6. **query_metric** - 按统一口径查询语义指标
+   - 当用户问题命中可用指标时，优先用此工具查询，而不是自行拼接指标 SQL
+
 工作流程建议：
-1. 如果用户的问题模糊，先用 get_schema 了解可用数据
-2. 根据问题编写 SQL 并用 execute_sql 执行
-3. 如果结果需要可视化，用 generate_chart 生成图表
-4. 如果需要深入分析，用 analyze_data 进行分析
-5. 综合以上结果，用自然语言给用户清晰的结论和建议
+1. 如果用户的问题涉及业务指标，先用 list_metrics 查找统一指标口径
+2. 如果匹配到指标，用 query_metric 查询指标
+3. 如果用户的问题模糊，先用 get_schema 了解可用数据
+4. 根据问题编写 SQL 并用 execute_sql 执行
+5. 如果结果需要可视化，用 generate_chart 生成图表
+6. 如果需要深入分析，用 analyze_data 进行分析
+7. 综合以上结果，用自然语言给用户清晰的结论和建议
 
 重要规则：
 - 只执行 SELECT 查询，绝不执行 INSERT/UPDATE/DELETE/DROP 等修改操作
@@ -101,6 +113,12 @@ class AIAnalystService:
 4. analyze_data - 数据分析洞察
    输入: {{"tool": "analyze_data", "input": {{"data": [...], "columns": [...], "question": "用户问题"}}}}
 
+5. list_metrics - 查看可用语义指标
+   输入: {{"tool": "list_metrics", "input": {{"data_source_id": {data_source_id}}}}}
+
+6. query_metric - 查询语义指标
+   输入: {{"tool": "query_metric", "input": {{"metric_key": "gmv", "data_source_id": {data_source_id}, "dimensions": ["store_id"], "start_time": "2026-05-01", "end_time": "2026-06-01", "filters": {{}}, "page": 1, "page_size": 50}}}}
+
 当你需要使用工具时，请输出如下格式（一行 JSON）：
 ACTION: {{"tool": "工具名", "input": {{参数}}}}
 
@@ -136,6 +154,109 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
             }
         except Exception as e:
             logger.error(f"[AI-Analyst] SQL 执行失败: {e}")
+            return {"success": False, "error": str(e), "columns": [], "rows": [], "total": 0}
+
+    def _is_admin_user(self, user_id: Optional[int]) -> bool:
+        if user_id is None:
+            return False
+        try:
+            user = self.db.query(User).filter_by(id=user_id).first()
+            return bool(user and user.role and user.role.name == "admin")
+        except Exception:
+            return False
+
+    def list_metrics_tool(self, data_source_id: int, user_id: Optional[int]) -> Dict[str, Any]:
+        """列出当前用户可用的语义指标。"""
+        if user_id is None:
+            return {"success": False, "error": "缺少用户上下文", "metrics": []}
+
+        try:
+            metrics = SemanticMetricRepository(self.db).list_visible_for_data_source(
+                data_source_id=data_source_id,
+                user_id=user_id,
+                is_admin=self._is_admin_user(user_id),
+                limit=50,
+                active_only=True,
+            )
+            return {
+                "success": True,
+                "metrics": [
+                    {
+                        "metric_key": metric.metric_key,
+                        "name": metric.name,
+                        "description": metric.description,
+                        "metric_expression": metric.metric_expression,
+                        "dimensions": metric.dimensions or [],
+                        "time_column": metric.time_column,
+                    }
+                    for metric in metrics
+                ],
+                "total": len(metrics),
+            }
+        except Exception as e:
+            logger.error(f"[AI-Analyst] 获取语义指标失败: {e}")
+            return {"success": False, "error": str(e), "metrics": []}
+
+    def query_metric_tool(
+        self,
+        metric_key: str,
+        data_source_id: int,
+        user_id: Optional[int],
+        dimensions: Optional[List[str]] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """按语义指标统一口径查询数据。"""
+        if user_id is None:
+            return {"success": False, "error": "缺少用户上下文", "columns": [], "rows": [], "total": 0}
+
+        try:
+            is_admin = self._is_admin_user(user_id)
+            visible_metric = SemanticMetricRepository(self.db).get_visible_by_key(
+                metric_key,
+                user_id=user_id,
+                is_admin=is_admin,
+                active_only=True,
+            )
+            if not visible_metric:
+                return {"success": False, "error": "指标不存在或已禁用", "columns": [], "rows": [], "total": 0}
+            if visible_metric.data_source_id != data_source_id:
+                return {"success": False, "error": "指标不属于当前数据源", "columns": [], "rows": [], "total": 0}
+
+            metric, result = SemanticMetricQueryService(self.db).execute(
+                SemanticMetricQueryRequest(
+                    metric_key=metric_key,
+                    start_time=start_time,
+                    end_time=end_time,
+                    dimensions=dimensions or [],
+                    filters=filters or {},
+                    page=page,
+                    page_size=page_size,
+                ),
+                user_id=user_id,
+                is_admin=is_admin,
+            )
+            return {
+                "success": True,
+                "metric": {
+                    "metric_key": metric.metric_key,
+                    "name": metric.name,
+                    "dimensions": metric.dimensions or [],
+                    "time_column": metric.time_column,
+                },
+                "columns": result.columns,
+                "rows": result.rows[:100],
+                "total": result.total,
+                "page": result.page,
+                "page_size": result.page_size,
+                "execution_time_ms": result.execution_time_ms,
+                "preview_truncated": len(result.rows) > 100,
+            }
+        except Exception as e:
+            logger.error(f"[AI-Analyst] 查询语义指标失败: {e}")
             return {"success": False, "error": str(e), "columns": [], "rows": [], "total": 0}
 
     def get_schema_tool(self, data_source_id: int, table_name: Optional[str] = None) -> Dict[str, Any]:
@@ -379,7 +500,12 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
 
         return None
 
-    def _execute_tool(self, action: Dict[str, Any], data_source_id: int) -> Dict[str, Any]:
+    def _execute_tool(
+        self,
+        action: Dict[str, Any],
+        data_source_id: int,
+        user_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """执行工具调用"""
         tool_name = action.get("tool", "")
         tool_input = action.get("input", {})
@@ -408,6 +534,23 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
                 columns=tool_input.get("columns", []),
                 question=tool_input.get("question", ""),
             )
+        elif tool_name == "list_metrics":
+            return self.list_metrics_tool(
+                data_source_id=tool_input.get("data_source_id", data_source_id),
+                user_id=user_id,
+            )
+        elif tool_name == "query_metric":
+            return self.query_metric_tool(
+                metric_key=tool_input.get("metric_key", ""),
+                data_source_id=tool_input.get("data_source_id", data_source_id),
+                user_id=user_id,
+                dimensions=tool_input.get("dimensions") or [],
+                start_time=tool_input.get("start_time"),
+                end_time=tool_input.get("end_time"),
+                filters=tool_input.get("filters") or {},
+                page=tool_input.get("page", 1),
+                page_size=tool_input.get("page_size", 50),
+            )
         else:
             return {"success": False, "error": f"未知工具: {tool_name}"}
 
@@ -417,6 +560,7 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         data_source_id: int,
         conversation_id: Optional[str] = None,
         group_id: Optional[int] = None,
+        user_id: Optional[int] = None,
     ) -> AIAnalystChatResponse:
         """
         同步聊天接口（非流式）
@@ -480,7 +624,7 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
 
             # 执行工具
             tool_name = action.get("tool", "unknown")
-            tool_result = self._execute_tool(action, data_source_id)
+            tool_result = self._execute_tool(action, data_source_id, user_id=user_id)
 
             tool_calls.append(AIAnalystToolCall(
                 tool_name=tool_name,
@@ -515,6 +659,7 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         data_source_id: int,
         conversation_id: Optional[str] = None,
         group_id: Optional[int] = None,
+        user_id: Optional[int] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式聊天接口（SSE）
@@ -569,7 +714,7 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
             tool_name = action.get("tool", "unknown")
             yield {"type": "tool_call", "tool_name": tool_name, "tool_input": action.get("input", {})}
 
-            tool_result = self._execute_tool(action, data_source_id)
+            tool_result = self._execute_tool(action, data_source_id, user_id=user_id)
             yield {"type": "tool_result", "tool_name": tool_name, "tool_output": json.dumps(tool_result, ensure_ascii=False)[:2000]}
 
             tool_calls_record = {

@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.models.rca import RcaMetricConfig, RcaAnalysisTask, RcaAnomaly
 from app.models.data_source import DataSource
+from app.repositories.semantic_metric_repository import SemanticMetricRepository
+from app.schemas.semantic_metric import SemanticMetricQueryRequest
+from app.services.semantic_metric_query_service import SemanticMetricQueryService
 from app.utils.rca_sql_builder import RcaSqlBuilder
 from app.utils.db_executor import execute_query
 
@@ -29,6 +32,7 @@ class RcaService:
         )
 
     def create_config(self, data: dict, user_id: int) -> RcaMetricConfig:
+        self._validate_semantic_metric_binding(data, user_id)
         config = RcaMetricConfig(**data, created_by=user_id)
         self.db.add(config)
         self.db.commit()
@@ -43,10 +47,17 @@ class RcaService:
         self.db.commit()
         return True
 
-    def update_config(self, config_id: int, data: dict) -> Optional[RcaMetricConfig]:
+    def update_config(self, config_id: int, data: dict, user_id: int | None = None) -> Optional[RcaMetricConfig]:
         c = self.db.query(RcaMetricConfig).filter(RcaMetricConfig.id == config_id).first()
         if not c:
             return None
+        merged = {
+            "data_source_id": c.data_source_id,
+            "semantic_metric_key": c.semantic_metric_key,
+            **{k: v for k, v in data.items() if v is not None},
+        }
+        if user_id is not None:
+            self._validate_semantic_metric_binding(merged, user_id)
         for k, v in data.items():
             if v is not None:
                 setattr(c, k, v)
@@ -103,6 +114,9 @@ class RcaService:
         self.db.commit()
 
         try:
+            if config.semantic_metric_key:
+                return self._execute_semantic_metric_analysis(task, config)
+
             builder = RcaSqlBuilder(config.source_table, config.group_id)
             p = task.period_days
             ce = task.analysis_date
@@ -190,6 +204,143 @@ class RcaService:
             self.db.commit()
             logger.error(f"RCA analysis failed: {e}", exc_info=True)
             raise
+
+    def _validate_semantic_metric_binding(self, data: dict, user_id: int) -> None:
+        metric_key = data.get("semantic_metric_key")
+        if not metric_key:
+            return
+        metric = SemanticMetricRepository(self.db).get_visible_by_key(
+            metric_key,
+            user_id=user_id,
+            is_admin=False,
+            active_only=True,
+        )
+        if not metric:
+            raise ValueError(f"语义指标不存在或不可访问: {metric_key}")
+        data_source_id = data.get("data_source_id")
+        if data_source_id and metric.data_source_id != data_source_id:
+            raise ValueError("语义指标不属于当前数据源")
+
+    def _execute_semantic_metric_analysis(
+        self,
+        task: RcaAnalysisTask,
+        config: RcaMetricConfig,
+    ) -> Dict[str, Any]:
+        user_id = task.created_by or config.created_by or 0
+        p = task.period_days
+        ce = task.analysis_date
+        cs = (ce - timedelta(days=p)).strftime("%Y%m%d")
+        ce_s = ce.strftime("%Y%m%d")
+        be = ce - timedelta(days=p)
+        bs = (be - timedelta(days=p)).strftime("%Y%m%d")
+        be_s = be.strftime("%Y%m%d")
+
+        total_current = self._query_semantic_metric_total(config, user_id, cs, ce_s)
+        total_baseline = self._query_semantic_metric_total(config, user_id, bs, be_s)
+        total_change = self._calc_change_pct(total_current, total_baseline)
+
+        anomalies = []
+        for dim in (config.drill_dimensions or [])[:4]:
+            current_rows = self._query_semantic_metric_dimension(config, user_id, cs, ce_s, dim)
+            baseline_rows = self._query_semantic_metric_dimension(config, user_id, bs, be_s, dim)
+            baseline_by_dim = {row.get(dim): float(row.get("metric_value") or 0) for row in baseline_rows}
+            current_by_dim = {row.get(dim): float(row.get("metric_value") or 0) for row in current_rows}
+            keys = list(dict.fromkeys([*current_by_dim.keys(), *baseline_by_dim.keys()]))
+            diffs = {
+                key: current_by_dim.get(key, 0) - baseline_by_dim.get(key, 0)
+                for key in keys
+            }
+            total_abs_diff = sum(abs(value) for value in diffs.values()) or 1
+
+            seen = 0
+            for key in sorted(keys, key=lambda item: abs(diffs[item]), reverse=True):
+                if seen >= 5:
+                    break
+                current_value = current_by_dim.get(key, 0)
+                baseline_value = baseline_by_dim.get(key, 0)
+                change_pct = self._calc_change_pct(current_value, baseline_value)
+                if abs(change_pct) < config.threshold_value:
+                    continue
+                anomaly = RcaAnomaly(
+                    task_id=task.task_id,
+                    metric_name=config.name,
+                    dimension_path={dim: key},
+                    current_value=current_value,
+                    baseline_value=baseline_value,
+                    change_pct=change_pct,
+                    severity="critical" if abs(change_pct) >= 30 else "warning",
+                    contribution_pct=round(abs(diffs[key]) / total_abs_diff * 100, 2),
+                    root_cause_hint=f"基于语义指标 {config.semantic_metric_key} 下钻发现",
+                )
+                self.db.add(anomaly)
+                anomalies.append(anomaly)
+                seen += 1
+
+        task.status = "completed"
+        task.anomaly_count = len(anomalies)
+        task.summary = {
+            "total_change_pct": float(total_change),
+            "anomaly_count": len(anomalies),
+            "metric_name": config.name,
+            "semantic_metric_key": config.semantic_metric_key,
+            "period_days": p,
+        }
+        from datetime import datetime, timezone
+        task.completed_at = datetime.now(timezone.utc)
+        self.db.commit()
+
+        return {"status": "completed", "anomaly_count": len(anomalies)}
+
+    def _query_semantic_metric_total(
+        self,
+        config: RcaMetricConfig,
+        user_id: int,
+        start_time: str,
+        end_time: str,
+    ) -> float:
+        rows = self._query_semantic_metric(config, user_id, start_time, end_time, dimensions=[])
+        if not rows:
+            return 0
+        return float(rows[0].get("metric_value") or 0)
+
+    def _query_semantic_metric_dimension(
+        self,
+        config: RcaMetricConfig,
+        user_id: int,
+        start_time: str,
+        end_time: str,
+        dimension: str,
+    ) -> list[dict[str, Any]]:
+        return self._query_semantic_metric(config, user_id, start_time, end_time, dimensions=[dimension])
+
+    def _query_semantic_metric(
+        self,
+        config: RcaMetricConfig,
+        user_id: int,
+        start_time: str,
+        end_time: str,
+        dimensions: list[str],
+    ) -> list[dict[str, Any]]:
+        _, response = SemanticMetricQueryService(self.db).execute(
+            SemanticMetricQueryRequest(
+                metric_key=config.semantic_metric_key,
+                start_time=start_time,
+                end_time=end_time,
+                dimensions=dimensions,
+                filters={},
+                page=1,
+                page_size=1000,
+            ),
+            user_id=user_id,
+            is_admin=False,
+        )
+        return [dict(zip(response.columns, row)) for row in response.rows]
+
+    @staticmethod
+    def _calc_change_pct(current_value: float, baseline_value: float) -> float:
+        if not baseline_value:
+            return 0
+        return round((current_value - baseline_value) / baseline_value * 100, 2)
 
     # ── 查询 ──
 

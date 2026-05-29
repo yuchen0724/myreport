@@ -3,6 +3,9 @@ from types import SimpleNamespace
 import time
 
 import pytest
+from app.core.security import encrypt_password
+from app.models.data_source import DataSource
+from app.repositories.semantic_metric_repository import SemanticMetricRepository
 from app.schemas.nl2sql import NL2SQLRequest
 from app.utils.nl2sql_rules import NL2SQLRuleEngine
 from app.services.nl2sql_service import NL2SQLService
@@ -54,6 +57,22 @@ def test_build_system_prompt_includes_required_sections():
     assert '"chart_config"' in prompt
 
 
+def test_build_system_prompt_includes_semantic_metrics_context():
+    service = NL2SQLService(query_service=object(), db=None)
+
+    prompt = service._build_system_prompt(
+        db_type="DORIS",
+        db_limitations="Doris 限制",
+        schema_prompt="### 表: ads.table\n| col | type |",
+        group_id=812,
+        semantic_metrics_prompt="- metric_key: gmv\n  名称: GMV\n  指标表达式: SUM(amount)",
+    )
+
+    assert "## 可用语义指标" in prompt
+    assert "metric_key: gmv" in prompt
+    assert "优先使用该指标" in prompt
+
+
 def test_build_system_prompt_for_postgresql_uses_public_schema_rule():
     service = NL2SQLService(query_service=object(), db=None)
 
@@ -67,6 +86,62 @@ def test_build_system_prompt_for_postgresql_uses_public_schema_rule():
     assert "POSTGRESQL" in prompt
     assert "库名.public.表名" in prompt
     assert "mydb.public.dim_store" in prompt
+
+
+def test_build_semantic_metrics_prompt_only_includes_visible_metrics(db_session, test_user):
+    other_user = SimpleNamespace(id=test_user.id + 1000)
+    data_source = DataSource(
+        name="NL2SQL 语义指标数据源",
+        type="MYSQL",
+        host="localhost",
+        port=3306,
+        database="reporting",
+        username="report_user",
+        password_encrypted=encrypt_password("password"),
+        is_active=True,
+        created_by=test_user.id,
+    )
+    db_session.add(data_source)
+    db_session.commit()
+    db_session.refresh(data_source)
+
+    repo = SemanticMetricRepository(db_session)
+    repo.create(
+        {
+            "metric_key": "gmv",
+            "name": "GMV",
+            "description": "成交金额",
+            "data_source_id": data_source.id,
+            "base_sql": "SELECT biz_date, amount, store_id FROM fact_orders",
+            "metric_expression": "SUM(amount)",
+            "dimensions": ["store_id"],
+            "time_column": "biz_date",
+            "is_active": True,
+        },
+        user_id=test_user.id,
+    )
+    repo.create(
+        {
+            "metric_key": "other_metric",
+            "name": "其他用户指标",
+            "description": "不可见",
+            "data_source_id": data_source.id,
+            "base_sql": "SELECT dt, value FROM other_table",
+            "metric_expression": "SUM(value)",
+            "dimensions": [],
+            "time_column": "dt",
+            "is_active": True,
+        },
+        user_id=other_user.id,
+    )
+
+    service = NL2SQLService(query_service=object(), db=db_session)
+    prompt = service._build_semantic_metrics_prompt(data_source.id, user_id=test_user.id)
+
+    assert "metric_key: gmv" in prompt
+    assert "指标表达式: SUM(amount)" in prompt
+    assert "base_sql: SELECT biz_date, amount, store_id FROM fact_orders" in prompt
+    assert "other_metric" not in prompt
 
 
 def test_build_system_prompt_reads_template_from_config_file(monkeypatch, tmp_path):

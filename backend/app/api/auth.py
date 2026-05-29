@@ -1,5 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from urllib.parse import parse_qs
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import decode_access_token
@@ -34,13 +36,18 @@ def _validate_token_not_blacklisted(token: str) -> dict:
 
 @router.post("/login", response_model=Token)
 async def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """用户登录"""
+    body = (await request.body()).decode()
+    form_data = parse_qs(body, keep_blank_values=True)
+    username = form_data.get("username", [""])[0]
+    password = form_data.get("password", [""])[0]
+
     auth_service = AuthService(db)
     try:
-        token = auth_service.login(form_data.username, form_data.password)
+        token = auth_service.login(username, password)
         return token
     except ValueError as e:
         raise HTTPException(

@@ -11,6 +11,7 @@ import {
   HeatmapChart,
   TreemapChart,
   BoxplotChart,
+  CandlestickChart,
 } from 'echarts/charts'
 import {
   TitleComponent,
@@ -36,6 +37,7 @@ echarts.use([
   HeatmapChart,
   TreemapChart,
   BoxplotChart,
+  CandlestickChart,
   TitleComponent,
   TooltipComponent,
   LegendComponent,

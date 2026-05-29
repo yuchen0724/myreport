@@ -26,6 +26,7 @@ import ChartEditor from "./editors/ChartEditor.vue"
 import TableEditor from "./editors/TableEditor.vue"
 import Nl2sqlEditor from "./editors/Nl2sqlEditor.vue"
 import IframeEditor from "./editors/IframeEditor.vue"
+import SemanticMetricWidgetEditor from "./editors/SemanticMetricWidgetEditor.vue"
 
 const EDITOR_MAP = {
   stat: markRaw(StatEditor),
@@ -37,7 +38,7 @@ const EDITOR_MAP = {
 
 export default {
   name: "WidgetEditorDialog",
-  components: { StatEditor, ChartEditor, TableEditor, Nl2sqlEditor, IframeEditor },
+  components: { StatEditor, ChartEditor, TableEditor, Nl2sqlEditor, IframeEditor, SemanticMetricWidgetEditor },
   props: {
     modelValue: { type: Boolean, default: false },
     widget: { type: Object, default: null },
@@ -58,11 +59,20 @@ export default {
 
     const editorComponent = computed(() => {
       if (!props.widget) return null
+      if (
+        props.widget.widget_type === 'chart' &&
+        (props.widget.widget_subtype === '__semantic_metric__' || props.widget.extra_config?.semanticMetricQuery)
+      ) {
+        return markRaw(SemanticMetricWidgetEditor)
+      }
       return EDITOR_MAP[props.widget.widget_type] || null
     })
 
     const titlePrefix = computed(() => {
       const names = { stat: "统计卡片", chart: "图表", table: "数据表格", nl2sql: "智能查询", iframe: "外部嵌入" }
+      if (props.widget?.widget_subtype === '__semantic_metric__' || props.widget?.extra_config?.semanticMetricQuery) {
+        return "语义指标图表"
+      }
       return names[props.widget?.widget_type] || "组件"
     })
 
@@ -98,6 +108,7 @@ export default {
         if (formData.value.xAxis !== undefined) extra.xAxis = formData.value.xAxis
         if (formData.value.yAxis !== undefined) extra.yAxis = formData.value.yAxis
         if (formData.value.chartSubType !== undefined) extra.chartSubType = formData.value.chartSubType
+        if (formData.value.semanticMetricQuery !== undefined) extra.semanticMetricQuery = formData.value.semanticMetricQuery
         payload.extra_config = extra
 
         // 解析 widgetId

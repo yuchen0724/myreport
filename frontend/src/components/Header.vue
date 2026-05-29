@@ -36,7 +36,7 @@ import { ArrowDown, Moon, Sunny } from '@element-plus/icons-vue'
 
 export default {
   name: 'Header',
-  components: { ArrowDown, Moon, Sunny },
+  components: { ArrowDown },
   setup() {
     const router = useRouter()
     const userStore = useUserStore()
@@ -54,7 +54,7 @@ export default {
       themeStore.toggleTheme()
     }
 
-    return { user, handleCommand, themeStore, handleThemeToggle }
+    return { user, handleCommand, themeStore, handleThemeToggle, Moon, Sunny }
   }
 }
 </script>

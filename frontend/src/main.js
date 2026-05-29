@@ -1,6 +1,59 @@
 import { createApp } from "vue"
 import { createPinia } from "pinia"
-import ElementPlus from "element-plus"
+import {
+  ElAlert,
+  ElBreadcrumb,
+  ElBreadcrumbItem,
+  ElButton,
+  ElButtonGroup,
+  ElCard,
+  ElCheckbox,
+  ElCheckboxGroup,
+  ElCol,
+  ElCollapse,
+  ElCollapseItem,
+  ElCollapseTransition,
+  ElDatePicker,
+  ElDescriptions,
+  ElDescriptionsItem,
+  ElDialog,
+  ElDivider,
+  ElDrawer,
+  ElDropdown,
+  ElDropdownItem,
+  ElDropdownMenu,
+  ElEmpty,
+  ElForm,
+  ElFormItem,
+  ElIcon,
+  ElInput,
+  ElInputNumber,
+  ElLoading,
+  ElMenu,
+  ElMenuItem,
+  ElOption,
+  ElPageHeader,
+  ElPagination,
+  ElPopconfirm,
+  ElPopover,
+  ElProgress,
+  ElRadio,
+  ElRadioButton,
+  ElRadioGroup,
+  ElResult,
+  ElRow,
+  ElSelect,
+  ElSkeleton,
+  ElSubMenu,
+  ElSwitch,
+  ElTabPane,
+  ElTable,
+  ElTableColumn,
+  ElTabs,
+  ElTag,
+  ElTooltip,
+  ElTreeSelect,
+} from "element-plus"
 import "element-plus/dist/index.css"
 import "element-plus/theme-chalk/dark/css-vars.css"
 import {
@@ -31,6 +84,60 @@ window.addEventListener('unhandledrejection', (event) => {
 
 const pinia = createPinia()
 
+const elementComponents = [
+  ElAlert,
+  ElBreadcrumb,
+  ElBreadcrumbItem,
+  ElButton,
+  ElButtonGroup,
+  ElCard,
+  ElCheckbox,
+  ElCheckboxGroup,
+  ElCol,
+  ElCollapse,
+  ElCollapseItem,
+  ElCollapseTransition,
+  ElDatePicker,
+  ElDescriptions,
+  ElDescriptionsItem,
+  ElDialog,
+  ElDivider,
+  ElDrawer,
+  ElDropdown,
+  ElDropdownItem,
+  ElDropdownMenu,
+  ElEmpty,
+  ElForm,
+  ElFormItem,
+  ElIcon,
+  ElInput,
+  ElInputNumber,
+  ElMenu,
+  ElMenuItem,
+  ElOption,
+  ElPageHeader,
+  ElPagination,
+  ElPopconfirm,
+  ElPopover,
+  ElProgress,
+  ElRadio,
+  ElRadioButton,
+  ElRadioGroup,
+  ElResult,
+  ElRow,
+  ElSelect,
+  ElSkeleton,
+  ElSubMenu,
+  ElSwitch,
+  ElTabPane,
+  ElTable,
+  ElTableColumn,
+  ElTabs,
+  ElTag,
+  ElTooltip,
+  ElTreeSelect,
+]
+
 // 按需注册常用图标
 const icons = {
   Edit, Delete, Search, Plus, Refresh,
@@ -45,5 +152,8 @@ for (const [key, component] of Object.entries(icons)) {
 
 app.use(pinia)
 app.use(router)
-app.use(ElementPlus)
+for (const component of elementComponents) {
+  app.use(component)
+}
+app.use(ElLoading)
 app.mount("#app")

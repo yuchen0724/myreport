@@ -45,6 +45,8 @@ def create_subscription(
             template_id=request.template_id,
             cron_expression=request.cron_expression,
             notify_channel=request.notify_channel,
+            semantic_metric_key=request.semantic_metric_key,
+            semantic_query=request.semantic_query,
         )
         return sub.to_dict()
     except ValueError as e:

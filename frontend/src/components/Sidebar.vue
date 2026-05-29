@@ -90,6 +90,10 @@
           <el-icon><Monitor /></el-icon>
           <span>连接池监控</span>
         </el-menu-item>
+        <el-menu-item index="/semantic-metrics">
+          <el-icon><DataLine /></el-icon>
+          <span>语义指标</span>
+        </el-menu-item>
       </el-sub-menu>
       
       <!-- 工具菜单 -->

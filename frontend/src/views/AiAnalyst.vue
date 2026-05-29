@@ -101,6 +101,7 @@ import { ref, nextTick, onMounted } from 'vue'
 import { User, Monitor } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
+import { sanitizeHtml } from '@/utils/sanitizeHtml'
 
 const messages = ref([])
 const inputText = ref('')
@@ -117,10 +118,10 @@ const quickQuestions = [
 
 const formatMessage = (content) => {
   // 简单的 Markdown 格式化
-  return content
+  return sanitizeHtml(content
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br>')
+    .replace(/\n/g, '<br>'))
 }
 
 const scrollToBottom = async () => {

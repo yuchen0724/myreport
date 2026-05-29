@@ -1,7 +1,7 @@
 <template>
   <div class="report-layout" :class="{ 'edit-mode': isEditing }">
     <grid-layout
-      :layout.sync="layoutItems"
+      v-model:layout="layoutModel"
       :col-num="12"
       :row-height="rowHeight"
       :is-draggable="isEditing"
@@ -42,6 +42,7 @@
 </template>
 
 <script>
+import { computed } from "vue"
 import { GridLayout, GridItem } from "grid-layout-plus"
 import "grid-layout-plus/es/index.mjs" // 样式随模块加载
 import WidgetSlot from "./WidgetSlot.vue"
@@ -57,9 +58,12 @@ export default {
   },
   emits: ["update:layoutItems", "editWidget", "removeWidget", "drillDown"],
   setup(props, { emit }) {
-    // grid-layout-plus 的 layout.sync 要求 layout 可响应式
-    // 父组件通过 v-model:layoutItems 绑定
-    return {}
+    const layoutModel = computed({
+      get: () => props.layoutItems,
+      set: (value) => emit("update:layoutItems", value),
+    })
+
+    return { layoutModel }
   },
 }
 </script>

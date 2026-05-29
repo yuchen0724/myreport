@@ -13,6 +13,8 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
     # 不需要审计的路径
     SKIP_PATHS = {
         "/health",
+        "/health/live",
+        "/health/ready",
         "/",
         "/docs",
         "/openapi.json",

@@ -17,6 +17,7 @@ from app.models.dashboard_widget import DashboardWidgetConfig
 from app.models.subscription import QuerySubscription, SubscriptionExecution
 from app.models.sql_review import SqlReview
 from app.models.rca import RcaMetricConfig, RcaAnalysisTask, RcaAnomaly
+from app.models.semantic_metric import SemanticMetric, SemanticMetricPermission, SemanticMetricVersion
 
 __all__ = [
     "User",
@@ -40,4 +41,7 @@ __all__ = [
     "RcaMetricConfig",
     "RcaAnalysisTask",
     "RcaAnomaly",
+    "SemanticMetric",
+    "SemanticMetricPermission",
+    "SemanticMetricVersion",
 ]

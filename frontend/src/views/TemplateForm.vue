@@ -200,8 +200,8 @@ const rules = {
 
 // 从 config 还原到表单
 const restoreFromConfig = (config) => {
-  form.data_source_id = config.data_source_id || null
-  form.sql = config.sql || ''
+  form.value.data_source_id = config.data_source_id || null
+  form.value.sql = config.sql || ''
   paramList.value = (config.params || []).map(p => ({
     name: p.name || '',
     label: p.label || p.name || '',
@@ -215,11 +215,7 @@ const restoreFromConfig = (config) => {
 // 从表单构建 config
 const buildConfig = () => {
   
-  const dsId = form.value.data_source_id
-  const sql = form.value.sql
-  
-  
-  const upperSql = (form.sql || '').toUpperCase().trim()
+  const upperSql = (form.value.sql || '').toUpperCase().trim()
   if (/\b(DROP\s+TABLE|DROP\s+DATABASE|TRUNCATE\s+TABLE|ALTER\s+TABLE)\b/i.test(upperSql)) {
     ElMessage.error('SQL 包含危险操作（DROP/TRUNCATE/ALTER），已拒绝')
     return null

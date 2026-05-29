@@ -189,15 +189,17 @@ import { ElMessage } from 'element-plus'
 import { MagicStick, User, SetUp, Promotion } from '@element-plus/icons-vue'
 import { chatStream } from '@/api/aiAnalyst'
 import { getGroups } from '@/api/nl2sql'
+import { sanitizeHtml } from '@/utils/sanitizeHtml'
 
 // 简易 markdown 渲染
 function renderMarkdown(text) {
   if (!text) return ''
-  return text
+  const html = text
     .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="code-block"><code>$2</code></pre>')
     .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\n/g, '<br>')
+  return sanitizeHtml(html)
 }
 
 export default {

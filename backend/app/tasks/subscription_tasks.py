@@ -7,7 +7,9 @@ from app.celery_app import celery_app
 from app.core.database import SessionLocal
 from app.models.subscription import QuerySubscription, SubscriptionExecution
 from app.models.template import Template
+from app.schemas.semantic_metric import SemanticMetricQueryRequest
 from app.services.query_service import QueryService
+from app.services.semantic_metric_query_service import SemanticMetricQueryService
 from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -55,48 +57,8 @@ def _execute_subscription_impl(subscription_id: int) -> dict:
         db.commit()
         db.refresh(exec_rec)
 
-        # get template
-        template = db.query(Template).filter(Template.id == sub.template_id).first()
-        if not template:
-            exec_rec.status = "failed"
-            exec_rec.error_message = f"模板不存在: {sub.template_id}"
-            db.commit()
-            return {"status": "error", "message": exec_rec.error_message}
-
-        # parse template config to get data_source_id and sql
-        import json
         try:
-            config = json.loads(template.config) if isinstance(template.config, str) else template.config
-        except (json.JSONDecodeError, TypeError):
-            config = {}
-
-        data_source_id = config.get("data_source_id") or config.get("dataSourceId")
-        sql = config.get("sql") or config.get("query")
-
-        if not sql:
-            exec_rec.status = "failed"
-            exec_rec.error_message = "模板配置中缺少 SQL 查询"
-            db.commit()
-            return {"status": "error", "message": exec_rec.error_message}
-
-        if not data_source_id:
-            exec_rec.status = "failed"
-            exec_rec.error_message = "模板配置中缺少 data_source_id"
-            db.commit()
-            return {"status": "error", "message": exec_rec.error_message}
-
-        # execute query
-        try:
-            from app.schemas.query import SQLQueryRequest
-            query_service = QueryService(db)
-            request = SQLQueryRequest(
-                data_source_id=data_source_id,
-                sql=sql,
-                page=1,
-                page_size=999999,  # full result for push
-            )
-            result = query_service.execute_sql(request, int(sub.user_id))
-            result_summary = f"查询完成: {result.total} 行数据, {result.execution_time_ms}ms"
+            template_name, result_summary = _execute_subscription_query(db, sub)
         except Exception as query_err:
             exec_rec.status = "failed"
             exec_rec.error_message = f"查询执行失败: {str(query_err)[:500]}"
@@ -106,9 +68,9 @@ def _execute_subscription_impl(subscription_id: int) -> dict:
         # send notification based on channel
         try:
             if sub.notify_channel == "feishu":
-                _send_feishu_notification(sub.user_id, template.name, result_summary)
+                _send_feishu_notification(sub.user_id, template_name, result_summary)
             elif sub.notify_channel == "email":
-                _send_email_notification(sub.user_id, template.name, result_summary)
+                _send_email_notification(sub.user_id, template_name, result_summary)
             else:
                 logger.warning("未知通知渠道: %s", sub.notify_channel)
         except Exception as notif_err:
@@ -132,6 +94,53 @@ def _execute_subscription_impl(subscription_id: int) -> dict:
         return {"status": "error", "message": str(e)[:500]}
     finally:
         db.close()
+
+
+def _execute_subscription_query(db, sub: QuerySubscription) -> tuple[str, str]:
+    if sub.semantic_metric_key:
+        query_config = sub.semantic_query or {}
+        metric, result = SemanticMetricQueryService(db).execute(
+            SemanticMetricQueryRequest(
+                metric_key=sub.semantic_metric_key,
+                start_time=query_config.get("start_time"),
+                end_time=query_config.get("end_time"),
+                dimensions=query_config.get("dimensions") or [],
+                filters=query_config.get("filters") or {},
+                page=1,
+                page_size=query_config.get("page_size", 1000),
+            ),
+            user_id=int(sub.user_id),
+            is_admin=False,
+        )
+        return metric.name, f"语义指标查询完成: {metric.name}, {result.total} 行数据, {result.execution_time_ms}ms"
+
+    template = db.query(Template).filter(Template.id == sub.template_id).first()
+    if not template:
+        raise ValueError(f"模板不存在: {sub.template_id}")
+
+    import json
+    try:
+        config = json.loads(template.config) if isinstance(template.config, str) else template.config
+    except (json.JSONDecodeError, TypeError):
+        config = {}
+
+    data_source_id = config.get("data_source_id") or config.get("dataSourceId")
+    sql = config.get("sql") or config.get("query")
+    if not sql:
+        raise ValueError("模板配置中缺少 SQL 查询")
+    if not data_source_id:
+        raise ValueError("模板配置中缺少 data_source_id")
+
+    from app.schemas.query import SQLQueryRequest
+    query_service = QueryService(db)
+    request = SQLQueryRequest(
+        data_source_id=data_source_id,
+        sql=sql,
+        page=1,
+        page_size=999999,
+    )
+    result = query_service.execute_sql(request, int(sub.user_id))
+    return template.name, f"查询完成: {result.total} 行数据, {result.execution_time_ms}ms"
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
