@@ -168,3 +168,31 @@ def test_ai_analyst_parse_action_handles_json_code_block(db_session):
     )
 
     assert action == {"tool": "list_metrics", "input": {"data_source_id": 10}}
+
+
+def test_ai_analyst_compacts_large_schema_without_losing_table_names(db_session):
+    service = AIAnalystService(db_session)
+    result = {
+        "success": True,
+        "total_count": 2,
+        "tables": [
+            {
+                "table_name": "wide_fact_table",
+                "column_count": 200,
+                "columns": [{"column": f"col_{index}"} for index in range(200)],
+            },
+            {
+                "table_name": "dim_store",
+                "column_count": 3,
+                "columns": [{"column": "store_id"}, {"column": "store_name"}, {"column": "city"}],
+            },
+        ],
+    }
+
+    compact = service._compact_tool_result_for_llm("get_schema", result)
+
+    assert compact["total_count"] == 2
+    assert [table["table_name"] for table in compact["tables"]] == ["wide_fact_table", "dim_store"]
+    assert len(compact["tables"][0]["columns_preview"]) == 12
+    assert compact["tables"][0]["columns_truncated"] is True
+    assert compact["tables"][1]["columns_preview"] == ["store_id", "store_name", "city"]

@@ -591,6 +591,36 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         else:
             return {"success": False, "error": f"未知工具: {tool_name}"}
 
+    def _compact_tool_result_for_llm(self, tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
+        """压缩工具结果，避免大 schema/结果集被硬截断后误导 LLM。"""
+        if tool_name != "get_schema" or not result.get("success"):
+            return result
+
+        compact_tables = []
+        for table in result.get("tables", []):
+            columns = table.get("columns", [])
+            compact_tables.append({
+                "table_name": table.get("table_name"),
+                "column_count": table.get("column_count", len(columns)),
+                "columns_preview": [
+                    column.get("column")
+                    for column in columns[:12]
+                    if isinstance(column, dict) and column.get("column")
+                ],
+                "columns_truncated": len(columns) > 12,
+            })
+
+        return {
+            "success": True,
+            "total_count": result.get("total_count", len(compact_tables)),
+            "tables": compact_tables,
+            "note": "已压缩 schema：包含全部表名、字段数量和前 12 个字段预览；如需完整字段，请指定 table_name 再调用 get_schema。",
+        }
+
+    def _format_tool_output(self, tool_name: str, result: Dict[str, Any], limit: int = 12000) -> str:
+        compact_result = self._compact_tool_result_for_llm(tool_name, result)
+        return json.dumps(compact_result, ensure_ascii=False, default=str)[:limit]
+
     def chat(
         self,
         message: str,
@@ -666,7 +696,7 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
             tool_calls.append(AIAnalystToolCall(
                 tool_name=tool_name,
                 tool_input=action.get("input", {}),
-                tool_output=json.dumps(tool_result, ensure_ascii=False)[:2000],
+                tool_output=self._format_tool_output(tool_name, tool_result, limit=4000),
             ))
 
             # 提取图表配置
@@ -674,7 +704,7 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
                 chart_config = tool_result.get("chart_config")
 
             # 将工具结果反馈给 LLM
-            tool_feedback = f"工具 [{tool_name}] 执行结果:\n{json.dumps(tool_result, ensure_ascii=False, default=str)[:3000]}"
+            tool_feedback = f"工具 [{tool_name}] 执行结果:\n{self._format_tool_output(tool_name, tool_result)}"
             messages.append({"role": "assistant", "content": response_text})
             messages.append({"role": "user", "content": tool_feedback})
 
@@ -752,12 +782,13 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
             yield {"type": "tool_call", "tool_name": tool_name, "tool_input": action.get("input", {})}
 
             tool_result = self._execute_tool(action, data_source_id, user_id=user_id)
-            yield {"type": "tool_result", "tool_name": tool_name, "tool_output": json.dumps(tool_result, ensure_ascii=False)[:2000]}
+            tool_output = self._format_tool_output(tool_name, tool_result, limit=4000)
+            yield {"type": "tool_result", "tool_name": tool_name, "tool_output": tool_output}
 
             tool_calls_record = {
                 "tool_name": tool_name,
                 "tool_input": action.get("input", {}),
-                "tool_output": json.dumps(tool_result, ensure_ascii=False)[:2000],
+                "tool_output": tool_output,
             }
             all_tool_calls.append(tool_calls_record)
 
@@ -766,7 +797,7 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
                 yield {"type": "chart", "chart_config": chart_config}
 
             # 反馈给 LLM
-            tool_feedback = f"工具 [{tool_name}] 执行结果:\n{json.dumps(tool_result, ensure_ascii=False, default=str)[:3000]}"
+            tool_feedback = f"工具 [{tool_name}] 执行结果:\n{self._format_tool_output(tool_name, tool_result)}"
             messages.append({"role": "assistant", "content": response_text})
             messages.append({"role": "user", "content": tool_feedback})
 
