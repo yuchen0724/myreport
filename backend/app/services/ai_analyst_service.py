@@ -482,19 +482,56 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
     def _parse_action(self, text: str) -> Optional[Dict[str, Any]]:
         """从 LLM 输出中解析 ACTION: {...} 指令"""
         import re
-        # 匹配 ACTION: {json} 或 ```json ... ```
-        match = re.search(r'ACTION:\s*(\{.*?\})', text, re.DOTALL)
+
+        def extract_balanced_json(source: str, start: int) -> Optional[str]:
+            brace_start = source.find("{", start)
+            if brace_start == -1:
+                return None
+
+            depth = 0
+            in_string = False
+            escaped = False
+            for index in range(brace_start, len(source)):
+                char = source[index]
+                if in_string:
+                    if escaped:
+                        escaped = False
+                    elif char == "\\":
+                        escaped = True
+                    elif char == '"':
+                        in_string = False
+                    continue
+
+                if char == '"':
+                    in_string = True
+                elif char == "{":
+                    depth += 1
+                elif char == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return source[brace_start:index + 1]
+            return None
+
+        # 匹配 ACTION: 后面的完整 JSON 对象。不能用非贪婪正则截取，
+        # 因为工具参数本身会包含嵌套对象，例如 {"input": {"data_source_id": 10}}。
+        match = re.search(r'ACTION:\s*', text, re.DOTALL)
         if match:
+            json_text = extract_balanced_json(text, match.end())
+            if not json_text:
+                return None
             try:
-                return json.loads(match.group(1))
+                return json.loads(json_text)
             except json.JSONDecodeError:
                 return None
 
         # 也匹配 ```json\n{...}\n``` 格式
-        match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
+        match = re.search(r'```json\s*', text, re.DOTALL)
         if match:
+            json_text = extract_balanced_json(text, match.end())
+            if not json_text:
+                return None
             try:
-                return json.loads(match.group(1))
+                return json.loads(json_text)
             except json.JSONDecodeError:
                 return None
 

@@ -139,3 +139,32 @@ def test_ai_analyst_execute_tool_dispatches_metric_tools(db_session, test_user):
 
     assert result["success"] is True
     assert result["metrics"][0]["metric_key"] == "gmv"
+
+
+def test_ai_analyst_parse_action_handles_nested_tool_input(db_session):
+    service = AIAnalystService(db_session)
+
+    action = service._parse_action('ACTION: {"tool":"get_schema","input":{"data_source_id":10}}')
+
+    assert action == {"tool": "get_schema", "input": {"data_source_id": 10}}
+
+
+def test_ai_analyst_parse_action_uses_first_action_when_model_repeats(db_session):
+    service = AIAnalystService(db_session)
+
+    action = service._parse_action(
+        'ACTION: {"tool":"get_schema","input":{"data_source_id":10}}'
+        'ACTION: {"tool":"get_schema","input":{"data_source_id":10}}'
+    )
+
+    assert action == {"tool": "get_schema", "input": {"data_source_id": 10}}
+
+
+def test_ai_analyst_parse_action_handles_json_code_block(db_session):
+    service = AIAnalystService(db_session)
+
+    action = service._parse_action(
+        '```json\n{"tool":"list_metrics","input":{"data_source_id":10}}\n```'
+    )
+
+    assert action == {"tool": "list_metrics", "input": {"data_source_id": 10}}
