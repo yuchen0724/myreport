@@ -24,6 +24,7 @@ from app.schemas.query import SQLQueryRequest
 from app.schemas.ai_analyst import AIAnalystChatResponse, AIAnalystMessage, AIAnalystToolCall
 from app.schemas.semantic_metric import SemanticMetricQueryRequest
 from app.services.semantic_metric_query_service import SemanticMetricQueryService
+from app.utils.semantic_runtime_context import build_semantic_runtime_context
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,8 @@ class AIAnalystService:
 重要规则：
 - 只执行 SELECT 查询，绝不执行 INSERT/UPDATE/DELETE/DROP 等修改操作
 - SQL 表名必须带库名前缀
+- 运行时语义层文档是数据逻辑来源；生成 SQL、选择工具或解释结果前，必须先依据语义层文档理解字段含义、指标口径、维度、关联关系和过滤条件
+- 如果语义层文档与实时 schema、字段名猜测或模型常识冲突，以语义层文档为准
 - 当不确定数据结构时，先查看 schema
 - 回答要简洁清晰，重点突出
 """
@@ -643,9 +646,10 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
 
         history = self._get_conversation_history(conversation_id)
         tools_prompt = self._build_tools_prompt(data_source_id)
+        semantic_context = build_semantic_runtime_context(self.db, data_source_id, message)
 
         # 构建完整对话
-        system_msg = self.SYSTEM_PROMPT + "\n\n" + tools_prompt
+        system_msg = self.SYSTEM_PROMPT + "\n\n" + tools_prompt + "\n\n" + semantic_context
         if group_id:
             system_msg += f"\n\n当前用户集团ID: {group_id}（查询时需过滤此集团数据）"
 
@@ -738,8 +742,9 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
 
         history = self._get_conversation_history(conversation_id)
         tools_prompt = self._build_tools_prompt(data_source_id)
+        semantic_context = build_semantic_runtime_context(self.db, data_source_id, message)
 
-        system_msg = self.SYSTEM_PROMPT + "\n\n" + tools_prompt
+        system_msg = self.SYSTEM_PROMPT + "\n\n" + tools_prompt + "\n\n" + semantic_context
         if group_id:
             system_msg += f"\n\n当前用户集团ID: {group_id}（查询时需过滤此集团数据）"
 

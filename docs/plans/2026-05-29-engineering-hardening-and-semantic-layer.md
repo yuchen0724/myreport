@@ -225,6 +225,8 @@
 
 **目标**: 让 AI 和 NL2SQL 优先引用指标层，而不是自由生成不稳定口径。
 
+**开发约束**: 开发、调试或调用任何 LLM 能力前，必须先阅读 `semantic/` 下相关语义层文档，确认数据逻辑、指标口径、维度、关联关系、过滤条件和业务含义，再调整 prompt、工具调用或 SQL 生成逻辑。
+
 **涉及模块**:
 - `backend/app/services/nl2sql_service.py`
 - `backend/app/services/ai_analyst_service.py`

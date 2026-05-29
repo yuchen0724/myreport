@@ -64,6 +64,12 @@ Thumbs.db
 # DeepSeek agent cache
 .deepseek/
 .hermes/
+
+# Local assistant/project notes
+AGENTS.md
+CLAUDE.md
+README.md
+
 frontend/vite.config.js.timestamp-*
 .venv/
 backend/models/

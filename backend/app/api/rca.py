@@ -8,6 +8,7 @@ from typing import List
 
 from app.core.database import get_db
 from app.core.auth_deps import get_current_user_id
+from app.utils.semantic_runtime_context import build_semantic_runtime_context
 from app.schemas.rca import (
     RcaMetricConfigCreate, RcaMetricConfigUpdate, RcaMetricConfigResponse,
     RcaAnalyzeRequest, RcaAnomalyResponse, RcaTaskResponse,
@@ -153,6 +154,11 @@ async def ai_analysis(
         )
 
     summary = "\n".join(summary_lines)
+    semantic_context = (
+        build_semantic_runtime_context(db, config.data_source_id, f"{metric_name}\n{summary}")
+        if config is not None
+        else ""
+    )
 
     # 读取提示词模板
     prompts_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'prompts')
@@ -174,7 +180,7 @@ async def ai_analysis(
 
     async def event_stream():
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": system_prompt + ("\n\n" + semantic_context if semantic_context else "")},
             {"role": "user", "content": user_prompt},
         ]
         try:
