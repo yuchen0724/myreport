@@ -1381,6 +1381,14 @@ class NL2SQLService:
                     logger.info(f"加载语义层文档(合并 {len(md_files)} 个文件): {ds_dir}")
                     return content
 
+            # 新增策略: semantic/{ds_name}.md
+            # 用于 data_source 名直接对应单文件的兼容结构。
+            ds_single_file = semantic_dir / f"{ds_name}.md"
+            if ds_single_file.exists():
+                content = ds_single_file.read_text(encoding="utf-8")
+                logger.info(f"加载语义层文档(新增单文件): {ds_single_file}")
+                return content
+
             # 回退策略：按数据库名单个文件查找
             single_file = semantic_dir / ds_name / f"{db_name}.md"
             if single_file.exists():

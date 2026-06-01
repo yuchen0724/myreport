@@ -26,12 +26,13 @@ from app.schemas.semantic_metric import SemanticMetricQueryRequest
 from app.services.semantic_metric_query_service import SemanticMetricQueryService
 from app.utils.semantic_runtime_context import build_semantic_runtime_context
 from app.models.user import User
+from app.core.redis import get_redis
 
 logger = logging.getLogger(__name__)
 
-# 简单内存缓存（对话历史）
-_conversation_store: Dict[str, List[Dict[str, str]]] = {}
+# 对话历史持久化存储（Redis）
 MAX_HISTORY = 20  # 保留最近 N 轮对话
+_REDIS_CONVERSATION_PREFIX = "ai_analyst:conversation:"
 
 
 class AIAnalystService:
@@ -80,6 +81,8 @@ class AIAnalystService:
 - 如果语义层文档与实时 schema、字段名猜测或模型常识冲突，以语义层文档为准
 - 当不确定数据结构时，先查看 schema
 - 回答要简洁清晰，重点突出
+- 用户明确要求生成图表时，必须先执行 SQL 查询获取数据，然后立即调用 generate_chart 工具生成图表，不要反问用户
+- execute_sql 执行成功后，如果用户要图表，不要再问用户图表类型，直接用柱状图（bar）生成
 """
 
     def __init__(self, db: Session):
@@ -92,12 +95,30 @@ class AIAnalystService:
         return get_llm_client()
 
     def _get_conversation_history(self, conversation_id: str) -> List[Dict[str, str]]:
-        """获取对话历史"""
-        return _conversation_store.get(conversation_id, [])
+        """获取对话历史（Redis）"""
+        try:
+            r = get_redis()
+            key = f"{_REDIS_CONVERSATION_PREFIX}{conversation_id}"
+            raw = r.get(key)
+            if not raw:
+                return []
+            return json.loads(raw)
+        except Exception:
+            # Redis 不可用时：保持系统可用性，退回为空历史（不保证记忆）
+            return []
 
     def _save_conversation_history(self, conversation_id: str, history: List[Dict[str, str]]):
-        """保存对话历史"""
-        _conversation_store[conversation_id] = history[-MAX_HISTORY * 2:]
+        """保存对话历史（Redis）"""
+        try:
+            r = get_redis()
+            key = f"{_REDIS_CONVERSATION_PREFIX}{conversation_id}"
+            trimmed = history[-MAX_HISTORY * 2:]
+            # TTL 24h，避免无限增长
+            r.setex(key, 24 * 3600, json.dumps(trimmed, ensure_ascii=False, default=str))
+        except Exception:
+            # Redis 不可用时：不报错，保持系统可用性
+            return
+
 
     def _build_tools_prompt(self, data_source_id: int) -> str:
         """构建可用工具描述（告知 LLM 可用工具和参数格式）"""
@@ -345,8 +366,34 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         else:
             columns = [f"col_{i}" for i in range(len(data[0])) if isinstance(data[0], (list, tuple))]
 
-        x_data = [row.get(x_axis_field) if isinstance(row, dict) else row[columns.index(x_axis_field)] for row in data]
-        y_data = [row.get(y_axis_field) if isinstance(row, dict) else row[columns.index(y_axis_field)] for row in data]
+        def _safe_get(row, field, columns):
+            """安全取值：兼容 dict/list/tuple，字段名不存在时尝试数值索引"""
+            if isinstance(row, dict):
+                if field in row:
+                    return row[field]
+                # 尝试数值索引
+                try:
+                    idx = int(field)
+                    keys = list(row.keys())
+                    if 0 <= idx < len(keys):
+                        return row[keys[idx]]
+                except (ValueError, TypeError):
+                    pass
+                return None
+            else:
+                if field in columns:
+                    return row[columns.index(field)]
+                # 尝试数值索引
+                try:
+                    idx = int(field)
+                    if 0 <= idx < len(row):
+                        return row[idx]
+                except (ValueError, TypeError, IndexError):
+                    pass
+                return None
+
+        x_data = [_safe_get(row, x_axis_field, columns) for row in data]
+        y_data = [_safe_get(row, y_axis_field, columns) for row in data]
 
         # 转数值
         try:

@@ -14,9 +14,16 @@ class SQLValidator:
         "CREATE", "GRANT", "REVOKE", "COMMIT", "ROLLBACK", "EXEC", "EXECUTE",
         # 新增：之前遗漏的危险语句
         "RENAME", "ANALYZE", "EXPLAIN", "SHOW", "SET",
-        "LOAD DATA", "REPLACE", "CALL", "DO", "HANDLER",
+        "LOAD DATA", "CALL", "DO", "HANDLER",
         "FLUSH", "INSTALL", "UNINSTALL", "KILL", "LOCK", "UNLOCK",
         "PURGE", "RESET", "SHUTDOWN", "XA", "PREPARE", "DEALLOCATE",
+    ]
+
+    # 仅禁止会产生“写入语义”的 REPLACE 形式，而放行 REPLACE() 函数。
+    # 以常见的写入语法 REPLACE INTO 为准；同时保留对 REPLACE TABLE 的防御。
+    _danger_replace_patterns = [
+        re.compile(r"\bREPLACE\s+INTO\b", re.IGNORECASE),
+        re.compile(r"\bREPLACE\s+TABLE\b", re.IGNORECASE),
     ]
 
     # 危险函数（可能用于信息泄露或攻击）
@@ -93,6 +100,11 @@ class SQLValidator:
         for kw, pattern in zip(cls.DANGER_KEYWORDS, cls._danger_patterns):
             if pattern.search(sql):
                 return False, f"不允许使用 {kw} 语句"
+
+        # 1.5 检查 REPLACE 写入语义（避免误伤 replace() 函数）
+        for p in cls._danger_replace_patterns:
+            if p.search(sql):
+                return False, "不允许使用 REPLACE 写入语句"
 
         # 2. 检查危险函数
         for func, pattern in zip(cls.DANGER_FUNCTIONS, cls._danger_func_patterns):

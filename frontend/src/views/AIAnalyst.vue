@@ -16,7 +16,7 @@
               <el-option
                 v-for="ds in dataSources"
                 :key="ds.id"
-                :label="ds.name"
+                :label="`${ds.name}（${ds.id}）`"
                 :value="ds.id"
               />
             </el-select>
@@ -33,7 +33,7 @@
               <el-option
                 v-for="g in groups"
                 :key="g.group_id"
-                :label="g.group_name"
+                :label="`${g.group_name}（${g.group_id}）`"
                 :value="g.group_id"
               />
             </el-select>
@@ -187,6 +187,7 @@
 import { ref, nextTick, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { MagicStick, User, SetUp, Promotion } from '@element-plus/icons-vue'
+import * as echarts from 'echarts'
 import { chatStream } from '@/api/aiAnalyst'
 import { getGroups } from '@/api/nl2sql'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
@@ -206,6 +207,8 @@ export default {
   name: 'AIAnalyst',
   components: { MagicStick, User, SetUp, Promotion },
   setup() {
+    // 会话兜底：即使页面 full reload（例如调试器开关），也尽量保留 ai-analyst 对话内容
+    const SESSION_KEY = 'ai_analyst_session_v1'
     const chatContainer = ref(null)
     const inputRef = ref(null)
     const inputMessage = ref('')
@@ -230,6 +233,37 @@ export default {
     ]
 
     const showGroupSelect = ref(false)
+
+    // 页面初始化：从 sessionStorage 恢复会话
+    function persistState() {
+      try {
+        sessionStorage.setItem(
+          SESSION_KEY,
+          JSON.stringify({
+            conversationId: conversationId.value,
+            dataSourceId: dataSourceId.value,
+            groupId: groupId.value,
+            messages: messages.value,
+          })
+        )
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    function restoreState() {
+      try {
+        const raw = sessionStorage.getItem(SESSION_KEY)
+        if (!raw) return
+        const state = JSON.parse(raw)
+        conversationId.value = state.conversationId ?? null
+        dataSourceId.value = state.dataSourceId ?? null
+        groupId.value = state.groupId ?? null
+        messages.value = Array.isArray(state.messages) ? state.messages : []
+      } catch (_) {
+        // ignore
+      }
+    }
 
     // 获取数据源列表
     async function loadDataSources() {
@@ -280,6 +314,11 @@ export default {
       })
     }
 
+    // 恢复状态后确保滚动到底部
+    restoreState()
+    nextTick(() => scrollToBottom())
+
+
     // 发送消息
     function sendMessage(e) {
       if (e && e.preventDefault) e.preventDefault()
@@ -293,6 +332,7 @@ export default {
         role: 'user',
         content: msg,
       })
+      persistState()
       scrollToBottom()
 
       // 流式请求
@@ -352,6 +392,7 @@ export default {
             streamingMessage.value = ''
             streamingToolCalls.value = []
             streamingChart.value = null
+            persistState()
             scrollToBottom()
           },
           onError(error) {
@@ -362,6 +403,7 @@ export default {
             isStreaming.value = false
             streamingMessage.value = ''
             streamingToolCalls.value = []
+            persistState()
             scrollToBottom()
           },
         }
@@ -381,6 +423,7 @@ export default {
       conversationId.value = null
       streamingMessage.value = ''
       streamingToolCalls.value = []
+      persistState()
     }
 
     function formatJson(obj) {
@@ -392,8 +435,53 @@ export default {
     }
 
     onMounted(() => {
-      loadDataSources()
+      // 恢复会话状态
+      restoreState()
+      nextTick(() => {
+        scrollToBottom()
+        renderCharts()
+        // 恢复数据源后，重新计算集团下拉状态
+        if (dataSourceId.value) {
+          loadDataSources().then(() => {
+            onDataSourceChange(dataSourceId.value)
+          })
+        } else {
+          loadDataSources()
+        }
+      })
     })
+
+    // 渲染所有图表
+    const chartInstances = {}
+    function renderCharts() {
+      nextTick(() => {
+        document.querySelectorAll('.chart-container').forEach((el, idx) => {
+          const msgEl = el.closest('.message')
+          if (!msgEl) return
+          // 找到对应的消息
+          const allMessages = document.querySelectorAll('.message')
+          let msgIndex = -1
+          allMessages.forEach((m, i) => { if (m === msgEl) msgIndex = i })
+          if (msgIndex < 0 || msgIndex >= messages.value.length) return
+          const msg = messages.value[msgIndex]
+          if (!msg || !msg.chart_config) return
+          // 销毁旧实例
+          if (chartInstances[idx]) {
+            chartInstances[idx].dispose()
+          }
+          const chartEl = el.querySelector('.chart')
+          if (!chartEl) return
+          const chart = echarts.init(chartEl)
+          chart.setOption(msg.chart_config)
+          chartInstances[idx] = chart
+        })
+      })
+    }
+
+    // 监听消息变化，自动渲染图表
+    watch(messages, () => {
+      renderCharts()
+    }, { deep: true })
 
     return {
       chatContainer,

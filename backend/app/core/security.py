@@ -13,6 +13,18 @@ from app.config import get_settings
 
 settings = get_settings()
 
+
+# Debug: token 校验失败时，快速定位是否运行时配置发生变化（不打印 secret_key 明文）。
+def _debug_jwt_config_fingerprint() -> str:
+    try:
+        import hashlib
+        sk = settings.secret_key or ""
+        algo = settings.algorithm or ""
+        sk_hash = hashlib.sha256(sk.encode("utf-8")).hexdigest()[:12]
+        return f"algo={algo}, secret_key_sha256[:12]={sk_hash}, secret_key_len={len(sk)}"
+    except Exception:
+        return "fingerprint_unavailable"
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # 密码加密器（惰性初始化）
@@ -88,6 +100,11 @@ def decode_access_token(token: str) -> Optional[dict]:
         return payload
     except Exception:
         # 捕获所有 JWT 相关异常：过期、格式错误、签名错误等
+        # 额外输出配置指纹，辅助定位“最后一次请求是否落到不同实例/配置”。
+        try:
+            print(f"[JWT_DECODE_DEBUG] failed: {_debug_jwt_config_fingerprint()}")
+        except Exception:
+            pass
         return None
 
 
