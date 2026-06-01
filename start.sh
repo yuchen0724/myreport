@@ -147,11 +147,11 @@ start_backend() {
             UVICORN_BIN="uvicorn"
         fi
 
-        # 根据 DEBUG 环境变量决定是否启用 --reload（生产环境应设置 DEBUG=false）
-        RELOAD_FLAG="--reload"
+        # 开发模式启用 --reload，生产环境关闭
+        RELOAD_FLAG=""
         if [ "${DEBUG:-true}" = "true" ]; then
-            RELOAD_FLAG=""
-            echo -e "${YELLOW}⚠ 开发模式: 启用 --reload (生产环境请设置 DEBUG=false)${NC}"
+            RELOAD_FLAG="--reload"
+            echo -e "${YELLOW}⚠ 开发模式: 文件变更自动重启 (生产环境请设置 DEBUG=false)${NC}"
         fi
 
                 nohup env PYTHONPATH="$BACKEND_DIR:$PYTHONPATH" $UVICORN_BIN app.main:app --host 0.0.0.0 --port $BACKEND_PORT $RELOAD_FLAG \

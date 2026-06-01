@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-SEMANTIC_PROMPT_VERSION = "semantic-snapshot-v10"
+SEMANTIC_PROMPT_VERSION = "semantic-snapshot-v11"
 SEMANTIC_SCHEMA_PATH = Path(__file__).resolve().parents[3] / "semantic" / "semantic_layer.schema.json"
 
 

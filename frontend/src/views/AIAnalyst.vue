@@ -110,7 +110,7 @@
 
             <!-- 图表展示 -->
             <div v-if="msg.chart_config" class="chart-container">
-              <div ref="chartRef" class="chart"></div>
+              <div :id="'chart-' + idx" class="chart"></div>
             </div>
 
             <!-- 文本内容 -->
@@ -130,7 +130,7 @@
         </div>
 
         <!-- 流式消息占位 -->
-        <div v-if="isStreaming && streamingMessage" class="message assistant">
+        <div v-if="isStreaming && (streamingMessage || streamingChart)" class="message assistant">
           <div class="message-avatar">
             <el-icon :size="20"><MagicStick /></el-icon>
           </div>
@@ -148,6 +148,10 @@
                   <span v-if="!tc.done" class="spinner"></span>
                 </el-tag>
               </div>
+            </div>
+            <!-- 流式图表占位：chart 事件到达时直接渲染 -->
+            <div v-if="streamingChart" class="chart-container">
+              <div id="streaming-chart" class="chart"></div>
             </div>
             <div
               v-if="streamingMessage"
@@ -340,6 +344,11 @@ export default {
       streamingMessage.value = ''
       streamingToolCalls.value = []
       streamingChart.value = null
+      // 清理旧的流式图表实例
+      if (window._streamingChart) {
+        window._streamingChart.dispose()
+        window._streamingChart = null
+      }
 
       const streamRef = chatStream(
         {
@@ -371,6 +380,19 @@ export default {
           },
           onChart(config) {
             streamingChart.value = config
+            // 图表事件到达时直接渲染到当前流式消息的占位区域
+            nextTick(function() {
+              var placeholder = document.getElementById('streaming-chart')
+              if (!placeholder) return
+              try {
+                if (window._streamingChart) window._streamingChart.dispose()
+                var chart = echarts.init(placeholder)
+                chart.setOption(config)
+                window._streamingChart = chart
+              } catch (e) {
+                console.error('[AI-Analyst] 流式图表渲染失败:', e)
+              }
+            })
             scrollToBottom()
           },
           onDone(data) {
@@ -388,12 +410,16 @@ export default {
               chart_config: streamingChart.value,
             })
             conversationId.value = data.conversation_id || conversationId.value
-            isStreaming.value = false
-            streamingMessage.value = ''
-            streamingToolCalls.value = []
-            streamingChart.value = null
-            persistState()
-            scrollToBottom()
+            // 先渲染图表到正式消息，再关流式区域（避免图表闪烁消失）
+            renderCharts()
+            setTimeout(function() {
+              isStreaming.value = false
+              streamingMessage.value = ''
+              streamingToolCalls.value = []
+              streamingChart.value = null
+              persistState()
+              scrollToBottom()
+            }, 50)
           },
           onError(error) {
             messages.value.push({
@@ -423,6 +449,11 @@ export default {
       conversationId.value = null
       streamingMessage.value = ''
       streamingToolCalls.value = []
+      streamingChart.value = null
+      if (window._streamingChart) {
+        window._streamingChart.dispose()
+        window._streamingChart = null
+      }
       persistState()
     }
 
@@ -452,29 +483,39 @@ export default {
     })
 
     // 渲染所有图表
-    const chartInstances = {}
+    var chartInstances = {}
     function renderCharts() {
-      nextTick(() => {
-        document.querySelectorAll('.chart-container').forEach((el, idx) => {
-          const msgEl = el.closest('.message')
-          if (!msgEl) return
-          // 找到对应的消息
-          const allMessages = document.querySelectorAll('.message')
-          let msgIndex = -1
-          allMessages.forEach((m, i) => { if (m === msgEl) msgIndex = i })
-          if (msgIndex < 0 || msgIndex >= messages.value.length) return
-          const msg = messages.value[msgIndex]
-          if (!msg || !msg.chart_config) return
-          // 销毁旧实例
-          if (chartInstances[idx]) {
-            chartInstances[idx].dispose()
-          }
-          const chartEl = el.querySelector('.chart')
+      nextTick(function() {
+        var hasNewChart = false
+        messages.value.forEach(function(msg, idx) {
+          if (!msg.chart_config) return
+          var key = 'chart-' + idx
+          var chartEl = document.getElementById(key)
           if (!chartEl) return
-          const chart = echarts.init(chartEl)
-          chart.setOption(msg.chart_config)
-          chartInstances[idx] = chart
+          // 判断是否为最新消息的图表
+          if (idx === messages.value.length - 1) hasNewChart = true
+          if (chartInstances[key]) {
+            chartInstances[key].setOption(msg.chart_config)
+            return
+          }
+          try {
+            var chart = echarts.init(chartEl)
+            chart.setOption(msg.chart_config)
+            chartInstances[key] = chart
+            setTimeout(function() { chart.resize(); }, 200)
+          } catch (e) {
+            console.error('[AI-Analyst] 图表渲染失败:', e)
+          }
         })
+        // 仅当最新消息包含图表时才滚动到图表位置
+        if (hasNewChart && chatContainer.value) {
+          var lastMsg = messages.value[messages.value.length - 1]
+          if (lastMsg && lastMsg.chart_config) {
+            var key = 'chart-' + (messages.value.length - 1)
+            var el = document.getElementById(key)
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          }
+        }
       })
     }
 
@@ -660,11 +701,18 @@ export default {
 
 .chart-container {
   margin: 8px 0;
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 12px;
 }
 
 .chart {
   width: 100%;
   height: 300px;
+  border: 2px solid #409eff;
+  border-radius: 4px;
+  background: #fafafa;
 }
 
 .input-area {

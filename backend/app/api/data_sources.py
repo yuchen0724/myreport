@@ -49,7 +49,7 @@ async def get_data_source(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id)
 ):
-    """获取数据源详情（不包含密码）"""
+    """获取数据源详情"""
     ds_service = DataSourceService(db)
     ds = ds_service.get_data_source(ds_id)
     if not ds:
@@ -57,6 +57,12 @@ async def get_data_source(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="数据源不存在",
         )
+    # 编辑时需要返回解密密码
+    from app.models.data_source import DataSource
+    db_ds = db.query(DataSource).filter(DataSource.id == ds_id).first()
+    if db_ds and db_ds.password_encrypted:
+        from app.core.security import decrypt_password
+        ds.password_decrypted = decrypt_password(db_ds.password_encrypted)
     return ds
 
 

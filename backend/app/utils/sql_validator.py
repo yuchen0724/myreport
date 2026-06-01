@@ -32,7 +32,7 @@ class SQLValidator:
         "SLEEP", "WAITFOR", "DELAY", "UUID", "VERSION", "DATABASE",
         "USER", "CURRENT_USER", "LOAD_CONCATENATED_FILE", "READFILE",
         # 新增
-        "CHAR", "CONCAT", "GROUP_CONCAT", "INFORMATION_SCHEMA",
+        "CONCAT", "GROUP_CONCAT",
     ]
 
     # 常见注入模式

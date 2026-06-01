@@ -8,6 +8,7 @@ from app.models.export_task import ExportTask
 from app.models.associations import role_permissions
 from app.models.task_alert import TaskAlert
 from app.models.template_version import TemplateVersion
+from app.models.template import Template
 from app.models.template_share import TemplateShare
 from app.models.sql_analysis import SQLAnalysisResult
 from app.models.scheduled_report import ScheduledReport, ReportDelivery
@@ -44,4 +45,5 @@ __all__ = [
     "SemanticMetric",
     "SemanticMetricPermission",
     "SemanticMetricVersion",
+    "Template",
 ]

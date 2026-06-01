@@ -86,6 +86,7 @@ class AIAnalystService:
 |- 当不确定数据结构时，先查看 schema
 |- 门店名不能默认从事实表取；需要展示门店名时，必须按 `(group_id, store_code)` JOIN 门店维表后，再从维表选择 `store_name`
 |- 只有当语义层或 schema 明确写出事实表自带 `store_name` 时，才允许直接引用事实表中的 `store_name`
+|- 同一个 SQL/同一轮工具链里，遇到已明确报过的错误类型（如 QUALIFY、字段不存在、多级库名前缀、错误表名、缺失 JOIN 键）后，必须先停下来重新检查 schema/语义层/字段映射，再换写法；禁止在同一错误方向上连续重复提交同类 SQL
 
 - execute_sql 执行成功后，如果用户要图表，不要再问用户图表类型，直接用柱状图（bar）生成
 """
@@ -128,32 +129,49 @@ class AIAnalystService:
     def _build_tools_prompt(self, data_source_id: int) -> str:
         """构建可用工具描述（告知 LLM 可用工具和参数格式）"""
         return f"""
-当前可用工具（以 JSON 格式调用）：
+当前可用工具（以 JSON 格式调用）。按优先级排序：
 
-1. get_schema - 获取数据库表结构
-   输入: {{"tool": "get_schema", "input": {{"data_source_id": {data_source_id}}}}}
-
-2. execute_sql - 执行 SQL 查询
+1. **execute_sql** — 执行 SQL 查询（只读 SELECT）
    输入: {{"tool": "execute_sql", "input": {{"sql": "SELECT ...", "data_source_id": {data_source_id}}}}}
+   使用时机：当你有足够的表结构和字段信息后，立即使用此工具查询数据，不要反复查看 schema。
 
-3. generate_chart - 生成图表配置
-   输入: {{"tool": "generate_chart", "input": {{"chart_type": "bar|line|pie|scatter|area", "data": [...], "x_axis_field": "字段名", "y_axis_field": "字段名", "title": "图表标题"}}}}
+2. **get_schema** — 获取数据库表结构
+   输入: {{"tool": "get_schema", "input": {{"data_source_id": {data_source_id}}}}}
+   可选参数: "table_name": "表名"（指定只看某张表的完整字段）
+   使用时机：不确定表名或字段名时使用。**最多调用 2 次**，获取足够信息后立即转到 execute_sql。
 
-4. analyze_data - 数据分析洞察
-   输入: {{"tool": "analyze_data", "input": {{"data": [...], "columns": [...], "question": "用户问题"}}}}
-
-5. list_metrics - 查看可用语义指标
+3. **list_metrics** — 查看当前用户可用的统一业务指标
    输入: {{"tool": "list_metrics", "input": {{"data_source_id": {data_source_id}}}}}
+   使用时机：用户提到销售额、成交金额、订单数等业务指标时，优先查找可用指标。
 
-6. query_metric - 查询语义指标
+4. **query_metric** — 按统一口径查询语义指标
    输入: {{"tool": "query_metric", "input": {{"metric_key": "gmv", "data_source_id": {data_source_id}, "dimensions": ["store_id"], "start_time": "2026-05-01", "end_time": "2026-06-01", "filters": {{}}, "page": 1, "page_size": 50}}}}
+
+5. **generate_chart** — 生成 ECharts 图表配置（交互式，支持缩放和图例切换）
+   输入（单系列）：{{"tool": "generate_chart", "input": {{"chart_type": "bar|line|pie|scatter", "data": [...], "x_axis_field": "字段名", "y_axis_field": "字段名", "title": "图表标题"}}}}
+   输入（多系列/多条线）：{{"tool": "generate_chart", "input": {{"chart_type": "line", "data": [...], "x_axis_field": "日期字段", "y_axis_field": "第一个值字段", "title": "标题", "series_fields": ["门店1", "门店2", "门店3"]}}}}
+   说明：多系列模式适用于多个实体(门店/品类)对比趋势，每个字段一条不同颜色的线，带 dataZoom 缩放滑块和图例切换。数据格式为 wide format（每行一个时间点，每个门店一列）。
+
+6. **analyze_data** — 数据分析洞察
+   输入: {{"tool": "analyze_data", "input": {{"data": [...], "columns": [...], "question": "用户问题"}}}}
+   使用时机：需要对已有数据进行统计分析、趋势分析、异常检测时使用。
+
+---
+
+**重要规则**：
+- 先通过 get_schema（最多 2 次）了解表结构，然后立即用 execute_sql 查询数据
+- 同一个工具不要连续重复调用（尤其是 get_schema）
+- 调用 execute_sql 时，SQL 必须使用完整的 库名.表名 格式
+- **Doris SQL 提示**：日期过滤使用 `dt >= 20260501 AND dt < 20260601` 整数比较格式，不要使用 DATE_FORMAT/DATE_SUB 函数
+- **分步执行**：先执行简单 SQL 确认表有数据（如 `SELECT COUNT(*) FROM 库.表 WHERE dt >= 20260501`），不要一步写出复杂 SQL
+- **不要生成 HTML/JS 代码**：需要图表时请使用 generate_chart 工具，不要在文字回复中写 HTML、JS 或 echarts 代码。不要告诉用户"复制代码另存为 html"——图表直接由系统渲染。
+- **每次都需要调 generate_chart**：即使用户的后续追问是同一批数据，也必须重新调用 generate_chart 工具来生成图表配置。禁止在文字中写"图表已生成"而不实际调用工具。
 
 当你需要使用工具时，请输出如下格式（一行 JSON）：
 ACTION: {{"tool": "工具名", "input": {{参数}}}}
 
 当你不需要使用工具，直接回答用户问题时，正常输出文字即可。
 """
-
     # ── 工具执行 ──────────────────────────────────────────────────
 
     def execute_sql_tool(self, sql: str, data_source_id: int) -> Dict[str, Any]:
@@ -371,19 +389,19 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         x_axis_field: str,
         y_axis_field: str,
         title: str = "",
+        series_fields: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """生成 ECharts 图表配置"""
+        """生成 ECharts 图表配置（支持单系列/多系列）"""
         if not data:
             return {"success": False, "error": "无数据", "chart_config": None}
 
-        # 从第一行数据推断列名（如果 data 是 list of dict）
+        # 从第一行数据推断列名
         if isinstance(data[0], dict):
             columns = list(data[0].keys())
         else:
             columns = [f"col_{i}" for i in range(len(data[0])) if isinstance(data[0], (list, tuple))]
 
-        def _safe_get(row, field, columns):
-            """安全取值：兼容 dict/list/tuple，字段名不存在时尝试数值索引"""
+        def _safe_get(row, field, cols):
             if isinstance(row, dict):
                 if field in row:
                     return row[field]
@@ -395,8 +413,8 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
                 except (ValueError, TypeError):
                     pass
                 return None
-            if field in columns:
-                return row[columns.index(field)]
+            if field in cols:
+                return row[cols.index(field)]
             try:
                 idx = int(field)
                 if 0 <= idx < len(row):
@@ -406,9 +424,90 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
             return None
 
         x_axis_field, y_axis_field = infer_chart_axes(columns, data, x_axis_field, y_axis_field)
-        x_data = [_safe_get(row, x_axis_field, columns) for row in data]
-        y_data = [_safe_get(row, y_axis_field, columns) for row in data]
 
+        x_data = [_safe_get(row, x_axis_field, columns) for row in data]
+        # 去重保持顺序
+        seen = set()
+        x_unique = []
+        for v in x_data:
+            sv = str(v)
+            if sv not in seen:
+                seen.add(sv)
+                x_unique.append(sv)
+
+        # 预设颜色（12色，足够区分门店/品类）
+        colors = [
+            "#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de",
+            "#3ba272", "#fc8452", "#9a60b4", "#ea7ccc", "#1ab1ff",
+            "#ff9f7f", "#b6a2de",
+        ]
+
+        # ── 多系列模式 ──────────────────────────────────────────
+        if series_fields and len(series_fields) > 1:
+            series_list = []
+            legend_data = []
+            for idx, sf in enumerate(series_fields):
+                sf = str(sf)
+                sdata = [_safe_get(row, sf, columns) for row in data]
+                try:
+                    sdata = [float(v) if v is not None else 0 for v in sdata]
+                except (ValueError, TypeError):
+                    pass
+                series_list.append({
+                    "name": sf,
+                    "type": chart_type if chart_type in ("bar", "line", "scatter") else "line",
+                    "data": sdata,
+                    "smooth": chart_type == "line",
+                    "symbol": "circle",
+                    "symbolSize": 4,
+                    "lineStyle": {"width": 2},
+                    "itemStyle": {"color": colors[idx % len(colors)]},
+                })
+                legend_data.append(sf)
+
+            chart_config = {
+                "title": {"text": title or "多系列趋势图"},
+                "tooltip": {
+                    "trigger": "axis",
+                    "backgroundColor": "rgba(255,255,255,0.95)",
+                    "borderColor": "#e4e7ed",
+                    "borderWidth": 1,
+                    "textStyle": {"color": "#303133", "fontSize": 13},
+                },
+                "legend": {
+                    "data": legend_data,
+                    "top": 8,
+                    "textStyle": {"fontSize": 12},
+                    "type": "scroll",
+                },
+                "grid": {"left": 72, "right": 32, "bottom": 60, "top": 52},
+                "xAxis": {
+                    "type": "category",
+                    "data": x_unique,
+                    "axisLabel": {"rotate": 30, "fontSize": 11},
+                },
+                "yAxis": {
+                    "type": "value",
+                    "name": title or "值",
+                    "nameTextStyle": {"fontSize": 12},
+                    "axisLabel": {"fontSize": 11},
+                    "splitLine": {"lineStyle": {"type": "dashed", "color": "#f0f2f5"}},
+                },
+                "dataZoom": [
+                    {"type": "inside", "start": 0, "end": 100},
+                    {"type": "slider", "start": 0, "end": 100, "height": 20, "bottom": 8},
+                ],
+                "series": series_list,
+            }
+            return {
+                "success": True,
+                "chart_config": chart_config,
+                "chart_type": chart_type,
+                "series_count": len(series_fields),
+            }
+
+        # ── 单系列（单条线/柱） ─────────────────────────────────
+        y_data = [_safe_get(row, y_axis_field, columns) for row in data]
         try:
             y_data = [float(v) if v is not None else 0 for v in y_data]
         except (ValueError, TypeError):
@@ -437,12 +536,7 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
             chart_config = {
                 "title": {"text": title or y_axis_field},
                 "tooltip": {"trigger": "item"},
-                "series": [
-                    {
-                        "type": "pie",
-                        "data": pie_data,
-                    }
-                ],
+                "series": [{"type": "pie", "data": pie_data}],
             }
 
         return {
@@ -628,6 +722,7 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
                 x_axis_field=tool_input.get("x_axis_field", ""),
                 y_axis_field=tool_input.get("y_axis_field", ""),
                 title=tool_input.get("title", ""),
+                series_fields=tool_input.get("series_fields"),
             )
         elif tool_name == "analyze_data":
             return self.analyze_data_tool(
@@ -663,22 +758,23 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         compact_tables = []
         for table in result.get("tables", []):
             columns = table.get("columns", [])
+            preview_columns = [
+                column.get("column")
+                for column in columns[:100]
+                if isinstance(column, dict) and column.get("column")
+            ]
             compact_tables.append({
                 "table_name": table.get("table_name"),
-                "column_count": table.get("column_count", len(columns)),
-                "columns_preview": [
-                    column.get("column")
-                    for column in columns[:12]
-                    if isinstance(column, dict) and column.get("column")
-                ],
-                "columns_truncated": len(columns) > 12,
+                "column_count": len(columns),  # 保留总数让 LLM 知道表规模
+                "columns_preview": preview_columns,
+                "columns_truncated": len(columns) > 100,
             })
 
         return {
             "success": True,
             "total_count": result.get("total_count", len(compact_tables)),
             "tables": compact_tables,
-            "note": "已压缩 schema：包含全部表名、字段数量和前 12 个字段预览；如需完整字段，请指定 table_name 再调用 get_schema。",
+            "note": f"已展示前 100 个字段（共 {sum(t['column_count'] for t in compact_tables)} 个字段）。字段预览已足够判断可用列，请直接使用 execute_sql 查询数据，不要再重复调用 get_schema。如需进行门店名查询，请 JOIN dim_store 维表而非在事实表中查找门店名。",
         }
 
     def _format_tool_output(self, tool_name: str, result: Dict[str, Any], limit: int = 12000) -> str:
@@ -718,11 +814,12 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         messages.extend(history)
         messages.append({"role": "user", "content": message})
 
-        # Agent 循环（最多 5 轮工具调用）
+        # Agent 循环（最多 15 轮工具调用）
         chart_config = None
         tool_calls = []
         all_text = []
-        for step in range(5):
+        last_successful_result = None
+        for step in range(15):
             llm_client = self._get_llm_client()
             try:
                 response_text = llm_client.chat(messages, temperature=0.0)
@@ -764,6 +861,10 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
                 tool_output=self._format_tool_output(tool_name, tool_result, limit=4000),
             ))
 
+            # 记录最后一次成功的 SQL 结果（用于 fallback）
+            if tool_name == "execute_sql" and tool_result.get("success"):
+                last_successful_result = tool_result
+
             # 提取图表配置
             if tool_name == "generate_chart" and tool_result.get("success"):
                 chart_config = tool_result.get("chart_config")
@@ -773,8 +874,17 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
             messages.append({"role": "assistant", "content": response_text})
             messages.append({"role": "user", "content": tool_feedback})
 
-        # 达到最大轮次
-        final_content = all_text[-1] if all_text else "已完成分析。"
+        # 达到最大轮次 — 尝试用最后一次结果生成总结
+        if last_successful_result:
+            rows = last_successful_result.get("rows", [])
+            columns = last_successful_result.get("columns", [])
+            if rows:
+                preview = json.dumps(rows[:10], ensure_ascii=False, default=str)[:2000]
+                final_content = f"查询完成，共 {last_successful_result.get('total', len(rows))} 条结果（仅显示前 {min(10, len(rows))} 条）：\n\n列: {columns}\n数据: {preview}"
+            else:
+                final_content = "查询完成，但结果为空。"
+        else:
+            final_content = all_text[-1] if all_text else "已完成分析。"
         return AIAnalystChatResponse(
             conversation_id=conversation_id,
             message=AIAnalystMessage(
@@ -816,8 +926,9 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         chart_config = None
         all_tool_calls = []
         all_text = []
+        last_successful_result = None
 
-        for step in range(5):
+        for step in range(15):
             llm_client = self._get_llm_client()
 
             try:
@@ -858,6 +969,10 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
             }
             all_tool_calls.append(tool_calls_record)
 
+            # 记录最后一次成功的 SQL 结果（用于 fallback）
+            if tool_name == "execute_sql" and tool_result.get("success"):
+                last_successful_result = tool_result
+
             if tool_name == "generate_chart" and tool_result.get("success"):
                 chart_config = tool_result.get("chart_config")
                 yield {"type": "chart", "chart_config": chart_config}
@@ -867,31 +982,20 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
             messages.append({"role": "assistant", "content": response_text})
             messages.append({"role": "user", "content": tool_feedback})
 
+        # 达到最大轮次 — 如果有成功结果，发送 fallback 数据
+        if last_successful_result:
+            rows = last_successful_result.get("rows", [])
+            columns = last_successful_result.get("columns", [])
+            if rows:
+                preview = json.dumps(rows[:10], ensure_ascii=False, default=str)[:2000]
+                fallback_text = f"查询完成，共 {last_successful_result.get('total', len(rows))} 条结果（仅显示前 {min(10, len(rows))} 条）：\n\n列: {columns}\n数据: {preview}"
+            else:
+                fallback_text = "查询完成，但结果为空。"
+            yield {"type": "token", "content": fallback_text}
         yield {"type": "done", "conversation_id": conversation_id}
 
     async def _stream_llm_call(self, llm_client: LLMClient, messages: List[Dict[str, str]]) -> str:
-        """
-        调用 LLM（尽量使用流式）
-        如果 LangChain adapter 可用则流式调用，否则回退到同步调用
-        """
-        try:
-            from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-
-            # 尝试使用 LangChain 流式
-            if hasattr(llm_client, '_build_langchain_chat_model'):
-                model = llm_client._build_langchain_chat_model(temperature=0.0)
-                lc_messages = llm_client._build_langchain_messages(messages)
-
-                full_text = ""
-                async for chunk in model.astream(lc_messages):
-                    chunk_text = llm_client._extract_langchain_content(chunk)
-                    if chunk_text:
-                        full_text += chunk_text
-                return full_text
-        except Exception as e:
-            logger.debug(f"[AI-Analyst] 流式调用失败，回退同步: {e}")
-
-        # 回退到同步调用
+        """调用 LLM 获取完整响应文本（使用同步调用，可靠返回完整结果）"""
         return llm_client.chat(messages, temperature=0.0)
 
     # ── Schema 查询 ──────────────────────────────────────────────
