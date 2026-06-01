@@ -20,6 +20,7 @@ from app.services.query_service import QueryService
 from app.repositories.data_source_repository import DataSourceRepository
 from app.repositories.semantic_metric_repository import SemanticMetricRepository
 from app.utils.sql_validator import SQLValidator
+from app.utils.sql_normalizer import strip_trailing_semicolon
 from app.schemas.query import SQLQueryRequest
 from app.schemas.ai_analyst import AIAnalystChatResponse, AIAnalystMessage, AIAnalystToolCall
 from app.schemas.semantic_metric import SemanticMetricQueryRequest
@@ -154,6 +155,7 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
     def execute_sql_tool(self, sql: str, data_source_id: int) -> Dict[str, Any]:
         """执行 SQL 查询工具"""
         # 验证 SQL 安全
+        sql = strip_trailing_semicolon(sql)
         is_valid, msg = SQLValidator.validate(sql)
         if not is_valid:
             return {"success": False, "error": f"SQL 验证失败: {msg}", "columns": [], "rows": [], "total": 0}

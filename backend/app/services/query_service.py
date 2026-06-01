@@ -9,6 +9,7 @@ from app.repositories.data_source_repository import DataSourceRepository
 from app.repositories.query_history_repository import QueryHistoryRepository
 from app.schemas.query import SQLQueryRequest, SQLQueryResponse
 from app.utils.sql_validator import SQLValidator
+from app.utils.sql_normalizer import strip_trailing_semicolon
 from app.core.security import decrypt_password  # noqa: F401 - kept for legacy patch points
 from app.services.cache_service import cache_service, full_cache_service
 from app.utils.metrics import metrics_collector
@@ -47,7 +48,8 @@ class QueryService:
     def execute_sql(self, request: SQLQueryRequest, user_id: int) -> SQLQueryResponse:
         """执行 SQL 查询"""
         # 验证 SQL 安全（SQLValidator.validate 是唯一校验入口）
-        is_valid, message = SQLValidator.validate(request.sql)
+        sql = strip_trailing_semicolon(request.sql)
+        is_valid, message = SQLValidator.validate(sql)
         if not is_valid:
             raise ValueError(message)
 

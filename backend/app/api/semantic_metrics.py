@@ -21,11 +21,13 @@ from app.schemas.semantic_metric import (
 )
 from app.services.semantic_metric_query_service import SemanticMetricQueryService
 from app.utils.sql_validator import SQLValidator
+from app.utils.sql_normalizer import strip_trailing_semicolon
 
 router = APIRouter(prefix="/api/semantic-metrics", tags=["语义指标"])
 
 
 def _validate_metric_sql(sql: str) -> None:
+    sql = strip_trailing_semicolon(sql)
     is_valid, message = SQLValidator.validate(sql)
     if not is_valid:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
