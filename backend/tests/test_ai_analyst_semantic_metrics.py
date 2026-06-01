@@ -69,6 +69,34 @@ def test_ai_analyst_list_metrics_tool_filters_by_current_user(db_session, test_u
     assert result["metrics"][0]["metric_key"] == "gmv"
 
 
+def test_ai_analyst_chat_includes_semantic_context(monkeypatch, db_session, test_user):
+    service = AIAnalystService(db_session)
+    captured = {}
+
+    monkeypatch.setattr(service, "_get_conversation_history", lambda conversation_id: [])
+    monkeypatch.setattr(service, "_build_tools_prompt", lambda data_source_id: "TOOLS_PROMPT")
+    monkeypatch.setattr(service, "_get_llm_client", lambda: type("C", (), {"chat": lambda self, messages, temperature=0.0: '"done"'})())
+    monkeypatch.setattr(service, "_parse_action", lambda response_text: None)
+    monkeypatch.setattr(service, "_save_conversation_history", lambda *args, **kwargs: None)
+
+    def fake_build_semantic_runtime_context(db, data_source_id, question=None, max_chars=12000):
+        captured["question"] = question
+        return "SEMANTIC_CONTEXT"
+
+    monkeypatch.setattr("app.services.ai_analyst_service.build_semantic_runtime_context", fake_build_semantic_runtime_context)
+
+    response = service.chat(
+        message="查询销售额",
+        data_source_id=1,
+        conversation_id="conv-1",
+        group_id=812,
+        user_id=test_user.id,
+    )
+
+    assert response.message.content == '"done"'
+    assert captured["question"] == "查询销售额"
+
+
 def test_ai_analyst_query_metric_tool_uses_semantic_query_service(monkeypatch, db_session, test_user):
     data_source = _create_data_source(db_session, test_user.id)
     _create_metric(db_session, data_source.id, test_user.id)

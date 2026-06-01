@@ -1,0 +1,72 @@
+- database: ads_cockpit_freedom
+  title: 商策自由查 NL2SQL 语义层文档
+  source_md: /home/zhou/myreport/semantic/private.tgw.dmall-os.cn/ads_cockpit_freedom.md
+  semantics:
+    purpose: '**用途**: 零售门店商品销售、供应链、库存、贸易质检等业务分析。'
+    units: money_in_cents
+    default_priority:
+    - semantic_doc
+    - metric_definitions
+    - realtime_schema
+    - model_knowledge
+    forbidden_patterns:
+    - invent_columns
+    - mix_taxed_and_untaxed
+    - avg_of_ratios
+    - count_bitmap_with_count_star
+    join_rules: []
+    default_filters: []
+- database: ads_cockpit_qck
+  title: 商策快查 NL2SQL 语义层文档
+  source_md: /home/zhou/myreport/semantic/private.tgw.dmall-os.cn/ads_cockpit_qck.md
+  semantics:
+    purpose: '**用途**: 零售门店快查场景的预聚合数据层，提供销售、成本、库存、供应链、档期促销、会员、门店运营等维度的快速查询。基于订单流水数据进行多口径聚合（销售口径/过账口径）。'
+    units: money_in_cents
+    default_priority:
+    - semantic_doc
+    - metric_definitions
+    - realtime_schema
+    - model_knowledge
+    forbidden_patterns:
+    - invent_columns
+    - mix_taxed_and_untaxed
+    - avg_of_ratios
+    - count_bitmap_with_count_star
+    join_rules: []
+    default_filters: []
+- database: retail_analysis
+  title: Retail Analysis NL2SQL 语义层文档
+  source_md: /home/zhou/myreport/semantic/零售分析数据库/retail_analysis.md
+  semantics:
+    purpose: '**用途**: 记录门店、商品、销售、库存、促销等零售业务数据'
+    units: money_in_cents
+    default_priority:
+    - semantic_doc
+    - metric_definitions
+    - realtime_schema
+    - model_knowledge
+    forbidden_patterns:
+    - invent_columns
+    - mix_taxed_and_untaxed
+    - avg_of_ratios
+    - count_bitmap_with_count_star
+    join_rules: []
+    default_filters: []
+- database: information_schema
+  title: Information Schema 语义层文档
+  source_md: /home/zhou/myreport/semantic/private.tgw.dmall-os.cn/information_schema.md
+  semantics:
+    purpose: ''
+    units: money_in_cents
+    default_priority:
+    - semantic_doc
+    - metric_definitions
+    - realtime_schema
+    - model_knowledge
+    forbidden_patterns:
+    - invent_columns
+    - mix_taxed_and_untaxed
+    - avg_of_ratios
+    - count_bitmap_with_count_star
+    join_rules: []
+    default_filters: []

@@ -1099,7 +1099,8 @@ class NL2SQLService:
                 "请直接使用文档中的表名，**不要再添加其他库名**！\n"
                 f"{pg_table_format_hint}"
             )
-            return prefix_hint + semantic_doc
+            from app.utils.semantic_context import build_semantic_snapshot
+            return prefix_hint + build_semantic_snapshot(semantic_doc, data_source_id)
 
         # 2. 回退到动态查询
         logger.info(f"[NL2SQL] │   ├─ 语义层文档: 未找到, 改用动态查询获取表结构")

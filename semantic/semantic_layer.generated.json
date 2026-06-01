@@ -1,0 +1,102 @@
+[
+  {
+    "database": "ads_cockpit_freedom",
+    "title": "商策自由查 NL2SQL 语义层文档",
+    "source_md": "/home/zhou/myreport/semantic/private.tgw.dmall-os.cn/ads_cockpit_freedom.md",
+    "tables": [
+      {
+        "title": "ads_cockpit_fd_store_ware_d",
+        "columns": [],
+        "notes": [
+          "**说明**: 核心店品日汇总宽表。",
+          "**粒度**: `dt + group_id + store_code + matnr + supplier_code + sell_type`",
+          "**分表规则**: `group_id` 对应后缀表；已知 812、57362 需要使用带后缀表。",
+          "**适用场景**: 销售、毛利、库存、预警、类目、供应链综合分析。",
+          "**默认过滤**:"
+        ]
+      },
+      {
+        "title": "ads_cockpit_fd_store_ware_trade_qc_d_v5",
+        "columns": [],
+        "notes": [
+          "**说明**: 贸易/质检日汇总表。",
+          "**粒度**: `dt + group_id + store_code + u_id`",
+          "**特点**: 含交易来源维度和 bitmap 订单聚合字段。",
+          "**适用场景**: 交易渠道分析、订单数分析、客单价分析。",
+          "**注意**: `order_id_normal`、`schedule_order_id`、`coupon_order_id`、`coupon_code` 都是 bitmap 字段，计数必须用 `BITMAP_COUNT()`。"
+        ]
+      },
+      {
+        "title": "ads_cockpit_fd_supply_ware_d",
+        "columns": [],
+        "notes": [
+          "**说明**: 供应链店品日汇总表。",
+          "**粒度**: `dt + group_id + store_code + matnr + supplier_code + sell_type`",
+          "**适用场景**: 订货、收货、到货准确率、供应链效率分析。"
+        ]
+      },
+      {
+        "title": "ads_fd_dim_store_ware",
+        "columns": [],
+        "notes": [
+          "**说明**: 门店商品范围及属性维表。",
+          "**用途**: 过滤门店-商品范围、补充类目和品牌属性。",
+          "**关联键**: `(group_id, store_code, matnr)`",
+          "**注意**: 如果要展示门店名，需要使用门店维表或业务约定的主数据来源。"
+        ]
+      },
+      {
+        "title": "ads_fd_dim_supplier",
+        "columns": [],
+        "notes": [
+          "**说明**: 供应商基础信息维表。",
+          "**用途**: 补供应商名称、类型、税务、结算方式等属性。",
+          "**关联键**: `(group_id, supplier_code)`",
+          "`dt` 一般用于日期范围过滤，格式为 `YYYYMMDD` 整数。",
+          "`month_id` 一般用于月汇总，格式如 `202405`。",
+          "`date_type` 用于控制粒度，不同分析必须明确取值。",
+          "金额字段默认单位为“分”。",
+          "若展示给用户，统一转换为“元”。",
+          "同一张结果表中不要混用“分”和“元”。",
+          "不能先行级算比率再汇总。",
+          "必须先汇总分子/分母，再计算比率。",
+          "分母可能为 0 时必须用 `NULLIF()`。",
+          "预警字段只适合筛选、计数、分组，不适合作为连续数值指标。",
+          "预警字段含义固定为 0/1。",
+          "销售、库存、毛利、预警、订货综合分析 -> `ads_cockpit_fd_store_ware_d*`",
+          "交易来源、订单数、客单价 -> `ads_cockpit_fd_store_ware_trade_qc_d_v5`",
+          "订货/收货/到货准确率 -> `ads_cockpit_fd_supply_ware_d`",
+          "名称和编码尽量分列。",
+          "类目层级要显示明确层级名，不要只给拼接编码。",
+          "如果用户问“TopN”，默认按目标指标降序。",
+          "不要把订单数和商品数混为一谈。",
+          "不要把含税和未税混用。",
+          "不要把门店名、商品名、供应商名和编码混在一起输出。",
+          "不要在 bitmap 字段上直接 `COUNT(*)` 代替去重计数。",
+          "不要把预警字段当连续数值做均值。",
+          "不要在没有明确 group_id 时随意选错分表。",
+          "`ads_cockpit_freedom.semantic.json`",
+          "`ads_cockpit_freedom.semantic.yaml`"
+        ]
+      }
+    ]
+  },
+  {
+    "database": "ads_cockpit_qck",
+    "title": "商策快查 NL2SQL 语义层文档",
+    "source_md": "/home/zhou/myreport/semantic/private.tgw.dmall-os.cn/ads_cockpit_qck.md",
+    "tables": []
+  },
+  {
+    "database": "retail_analysis",
+    "title": "Retail Analysis NL2SQL 语义层文档",
+    "source_md": "/home/zhou/myreport/semantic/零售分析数据库/retail_analysis.md",
+    "tables": []
+  },
+  {
+    "database": "information_schema",
+    "title": "Information Schema 语义层文档",
+    "source_md": "/home/zhou/myreport/semantic/private.tgw.dmall-os.cn/information_schema.md",
+    "tables": []
+  }
+]

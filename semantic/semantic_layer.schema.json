@@ -1,0 +1,262 @@
+[
+  {
+    "database": "ads_cockpit_freedom",
+    "title": "商策自由查 NL2SQL 语义层文档",
+    "source_md": "/home/zhou/myreport/semantic/private.tgw.dmall-os.cn/ads_cockpit_freedom.md",
+    "semantics": {
+      "purpose": "**用途**: 零售门店商品销售、供应链、库存、贸易质检等业务分析。",
+      "units": "money_in_cents",
+      "default_priority": [
+        "semantic_doc",
+        "metric_definitions",
+        "realtime_schema",
+        "model_knowledge"
+      ],
+      "forbidden_patterns": [
+        "invent_columns",
+        "mix_taxed_and_untaxed",
+        "avg_of_ratios",
+        "count_bitmap_with_count_star"
+      ],
+      "join_rules": [
+        "ads_cockpit_fd_store_ware_d / ads_cockpit_fd_store_ware_trade_qc_d_v5 / ads_cockpit_fd_supply_ware_d use group_id, store_code, matnr, supplier_code, sell_type",
+        "ads_fd_dim_store_ware join key: group_id, store_code, matnr",
+        "ads_fd_dim_supplier join key: group_id, supplier_code",
+        "trade_qc bitmap fields must use BITMAP_COUNT"
+      ],
+      "default_filters": [
+        "exclude_flag != 1",
+        "service_flag != 1 OR service_flag IS NULL",
+        "shopping_bag_flag != 1 OR shopping_bag_flag IS NULL"
+      ],
+      "metrics": [
+        {
+          "name": "销售额",
+          "field": "actual_sale_untaxed_amt",
+          "unit": "cent",
+          "default_formula": "SUM(actual_sale_untaxed_amt)"
+        },
+        {
+          "name": "毛利额",
+          "field": "gp_untaxed_amt",
+          "unit": "cent",
+          "default_formula": "SUM(gp_untaxed_amt)"
+        },
+        {
+          "name": "订单数",
+          "field": "order_id_normal",
+          "unit": "count",
+          "default_formula": "BITMAP_COUNT(order_id_normal)"
+        }
+      ],
+      "dimensions": [
+        {
+          "name": "门店",
+          "fields": [
+            "store_code",
+            "store_name"
+          ]
+        },
+        {
+          "name": "商品",
+          "fields": [
+            "matnr",
+            "ware_name",
+            "item_num"
+          ]
+        },
+        {
+          "name": "供应商",
+          "fields": [
+            "supplier_code",
+            "supplier_name"
+          ]
+        },
+        {
+          "name": "类目",
+          "fields": [
+            "purchase_category1~5",
+            "operation_category1~5"
+          ]
+        },
+        {
+          "name": "预警",
+          "fields": [
+            "extra_stock",
+            "low_stock",
+            "lack_stock",
+            "stasis_sales",
+            "negative_profit"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "database": "ads_cockpit_qck",
+    "title": "商策快查 NL2SQL 语义层文档",
+    "source_md": "/home/zhou/myreport/semantic/private.tgw.dmall-os.cn/ads_cockpit_qck.md",
+    "semantics": {
+      "purpose": "**用途**: 零售门店快查场景的预聚合数据层，提供销售、成本、库存、供应链、档期促销、会员、门店运营等维度的快速查询。基于订单流水数据进行多口径聚合（销售口径/过账口径）。",
+      "units": "money_in_cents",
+      "default_priority": [
+        "semantic_doc",
+        "metric_definitions",
+        "realtime_schema",
+        "model_knowledge"
+      ],
+      "forbidden_patterns": [
+        "invent_columns",
+        "mix_taxed_and_untaxed",
+        "avg_of_ratios",
+        "count_bitmap_with_count_star"
+      ],
+      "join_rules": [
+        "order_*_v1 arrays must be exploded before aggregation",
+        "bitmap fields must use BITMAP_COUNT",
+        "agg tables should not be joined back to raw order tables without clear grain rules"
+      ],
+      "default_filters": [
+        "exclude_flag != 1",
+        "service_flag != 1 OR service_flag IS NULL",
+        "shopping_bag_flag != 1 OR shopping_bag_flag IS NULL"
+      ],
+      "metrics": [
+        {
+          "name": "销售额",
+          "field": "actual_sale_untaxed_amt",
+          "unit": "cent",
+          "default_formula": "SUM(actual_sale_untaxed_amt)"
+        },
+        {
+          "name": "订单数",
+          "field": "order_id_normal",
+          "unit": "count",
+          "default_formula": "BITMAP_COUNT(order_id_normal)"
+        }
+      ],
+      "dimensions": [
+        {
+          "name": "交易来源",
+          "fields": [
+            "sale_source_code1",
+            "sale_source_name1",
+            "sale_source_code2",
+            "sale_source_name2"
+          ]
+        },
+        {
+          "name": "门店",
+          "fields": [
+            "store_code"
+          ]
+        },
+        {
+          "name": "商品",
+          "fields": [
+            "matnr",
+            "ware_name",
+            "item_num"
+          ]
+        },
+        {
+          "name": "类目",
+          "fields": [
+            "purchase_category1~5",
+            "operation_category1~5"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "database": "retail_analysis",
+    "title": "Retail Analysis NL2SQL 语义层文档",
+    "source_md": "/home/zhou/myreport/semantic/零售分析数据库/retail_analysis.md",
+    "semantics": {
+      "purpose": "**用途**: 记录门店、商品、销售、库存、促销等零售业务数据",
+      "units": "money_in_cents",
+      "default_priority": [
+        "semantic_doc",
+        "metric_definitions",
+        "realtime_schema",
+        "model_knowledge"
+      ],
+      "forbidden_patterns": [
+        "invent_columns",
+        "mix_taxed_and_untaxed",
+        "avg_of_ratios",
+        "count_bitmap_with_count_star"
+      ],
+      "join_rules": [
+        "sales join stores/products/customers/promotions by id fields",
+        "dim_date join by date_id"
+      ],
+      "default_filters": [],
+      "metrics": [
+        {
+          "name": "销售额",
+          "field": "total_amount",
+          "unit": "currency",
+          "default_formula": "SUM(total_amount)"
+        },
+        {
+          "name": "销量",
+          "field": "quantity",
+          "unit": "count",
+          "default_formula": "SUM(quantity)"
+        }
+      ],
+      "dimensions": [
+        {
+          "name": "门店",
+          "fields": [
+            "store_id",
+            "store_name"
+          ]
+        },
+        {
+          "name": "商品",
+          "fields": [
+            "product_id",
+            "product_name"
+          ]
+        },
+        {
+          "name": "日期",
+          "fields": [
+            "date_id",
+            "year",
+            "month",
+            "day_of_week"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "database": "information_schema",
+    "title": "Information Schema 语义层文档",
+    "source_md": "/home/zhou/myreport/semantic/private.tgw.dmall-os.cn/information_schema.md",
+    "semantics": {
+      "purpose": "",
+      "units": "money_in_cents",
+      "default_priority": [
+        "semantic_doc",
+        "metric_definitions",
+        "realtime_schema",
+        "model_knowledge"
+      ],
+      "forbidden_patterns": [
+        "invent_columns",
+        "mix_taxed_and_untaxed",
+        "avg_of_ratios",
+        "count_bitmap_with_count_star"
+      ],
+      "join_rules": [],
+      "default_filters": [],
+      "metrics": [],
+      "dimensions": []
+    }
+  }
+]

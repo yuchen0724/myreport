@@ -1,431 +1,329 @@
 # 商策自由查 NL2SQL 语义层文档
 
-## 数据库概述
+## 1. 数据库概述
 
 - **数据库名**: ads_cockpit_freedom（商策自由查）
 - **数据源**: StarRocks (Apache Doris)
 - **用途**: 零售门店商品销售、供应链、库存、贸易质检等业务分析。
-- **【重要】跨库查询**: 以下维度表**不在本数据库中**，需要跨库查询：
-  - `ads_cockpit_qck.dim_store` - 门店维度表（门店主数据），如需店名请使用此表
-  - `ads_cockpit_qck.dim_date` - 日期维度
-  - `ads_cockpit_qck.dim_ware_status` - 商品状态维度
-  - 使用示例: `SELECT s.store_name FROM ads_cockpit_freedom.ads_cockpit_fd_store_ware_d f LEFT JOIN ads_cockpit_qck.dim_store s ON f.store_code = s.store_code`
-- **核心业务概念**:
-  - **店品**: 门店与商品的交叉维度，每条记录表示某门店某商品在某个日期的汇总数据
-  - **经营方式(sell_type)**: 区分自营(1)、联营(2)等经营模式
-  - **实销 vs 销售**: "实销"是实际卖给顾客的数量/金额，"销售"包含实销+退货
-  - **含税 vs 未税**: `_taxed_amt`含税金额，`_untaxed_amt`未税金额
-  - **金额单位:分**: 所有金额字段以"分"为单位，除以100转为"元"
+- **适用场景**: 门店经营分析、商品经营分析、库存预警、供应链订货收货、交易渠道分析、毛利分析。
+- **不适用场景**: 订单级明细分析、会员行为分析、单据级财务对账、实时交易回溯。
+- **金额单位**: 所有金额字段默认以“分”为单位，展示时除以 100 转为“元”。
+- **默认口径原则**:
+  1. 优先使用语义层文档定义的字段和口径。
+  2. 优先使用事实表中已经存在的业务字段，不发明派生字段。
+  3. 涉及销售、库存、毛利、订货等指标时，必须先确认是否需要过滤 `exclude_flag`、`service_flag`、`shopping_bag_flag`。
+  4. 维度展示时，名称和编码应尽量分列，不要混写。
+  5. 需要汇总时先汇总分子/分母，再计算比率，禁止先算比率再平均。
 
 ---
 
-## 表结构
+## 2. 核心业务概念
 
-### 维度表
+### 2.1 业务术语词典
 
----
+| 术语 | 标准定义 | 对应字段/表 | 易混淆项 |
+|------|----------|-------------|----------|
+| 店品 | 门店-商品在某一天的经营汇总粒度 | `ads_cockpit_fd_store_ware_d*` | 不等于订单明细 |
+| 实销 | 实际卖给顾客的销售口径 | `actual_sale_untaxed_amt` / `actual_sale_taxed_amt` | 不等于含退货的销售 |
+| 销售 | 销售口径总称，可能包含不同业务口径 | 依问题选择口径字段 | 不能默认与实销等同 |
+| 过账 | 财务过账口径 | 贸易质检表中的过账相关场景 | 不等于订单完成口径 |
+| 经营方式 | 门店商品经营模式 | `sell_type`, `sell_type_name` | 不能与门店类型混淆 |
+| 动销 | 商品有销售发生 | `sale_ware_tag = 1` | 不是库存变化 |
+| 高库存 | 库存高于预警阈值 | `extra_stock = 1` | 不等于库存大于 0 |
+| 畅缺 | 库存偏低且供给不足 | `lack_stock = 1` | 不等于缺货 100% |
+| 滞销 | 一段时间内销售弱 | `stasis_sales = 1` | 不等于零库存 |
+| 临期 | 接近保质期 | `overdue_ware = 1` | 不等于过期 |
+| 负毛利 | 毛利为负 | `negative_profit = 1` | 不能用销售额为负代替 |
 
-#### 1. ads_fd_dim_store_ware（门店商品维度表）
+### 2.2 口径优先级
 
-**说明**: 预检店品范围表，记录哪些门店经营哪些商品的基础信息。用于查询前校验门店-商品关系。
+当用户问法模糊时，优先级建议如下：
 
-**数据量**: 中等规模，全量门店-商品关系
-
-| 字段 | 类型 | 注释 |
-|------|------|------|
-| group_id | BIGINT | 集团ID |
-| store_code | VARCHAR(32) | 门店编码 |
-| matnr | VARCHAR(32) | 商品编码 |
-| group_tree_code1 ~ name6 | VARCHAR(128) | 管理架构1-6级（编码+名称），组织的管理归属层级 |
-| manage_type | INT | 门店经营性质 |
-| store_type | INT | 门店类型 |
-| store_business_district | VARCHAR(128) | 商圈性质 |
-| supplier_code | VARCHAR(32) | 供应商编码 |
-| sell_type | INT | 经营方式：1-自营、2-联营 |
-| u_id | VARCHAR(128) | 数据唯一键 |
-| sell_type_name | VARCHAR(128) | 经营方式名称 |
-| status_code | VARCHAR(32) | 商品状态编码 |
-| status_name | VARCHAR(128) | 商品状态名称：正常销售、停售等 |
-| item_num | VARCHAR(32) | 商品国条码 |
-| ware_name | VARCHAR(500) | 商品名称 |
-| supplier_name | VARCHAR(128) | 供应商名称 |
-| brand_flag | VARCHAR(128) | 品牌标识 |
-| purchase_category1_code~5 | VARCHAR(32) | 采购类目1-5级编码 |
-| purchase_category1_name~5 | VARCHAR(128) | 采购类目1-5级名称 |
-| operation_category1_code~5 | VARCHAR(32) | 营运类目1-5级编码 |
-| operation_category1_name~5 | VARCHAR(128) | 营运类目1-5级名称 |
-| exclude_flag | INT | 业绩排除标识：1-排除、0-不排除 |
-| service_flag | INT | 服务商品标识：1-服务商品、0-非服务商品 |
-| shopping_bag_flag | INT | 购物袋标识：1-购物袋、0-非购物袋 |
-
-**主键/Key**: (group_id, store_code, matnr) — **不含日期，静态维度表**
-
-**典型用途**:
-- 查询某门店经营的所有商品范围
-- 按管理架构/采购类目/营运类目过滤门店商品
-- 过滤排除商品(exclude_flag=1)、服务商品(service_flag=1)、购物袋(shopping_bag_flag=1)
+1. 语义层明确口径
+2. 指标词典默认口径
+3. 表字段注释
+4. 实时 schema
+5. 通用模型常识
 
 ---
 
-#### 2. ads_fd_dim_supplier（供应商维度表）
+## 3. 指标词典
 
-**说明**: 供应商基础信息表。记录集团所有供应商的详细资料。
+### 3.1 销售类指标
 
-**数据量**: 小型维度表
+| 指标中文名 | 推荐字段 | 默认口径 | 单位 | 是否可加总 | 说明 |
+|------------|----------|----------|------|------------|------|
+| 销售额 | `actual_sale_untaxed_amt` | 默认未税实销金额 | 分 | 是 | 经营分析默认优先未税口径 |
+| 含税销售额 | `actual_sale_taxed_amt` | 含税实销金额 | 分 | 是 | 对账或税务场景使用 |
+| 销量 | `sale_num` / `actual_sale_num` | 以表中已定义实销数量字段为准 | 数量 | 是 | 需要根据表粒度选择 |
+| 客单价 | `SUM(actual_sale_untaxed_amt)/COUNT(order_id)` 或业务定义 | 先求总额再除以订单数 | 元 | 否 | 不能先均值后平均 |
+| 订单数 | `BITMAP_COUNT(order_id_normal)` | 去重订单数 | 单 | 是 | 仅适用于 bitmap 表 |
 
-| 字段 | 类型 | 注释 |
-|------|------|------|
-| group_id | INT | 集团ID |
-| supplier_code | VARCHAR(65533) | 供应商编码 |
-| group_name | VARCHAR(65533) | 集团名称 |
-| company_id | INT | 公司ID |
-| company_name | VARCHAR(65533) | 公司名称 |
-| company_short_name | VARCHAR(65533) | 公司简称 |
-| supplier_account | VARCHAR(65533) | 供应商账号 |
-| supplier_name | VARCHAR(65533) | 供应商名称 |
-| supplier_short_name | VARCHAR(65533) | 供应商简称 |
-| supplier_type | INT | 供应商类型 |
-| supplier_biz_type | VARCHAR(65533) | 供应商业务类型 |
-| supplier_tax_type | VARCHAR(65533) | 供应商税类型 |
-| supplier_sell_type | INT | 供应商经营类型 |
-| supplier_status | INT | 供应商状态 |
-| supplier_contact | VARCHAR(65533) | 供应商联系人 |
-| supplier_telphone | VARCHAR(65533) | 供应商联系人电话 |
-| supplier_address | VARCHAR(65533) | 供应商联系地址 |
-| supplier_email | VARCHAR(65533) | 供应商联系邮箱 |
-| supplier_postcode | VARCHAR(65533) | 供应商邮政编码 |
-| supplier_sign_email | VARCHAR(65533) | 签章邮箱 |
-| supplier_sign_mobile | VARCHAR(65533) | 签章手机号 |
-| supplier_pay_way | INT | 付款方式 |
-| settle_company | VARCHAR(65533) | 结算公司编码 |
-| settle_company_name | VARCHAR(65533) | 结算公司名称 |
-| supplier_origin | INT | 注册来源 |
-| social_credit_code | VARCHAR(65533) | 统一社会信用编码 |
-| taxpayer_number | VARCHAR(65533) | 纳税人识别号 |
-| taxpayer_type | VARCHAR(65533) | 纳税类型 |
-| settle_period | INT | 结算周期 |
-| settle_type | INT | 结算方式 |
-| settle_start_day | INT | 账期起算日 |
-| supplier_can_order_flag | INT | 能否订货标识 |
-| supplier_can_return_flag | INT | 能否退货标识 |
-| supplier_order_week | VARCHAR(65533) | 订货周日历 |
-| create_time | VARCHAR(65533) | 创建时间 |
-| update_time | VARCHAR(65533) | 更新时间 |
-| supplier_vlt | VARCHAR(65533) | 供应商供货天数 |
-| main_supplier_code | VARCHAR(65533) | 父供应商编码 |
-| main_supplier_name | VARCHAR(65533) | 父供应商名称 |
-| company_manage_mode | INT | 公司经营模式 |
+### 3.2 毛利类指标
 
-**主键/Key**: (group_id, supplier_code)
+| 指标中文名 | 推荐字段 | 默认口径 | 单位 | 是否可加总 | 说明 |
+|------------|----------|----------|------|------------|------|
+| 毛利额 | `gp_untaxed_amt` | 未税毛利 | 分 | 是 | 默认经营分析口径 |
+| 毛利率 | `SUM(gp_untaxed_amt)/NULLIF(SUM(actual_sale_untaxed_amt),0)` | 先汇总再计算 | % | 否 | 禁止行级平均 |
+| 基础毛利 | `bgp_untaxed_amt` | 基础毛利未税 | 分 | 是 | 与毛利额口径不同 |
+| 综合毛利 | `cgp_untaxed_amt` / `wgp_untaxed_amt` | 按业务定义选择 | 分 | 是 | 必须明确口径 |
 
----
+### 3.3 库存与预警类指标
 
-### 事实表
+| 指标中文名 | 推荐字段 | 默认口径 | 单位 | 是否可加总 | 说明 |
+|------------|----------|----------|------|------------|------|
+| 期末库存 | `end_stock_num` | 期末库存数量 | 数量 | 视场景而定 | 不能与库存成本混用 |
+| 期末库存成本 | `end_stock_untaxed_cost` / `end_stock_taxed_cost` | 期末库存成本 | 分 | 是 | 建议统一未税优先 |
+| 高库存 | `extra_stock = 1` | 布尔预警 | 标识 | 否 | 只能做筛选或计数 |
+| 低库存 | `low_stock = 1` | 布尔预警 | 标识 | 否 | 只能做筛选或计数 |
+| 畅缺 | `lack_stock = 1` | 布尔预警 | 标识 | 否 | 只能做筛选或计数 |
+| 滞销 | `stasis_sales = 1` | 布尔预警 | 标识 | 否 | 只能做筛选或计数 |
+| 负毛利 | `negative_profit = 1` | 布尔预警 | 标识 | 否 | 只能做筛选或计数 |
 
----
+### 3.4 供应链类指标
 
-#### 3. ads_cockpit_fd_store_ware_d（店品日汇总宽表，按集团分表）
+| 指标中文名 | 推荐字段 | 默认口径 | 单位 | 说明 |
+|------------|----------|----------|------|------|
+| 订货量 | `scm_book_num` | 当天订货数量 | 数量 | 供应链分析用 |
+| 订货金额 | `scm_book_untaxed_amt` / `scm_book_taxed_amt` | 订货金额 | 分 | 默认优先未税 |
+| 收货量 | `scm_receive_num` | 当天收货数量 | 数量 | 供应链分析用 |
+| 收货金额 | `scm_receive_untaxed_amt` / `scm_receive_taxed_amt` | 收货金额 | 分 | 默认优先未税 |
+| 期望订货量 | `expect_book_num` | 期望到货相关 | 数量 | 用于到货准确率 |
+| 期望到货实际量 | `actual_receive_num_expect_dt` | 期望日期到货的实际数量 | 数量 | 用于到货准确率 |
 
-**说明**: 核心业务表。按天、门店、商品维度汇总的销售、成本、毛利、库存、损耗、供应链等全指标宽表。仅限**自营+联营**门店商品数据，不包含预购、拼团等。
+### 3.5 比率类指标
 
-**⚠️ 重要 — 按集团分表**: 本表按集团ID(group_id)做了分表，不同集团的数据存在不同后缀的表中：
-- **无后缀表** (`ads_cockpit_fd_store_ware_d`): 包含除以下明确集团外的**其他所有集团**的店品数据
-- **带后缀分表** (`ads_cockpit_fd_store_ware_d_{group_id}`): 该集团的专属店品数据
+比率类指标统一遵循：先汇总分子和分母，再计算比值。
 
-**分表规则**: 分表后缀 = group_id 本身
-| 集团ID | 表名 |
-|--------|------|
-| 57362  | `ads_cockpit_fd_store_ware_d_57362` |
-| 812    | `ads_cockpit_fd_store_ware_d_812` |
-| 其他   | `ads_cockpit_fd_store_ware_d`（无后缀） |
-
-**生成 SQL 时，必须根据用户问题中的集团信息选择正确的分表！**
-- 用户明确提到集团时，根据 group_id 选择对应分表
-- 若用户未明确集团但查询条件中包含了 group_id，也根据 group_id 选择分表
-- 无法确定时使用全量表 `ads_cockpit_fd_store_ware_d`
-
-**数据量**: 大表（多分区，按月分区，从2023年1月起）
-
-**分区**: 按`dt`(年月int)分区，如p202301=p202301
-
-| 字段分组 | 字段列表 | 说明 |
-|----------|----------|------|
-| **维度** | dt(INT), group_id(BIGINT), store_code, matnr, supplier_code, sell_type, u_id, week_id, month_id, quarter_id, year_id, date_type(VARCHAR(8)) | 日期、门店、商品、供应商、经营方式标识 |
-| **时间维度** | week_id, month_id, quarter_id, year_id, date_type | date_type(VARCHAR(8)),取值: 1-天、2-周、3-月、31-月累计、51-年累计、5-年 |
-| **门店属性** | store_type, sell_type_name | 门店类型、经营方式名称 |
-| **商品属性** | status_code, status_name, item_num, ware_name, purchase_taxed_price, offline_current_price, offline_original_price, ware_tax_rate, order_sched_binary, supplier_name, brand_flag | 商品基础信息、价格、税率 |
-| **商品类目** | purchase_category1~5(code+name), operation_category1~5(code+name) | 采购类目(5级)和营运类目(5级) |
-| **销售指标** | sale_ware_unit, ware_num, sale_num, actual_sale_taxed_amt, actual_sale_untaxed_amt | 销售单位、销售数量、实销数量、实销金额(含税/未税) |
-| **成本指标** | cost_taxed_amt, cost_untaxed_amt | 销售成本(含税/未税) |
-| **退货指标** | refund_sale_num, refund_ware_amt, refund_actual_sale_taxed_amt, refund_actual_sale_untaxed_amt | 退货数量、金额 |
-| **毛利指标** | bgp_taxed_amt/untaxed_amt, gp_taxed_amt/untaxed_amt, ngp_taxed_amt/untaxed_amt, gpc_taxed_amt/untaxed_amt, cgp_taxed_amt/untaxed_amt, wgp_taxed_amt/untaxed_amt | 基础毛利、毛利额、净毛利、毛利补偿、综合毛利、商品毛利（均含税/未税） |
-| **成本差异** | pcd_taxed_amt/untaxed_amt(采购成本差异), ccd_taxed_amt/untaxed_amt(联营成本差异) | 采购与联营成本差异 |
-| **返佣** | skb_taxed_amt/untaxed_amt | 赞助返佣金额 |
-| **日均销量** | dms, dms_n, dms_p | 日均销量(总/正常品/促销品) |
-| **订货(SCM)** | scm_book_unit, scm_book_num, scm_book_taxed_amt, scm_book_untaxed_amt | 订货单位、数量、金额 |
-| **损耗指标** | wl_num, wl_taxed_amt/untaxed_amt, discard_num, discard_taxed_amt/untaxed_amt | 商损数量/金额、废弃数量/金额 |
-| **报损报溢** | adjust_loss_num, adjust_loss_taxed_amt/untaxed_amt, adjust_profit_num, adjust_profit_taxed_amt/untaxed_amt | 报损/报溢数量金额 |
-| **盘点** | check_loss_num, check_loss_taxed_amt/untaxed_amt, check_profit_num, check_profit_taxed_amt/untaxed_amt | 盘亏/盘盈数量金额 |
-| **库存指标** | stock_ware_unit, end_stock_num, end_stock_taxed_cost, end_stock_untaxed_cost, map_stock_taxed_cost, map_stock_untaxed_cost | 库存单位、期末库存数量/成本、移动平均成本 |
-| **退货库存** | return_stock_num, return_stock_taxed_amt/untaxed_amt | 供商退货数量/金额 |
-| **收货库存** | receive_stock_num, receive_stock_taxed_amt/untaxed_amt | 供商收货数量/金额 |
-| **在途待确认** | scm_on_confirm_num, scm_on_way_num, scm_receive_num | 待确认/在途/代收数量 |
-| **促销/档期** | promotion_actual_sale_taxed_amt/untaxed_amt, promotion_sale_num, promotion_amt, promotion_bgp_taxed_amt/untaxed_amt | 促销实销金额/数量/优惠金额/促销基础毛利 |
-| **档期/出清** | schedule_actual_sale_taxed_amt/untaxed_amt, schedule_sale_num, schedule_sale_price, clearance_... | 档期销售、出清销售/折损 |
-| **末次信息** | last_sale_time, last_receive_time, last_receive_num, last_sale_price, last_purchase_price | 末次销售/收货时间、数量、价格 |
-| **预警标识** | extra_stock(高库存), low_stock(低库存), lack_stock(畅缺), stasis_sales(滞销), zero_stock(库零), negative_profit(负毛利), negative_stock(负库存), losing_ware(过季清仓), overdue_ware(临期), none_sales(进货未销) | 均为0/1布尔标识 |
-| **高库滞销** | extra_stock_count, extra_stock_cost_taxed/untaxed, stasis_sales_stock_count, stasis_sales_stock_cost_taxed/untaxed | 高库存/滞销库存成本明细 |
-| **SL指标** | sl_numerator, sl_denominator | SL分子分母 |
-| **滞销库存** | sale_num_flag(动销标识), last_end_stock_num(上期末库存), last_end_stock_taxed_cost/untaxed_cost | 动销标记与上期结转库存成本 |
-| **累计成本** | self_stock_cost_taxed_amt_mtd/untaxed_amt_mtd, self_end_stock_taxed_cost_mtd/untaxed_cost_mtd | 自营月累计成本(仅天维度使用) |
-| **库凭销售** | sale_stock_num, sale_stock_taxed_cost/untaxed_cost, bom_sale_stock_num, bom_sale_stock_taxed_cost/untaxed_cost | 库凭销售数量/成本、BOM销售数量/成本 |
-| **配出返仓** | distribute_out_stock_num, distribute_out_stock_taxed_amt/untaxed_amt | 门店退DC配出数量/成本 |
-| **其他** | v_actual_sale_untaxed_amt, sale_ware_tag, exclude_flag, service_flag, shopping_bag_flag | V9实销金额、动销标识、排除/服务/购物袋标识 |
-
-**主键/Key**: (dt, group_id, store_code, matnr, supplier_code, sell_type)
-
-**计算说明**:
-- 毛利率 = gp_untaxed_amt / actual_sale_untaxed_amt × 100%
-- 动销品 = sale_ware_tag = 1
-- 排除商品应过滤: exclude_flag != 1
-- 一般应过滤服务商品: service_flag != 1
-- 一般应过滤购物袋: shopping_bag_flag != 1
+| 指标中文名 | 公式 | 说明 |
+|------------|------|------|
+| 毛利率 | `SUM(gp_untaxed_amt)/NULLIF(SUM(actual_sale_untaxed_amt),0)` | 经营分析默认口径 |
+| 到货率 | `SUM(scm_receive_num)/NULLIF(SUM(scm_book_num),0)` | 供应链口径 |
+| 期望到货准确率 | `SUM(actual_receive_num_expect_dt)/NULLIF(SUM(expect_book_num),0)` | 期望到货口径 |
+| 客单价 | `SUM(actual_sale_untaxed_amt)/NULLIF(BITMAP_COUNT(order_id_normal),0)` | 订单口径表适用 |
 
 ---
 
-#### 4. ads_cockpit_fd_store_ware_trade_qc_d_v5（贸易质检日汇总表）
+## 4. 维度词典
 
-**说明**: 贸易/质检维度销售汇总表。基于交易来源(sale_source)维度的聚合，含订单级聚合（使用BITMAP）和实销金额汇总。本表是**AGGREGATE KEY**模型，需注意聚合语义。
+### 4.1 时间维度
 
-**数据量**: 大表（按月分区，从2021年1月起）
+| 维度 | 字段 | 说明 | 使用建议 |
+|------|------|------|----------|
+| 天 | `dt` | 日粒度分区字段 | 默认分析粒度 |
+| 周 | `week_id` | 周编码 | 周趋势分析 |
+| 月 | `month_id` | 月编码 | 月度分析 |
+| 季度 | `quarter_id` | 季度编码 | 季度分析 |
+| 年 | `year_id` | 年编码 | 年度分析 |
+| 日期类型 | `date_type` | 1=天、2=周、3=月、31=月累计、51=年累计、5=年 | 控制聚合层级 |
 
-| 字段 | 类型 | 注释 |
-|------|------|------|
-| dt | INT | 日期（YYYYMM格式） |
-| group_id | BIGINT | 集团ID |
-| store_code | VARCHAR(32) | 门店编码 |
-| u_id | VARCHAR(65533) | 数据唯一键 |
-| year_id | VARCHAR(16) | 年编码 |
-| quarter_id | VARCHAR(16) | 季度编码 |
-| month_id | VARCHAR(16) | 月编码 |
-| week_id | VARCHAR(16) | 周编码 |
-| date_type | INT | 日期类型 |
-| **sale_source_code1** | VARCHAR(32) | **一级交易类型编码** - 如：线下零售、线上到家等 |
-| **sale_source_name1** | VARCHAR(32) | **一级交易类型名称** |
-| **sale_source_code2** | VARCHAR(32) | **二级交易类型编码** |
-| **sale_source_name2** | VARCHAR(32) | **二级交易类型名称** |
-| matnr | VARCHAR(32) | 商品编码 |
-| item_num | VARCHAR(32) | 商品国条码 |
-| ware_name | VARCHAR(256) | 商品名称 |
-| sell_type | INT | 经营方式 |
-| sell_type_name | VARCHAR(32) | 经营方式名称 |
-| ware_status | VARCHAR(30) | 商品状态编码 |
-| ware_status_name | VARCHAR(32) | 商品状态名称 |
-| supplier_code | VARCHAR(200) | 供应商编码 |
-| supplier_name | VARCHAR(128) | 供应商名称 |
-| purchase_category1~5 | 采购类目1-5级 | 与店品表相同 |
-| operation_category1~5 | 营运类目1-5级 | 与店品表相同 |
-| brand_flag | INT | 商品品牌标识 |
-| member_flag | INT | 会员标识 |
-| **order_id_normal** | **BITMAP** | **普通订单号**（BITMAP类型，用于COUNT DISTINCT订单数） |
-| **schedule_order_id** | **BITMAP** | **档期订单号**（BITMAP类型） |
-| **coupon_order_id** | **BITMAP** | **优惠券订单号**（BITMAP类型） |
-| **coupon_code** | **BITMAP** | **优惠券code**（BITMAP类型） |
-| actual_sale_taxed_amt | DECIMAL | 实销金额含税(分) |
-| actual_sale_untaxed_amt | DECIMAL | 实销金额未税(分) |
-| sale_num | DOUBLE | 销售商品数量 |
-| actual_sale_num | DOUBLE | 实销商品数量 |
-| sale_ware_unit | VARCHAR(32) | 销售单位 |
-| cost_taxed_amt | DECIMAL | 销售成本含税(分) |
-| cost_untaxed_amt | DECIMAL | 销售成本未税(分) |
-| actual_cost_taxed_amt | DECIMAL | 实销成本含税(分) |
-| actual_cost_untaxed_amt | DECIMAL | 实销成本未税(分) |
-| bgp_taxed_amt | DECIMAL | 基础毛利含税(分) |
-| bgp_untaxed_amt | DECIMAL | 基础毛利未税(分) |
-| coupon_amt | BIGINT | 优惠券优惠金额(分) |
-| exclude_flag | INT | 业绩排除标识 |
-| service_flag | INT | 服务商品标识 |
-| shopping_bag_flag | INT | 购物袋标识 |
-| v_actual_sale_untaxed_amt | DECIMAL | V9专用实销金额未税(分) |
+### 4.2 门店与组织维度
 
-**主键/Key (AGGREGATE KEY)**: (dt, group_id, store_code, u_id)
+| 维度 | 字段 | 说明 | 规则 |
+|------|------|------|------|
+| 门店 | `store_code` | 门店编码 | 必要时 join 门店维表补名称 |
+| 门店类型 | `store_type` | 门店类型 | 用于筛选门店经营属性 |
+| 管理架构 | `group_tree_code1~6` | 组织层级 | 名称和编码最好分列展示 |
+| 集团 | `group_id` | 集团 ID | 分表规则的核心条件 |
 
-**BITMAP字段说明**: order_id_normal、schedule_order_id、coupon_order_id、coupon_code 为BITMAP类型，需要使用`BITMAP_COUNT()`函数进行去重计数，如 `BITMAP_COUNT(order_id_normal)` 计算订单数。
+### 4.3 商品维度
 
-**与ads_cockpit_fd_store_ware_d的核心区别**: 本表多了**交易来源**维度(sale_source_code1/2, sale_source_name1/2)和**BITMAP订单聚合数据**，适合按交易渠道分析。
+| 维度 | 字段 | 说明 | 规则 |
+|------|------|------|------|
+| 商品 | `matnr` | 商品编码 | 主键粒度之一 |
+| 商品名 | `ware_name` | 商品名称 | 适合展示 |
+| 条码 | `item_num` | 商品国条码 | 常与商品编码并列展示 |
+| 状态 | `status_code`, `status_name` | 商品状态 | 优先展示名称，编码辅助 |
+| 品牌 | `brand_flag` | 品牌标识 | 若需品牌名需明确维表 |
+| 经营方式 | `sell_type`, `sell_type_name` | 自营/联营 | 不与门店类型混淆 |
+| 类目 | `purchase_category1~5`, `operation_category1~5` | 采购/营运类目 | 按层级下钻 |
 
----
+### 4.4 供应商维度
 
-#### 5. ads_cockpit_fd_supply_ware_d（供应链店品日汇总表）
+| 维度 | 字段 | 说明 | 规则 |
+|------|------|------|------|
+| 供应商编码 | `supplier_code` | 供应商唯一标识 | 主键维度之一 |
+| 供应商名称 | `supplier_name` | 展示名 | 必要时 join 供应商维表 |
+| 供应商属性 | 结算方式、类型等 | 供应商详情 | 来自维表 `ads_fd_dim_supplier` |
 
-**说明**: 供应链维度汇总表。聚焦订货、收货、期望到货等供应链指标。
+### 4.5 交易来源维度
 
-**数据量**: 大表（按月分区，从2022年1月起）
+| 维度 | 字段 | 说明 | 规则 |
+|------|------|------|------|
+| 一级交易类型 | `sale_source_code1`, `sale_source_name1` | 如线下零售、线上到家 | 来自 trade_qc 表 |
+| 二级交易类型 | `sale_source_code2`, `sale_source_name2` | 更细分渠道 | 仅在 trade_qc 表可用 |
 
-| 字段 | 类型 | 注释 |
-|------|------|------|
-| dt | INT | 日期分区 |
-| group_id | BIGINT | 集团ID |
-| store_code | VARCHAR(32) | 门店编码 |
-| matnr | VARCHAR(32) | 商品编码 |
-| supplier_code | VARCHAR(32) | 供应商编码 |
-| sell_type | INT | 经营方式 |
-| u_id | VARCHAR(128) | 数据唯一键 |
-| week_id | VARCHAR(32) | 周编码 |
-| month_id | VARCHAR(32) | 月编码 |
-| quarter_id | VARCHAR(32) | 季度编码 |
-| year_id | VARCHAR(32) | 年编码 |
-| date_type | VARCHAR(8) | 1-天、2-周、3-月、31-月累计、51-年累计、5-年 |
-| store_type | INT | 门店类型 |
-| sell_type_name | VARCHAR(128) | 经营方式名称 |
-| status_code | VARCHAR(32) | 商品状态编码 |
-| status_name | VARCHAR(128) | 商品状态名称 |
-| item_num | VARCHAR(32) | 商品国条码 |
-| ware_name | VARCHAR(500) | 商品名称 |
-| supplier_name | VARCHAR(128) | 供应商名称 |
-| brand_flag | VARCHAR(128) | 商品品牌标识 |
-| purchase_category1~5 | 采购类目1-5级 | 编码+名称 |
-| operation_category1~5 | 营运类目1-5级 | 编码+名称 |
-| base_unit | VARCHAR(32) | 基本单位 |
-| **scm_book_num** | DECIMAL | **当天订货数量** |
-| **scm_book_taxed_amt** | DECIMAL | **订货金额含税** |
-| scm_book_untaxed_amt | DECIMAL | 订货金额未税 |
-| **scm_receive_num** | DECIMAL | **当天收货数量** |
-| scm_receive_taxed_amt | DECIMAL | 收货金额含税 |
-| scm_receive_untaxed_amt | DECIMAL | 收货金额未税 |
-| **expect_book_num** | DECIMAL | **期望日期的订货数量** |
-| **actual_receive_num_expect_dt** | DECIMAL | **期望日期到货的实际到货数量** |
-| exclude_flag | INT | 业绩排除标识 |
-| service_flag | INT | 服务商品标识 |
-| shopping_bag_flag | INT | 购物袋标识 |
+### 4.6 预警维度
 
-**主键/Key**: (dt, group_id, store_code, matnr, supplier_code, sell_type)
-
-**核心指标**:
-- 订货相关：scm_book_num（当天订货量）、scm_book_taxed_amt（订货金额）
-- 收货相关：scm_receive_num（当天收货量）、scm_receive_taxed_amt（收货金额）
-- 期望到货：expect_book_num（期望在某天到货的订货量）、actual_receive_num_expect_dt（期望日期实际到了多少）
-
-**与ads_cockpit_fd_store_ware_d的差异**: 供应链表专注订货/收货流程，不含销售金额、毛利、库存等指标。
+| 维度 | 字段 | 说明 | 规则 |
+|------|------|------|------|
+| 高库存 | `extra_stock` | 0/1 | 仅筛选或计数 |
+| 低库存 | `low_stock` | 0/1 | 仅筛选或计数 |
+| 畅缺 | `lack_stock` | 0/1 | 仅筛选或计数 |
+| 滞销 | `stasis_sales` | 0/1 | 仅筛选或计数 |
+| 零库存 | `zero_stock` | 0/1 | 仅筛选或计数 |
+| 负毛利 | `negative_profit` | 0/1 | 仅筛选或计数 |
+| 负库存 | `negative_stock` | 0/1 | 仅筛选或计数 |
+| 临期 | `overdue_ware` | 0/1 | 仅筛选或计数 |
+| 进货未销 | `none_sales` | 0/1 | 仅筛选或计数 |
 
 ---
 
-### 同构分表说明
+## 5. 表与关系
 
-以下表结构与**ads_cockpit_fd_store_ware_d**完全一致，仅数据范围不同（按集团分表）：
+### 5.1 事实表
 
-| 表名 | 集团ID | 用途 |
-|------|--------|------|
-| `ads_cockpit_fd_store_ware_d` | 其他集团 | 除 57362、812 之外的所有集团店品数据 |
-| `ads_cockpit_fd_store_ware_d_57362` | 57362 | 集团 57362 的店品数据 |
-| `ads_cockpit_fd_store_ware_d_812` | 812 | 集团 812 的店品数据 |
+#### 5.1.1 `ads_cockpit_fd_store_ware_d`
 
-**SQL 生成规则**: 根据 group_id 选择对应分表，后缀=group_id。无法确定时用无后缀全量表。
+- **说明**: 核心店品日汇总宽表。
+- **粒度**: `dt + group_id + store_code + matnr + supplier_code + sell_type`
+- **分表规则**: `group_id` 对应后缀表；已知 812、57362 需要使用带后缀表。
+- **适用场景**: 销售、毛利、库存、预警、类目、供应链综合分析。
+- **默认过滤**:
+  - `exclude_flag != 1`
+  - `service_flag != 1 OR service_flag IS NULL`
+  - `shopping_bag_flag != 1 OR shopping_bag_flag IS NULL`
 
----
+#### 5.1.2 `ads_cockpit_fd_store_ware_trade_qc_d_v5`
 
-## 表关系
+- **说明**: 贸易/质检日汇总表。
+- **粒度**: `dt + group_id + store_code + u_id`
+- **特点**: 含交易来源维度和 bitmap 订单聚合字段。
+- **适用场景**: 交易渠道分析、订单数分析、客单价分析。
+- **注意**: `order_id_normal`、`schedule_order_id`、`coupon_order_id`、`coupon_code` 都是 bitmap 字段，计数必须用 `BITMAP_COUNT()`。
 
-```
-维度表                         事实表
-──────────────────────────────────────────────────
-ads_fd_dim_store_ware ──┬──→ ads_cockpit_fd_store_ware_d
-(门店商品范围)           │     (店品主数据 - 门店商品的详细信息 - 通过group_id,store_code,matnr关联事实表)
-                         │──→ ads_cockpit_fd_store_ware_trade_qc_d_v5
-                         │     (贸易质检日汇总)
-                         │──→ ads_cockpit_fd_supply_ware_d
-                         │     (供应链店品日汇总)
-                         │
-ads_fd_dim_supplier ─────┘──→ (通过supplier_code关联所有事实表)
-(供应商信息)
-```
+#### 5.1.3 `ads_cockpit_fd_supply_ware_d`
 
-**关联键**:
-- 所有事实表通过 (group_id, store_code, matnr, supplier_code, sell_type) 与维度表关联
-- 维度表 ads_fd_dim_store_ware 用于: 过滤门店-商品范围、获取类目/品牌等属性
-- 维度表 ads_fd_dim_supplier 用于: 获取供应商详细信息（如名称、类型、结算方式等）
+- **说明**: 供应链店品日汇总表。
+- **粒度**: `dt + group_id + store_code + matnr + supplier_code + sell_type`
+- **适用场景**: 订货、收货、到货准确率、供应链效率分析。
 
----
+### 5.2 维表
 
-## 业务规则
+#### 5.2.1 `ads_fd_dim_store_ware`
 
-1. **排除商品过滤**: 几乎所有业务查询应加 `WHERE exclude_flag != 1` 或 `exclude_flag = 0`
-2. **服务商品过滤**: `WHERE service_flag != 1 OR service_flag IS NULL`
-3. **购物袋过滤**: `WHERE shopping_bag_flag != 1 OR shopping_bag_flag IS NULL`
-4. **金额单位**: 所有金额字段单位为"分"，如需元应除以100（`actual_sale_taxed_amt / 100`）
-5. **日期字段(dt)**: 格式为 YYYYMMDD 的整数（如20240510），通常用于分区过滤
-6. **date_type**: 1=天、2=周、3=月、31=月累计、51=年累计、5=年
-7. **毛利计算**: 毛利额(gp_untaxed_amt) = 实销金额(actual_sale_untaxed_amt) - 成本(cost_untaxed_amt)
-8. **动销判断**: sale_ware_tag = 1 表示动销品（有销售的商品）
-9. **经营方式**: sell_type = 1 自营, sell_type = 2 联营
-10. **预警标识字段为0/1**: extra_stock(高库存)、lack_stock(畅缺)、stasis_sales(滞销)等，1表示是
+- **说明**: 门店商品范围及属性维表。
+- **用途**: 过滤门店-商品范围、补充类目和品牌属性。
+- **关联键**: `(group_id, store_code, matnr)`
+- **注意**: 如果要展示门店名，需要使用门店维表或业务约定的主数据来源。
 
----
+#### 5.2.2 `ads_fd_dim_supplier`
 
-## 常用查询模式
+- **说明**: 供应商基础信息维表。
+- **用途**: 补供应商名称、类型、税务、结算方式等属性。
+- **关联键**: `(group_id, supplier_code)`
 
-### 按维度查询
+### 5.3 连接规则
 
-| 维度 | 字段 | 对应表 |
-|------|------|--------|
-| 时间(天) | dt | 所有事实表 |
-| 时间(周) | week_id | ads_cockpit_fd_store_ware_d, ads_cockpit_fd_supply_ware_d |
-| 时间(月) | month_id | 同上 |
-| 门店 | store_code | 所有表 |
-| 商品 | matnr, ware_name | 所有表 |
-| 供应商 | supplier_code, supplier_name | 所有表 |
-| 经营方式 | sell_type, sell_type_name | 所有表 |
-| 采购类目 | purchase_category1~5 | 所有表 |
-| 营运类目 | operation_category1~5 | 所有表 |
-| 品牌 | brand_flag | 所有表 |
-| 管理架构 | group_tree_code1~6 | ads_fd_dim_store_ware |
-| 交易渠道 | sale_source_code1/2 | ads_cockpit_fd_store_ware_trade_qc_d_v5 |
-
-### 按指标分类
-
-| 指标类别 | 主要字段 | 适用表 |
-|----------|----------|--------|
-| 销售额 | actual_sale_taxed_amt, actual_sale_untaxed_amt | store_ware_d, trade_qc_d_v5 |
-| 销量 | sale_num, ware_num | store_ware_d, trade_qc_d_v5 |
-| 毛利 | gp_taxed_amt, gp_untaxed_amt, gp_taxed_rate, gp_untaxed_rate | store_ware_d |
-| 退货 | refund_sale_num, refund_actual_sale_taxed_amt | store_ware_d |
-| 库存 | end_stock_num, end_stock_taxed_cost | store_ware_d |
-| 损耗 | wl_num, wl_taxed_amt | store_ware_d |
-| 订货 | scm_book_num, scm_book_taxed_amt | store_ware_d, supply_ware_d |
-| 收货 | scm_receive_num, scm_receive_taxed_amt | supply_ware_d |
-| 订单数 | BITMAP_COUNT(order_id_normal) | trade_qc_d_v5 |
-| 促销销售 | promotion_sale_num, promotion_actual_sale_taxed_amt | store_ware_d |
+1. 门店-商品范围先判断是否在 `ads_fd_dim_store_ware` 中存在，再进入事实表分析。
+2. 供应商属性必须通过 `ads_fd_dim_supplier` 补充，不要从事实表硬猜。
+3. 交易来源维度只在 `ads_cockpit_fd_store_ware_trade_qc_d_v5` 中可用，其他表不能直接使用。
+4. `group_id` 是分表核心条件，查询时必须先确定再选表。
+5. 同名字段跨表不代表同口径，必须按当前表语义层定义解释。
 
 ---
 
-## 示例查询
+## 6. 默认业务规则
 
-| 自然语言 | SQL |
-|----------|-----|
-| 某门店昨天的实销金额和毛利是多少？ | SELECT store_code, SUM(actual_sale_untaxed_amt)/100 AS sale_amt, SUM(gp_untaxed_amt)/100 AS gp_amt FROM ads_cockpit_fd_store_ware_d WHERE dt = 20240509 AND store_code = 'S001' AND exclude_flag != 1 AND group_id = 123 GROUP BY store_code |
-| 按采购类目统计本月销售额TOP10 | SELECT purchase_category1_name, SUM(actual_sale_untaxed_amt)/100 AS total_amt FROM ads_cockpit_fd_store_ware_d WHERE month_id = '202405' AND date_type = 1 AND exclude_flag != 1 AND group_id = 123 GROUP BY purchase_category1_name ORDER BY total_amt DESC LIMIT 10 |
-| 各门店上月的毛利率排名 | SELECT store_code, SUM(gp_untaxed_amt)/NULLIF(SUM(actual_sale_untaxed_amt),0)*100 AS gp_rate FROM ads_cockpit_fd_store_ware_d WHERE month_id = '202404' AND date_type = 1 AND exclude_flag != 1 AND group_id = 123 GROUP BY store_code ORDER BY gp_rate DESC |
-| 当前高库存商品有哪些? | SELECT store_code, matnr, ware_name, end_stock_num FROM ads_cockpit_fd_store_ware_d WHERE dt = 20240509 AND extra_stock = 1 AND exclude_flag != 1 AND group_id = 123 |
-| 按交易渠道统计某天各渠道销售额 | SELECT sale_source_name1, SUM(actual_sale_untaxed_amt)/100 AS amt FROM ads_cockpit_fd_store_ware_trade_qc_d_v5 WHERE dt = 20240509 AND exclude_flag != 1 AND group_id = 123 GROUP BY sale_source_name1 |
-| 某天各门店的订单数和客单价 | SELECT store_code, BITMAP_COUNT(order_id_normal) AS order_cnt, SUM(actual_sale_untaxed_amt)/100/BITMAP_COUNT(order_id_normal) AS avg_order_amt FROM ads_cockpit_fd_store_ware_trade_qc_d_v5 WHERE dt = 20240509 AND exclude_flag != 1 AND group_id = 123 GROUP BY store_code |
-| 某供应商的当天订货量和到货率 | SELECT store_code, matnr, scm_book_num, scm_receive_num, scm_receive_num/NULLIF(scm_book_num,0)*100 AS receive_rate FROM ads_cockpit_fd_supply_ware_d WHERE dt = 20240509 AND supplier_code = 'SUP001' AND group_id = 123 |
-| 期望到货准确率 | SELECT SUM(actual_receive_num_expect_dt)/NULLIF(SUM(expect_book_num),0)*100 AS accuracy FROM ads_cockpit_fd_supply_ware_d WHERE expect_book_num > 0 AND group_id = 123 |
+### 6.1 默认过滤
 
----
-
-## 通用WHERE过滤
+几乎所有业务查询默认建议加：
 
 ```sql
--- 基础过滤（建议所有查询加上）
-WHERE group_id = ?                    -- 集团ID
-  AND exclude_flag != 1               -- 排除业绩排除商品
-  AND (service_flag != 1 OR service_flag IS NULL)  -- 排除服务商品
-  AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)  -- 排除购物袋
-
--- 时间过滤
-  AND dt >= 20240501 AND dt <= 20240509    -- 日期范围
-  -- 或
-  AND month_id = '202405'                  -- 指定月份
-  -- 或
-  AND date_type = 1                        -- 只取天粒度
+WHERE group_id = ?
+  AND exclude_flag != 1
+  AND (service_flag != 1 OR service_flag IS NULL)
+  AND (shopping_bag_flag != 1 OR shopping_bag_flag IS NULL)
 ```
+
+### 6.2 时间规则
+
+- `dt` 一般用于日期范围过滤，格式为 `YYYYMMDD` 整数。
+- `month_id` 一般用于月汇总，格式如 `202405`。
+- `date_type` 用于控制粒度，不同分析必须明确取值。
+
+### 6.3 金额规则
+
+- 金额字段默认单位为“分”。
+- 若展示给用户，统一转换为“元”。
+- 同一张结果表中不要混用“分”和“元”。
+
+### 6.4 比率规则
+
+- 不能先行级算比率再汇总。
+- 必须先汇总分子/分母，再计算比率。
+- 分母可能为 0 时必须用 `NULLIF()`。
+
+### 6.5 预警规则
+
+- 预警字段只适合筛选、计数、分组，不适合作为连续数值指标。
+- 预警字段含义固定为 0/1。
+
+---
+
+## 7. 查询路由规则
+
+### 7.1 先选表再写 SQL
+
+- 销售、库存、毛利、预警、订货综合分析 -> `ads_cockpit_fd_store_ware_d*`
+- 交易来源、订单数、客单价 -> `ads_cockpit_fd_store_ware_trade_qc_d_v5`
+- 订货/收货/到货准确率 -> `ads_cockpit_fd_supply_ware_d`
+
+### 7.2 下钻优先级
+
+1. 门店
+2. 商品
+3. 供应商
+4. 类目
+5. 交易来源
+6. 预警
+
+### 7.3 展示规则
+
+- 名称和编码尽量分列。
+- 类目层级要显示明确层级名，不要只给拼接编码。
+- 如果用户问“TopN”，默认按目标指标降序。
+
+---
+
+## 8. 示例查询
+
+| 自然语言 | 推荐 SQL 思路 |
+|----------|---------------|
+| 某门店昨天的实销金额和毛利是多少 | 选 `ads_cockpit_fd_store_ware_d*`，按 `store_code + dt` 汇总 `actual_sale_untaxed_amt` 和 `gp_untaxed_amt` |
+| 按采购类目统计本月销售额 TOP10 | 选 `ads_cockpit_fd_store_ware_d*`，按 `purchase_category1_name` 聚合销售额并排序 |
+| 各门店上月毛利率排名 | 选 `ads_cockpit_fd_store_ware_d*`，按 `store_code` 汇总分子分母后算毛利率 |
+| 当前高库存商品有哪些 | 选 `ads_cockpit_fd_store_ware_d*`，筛 `extra_stock = 1` |
+| 按交易渠道统计某天销售额 | 选 `ads_cockpit_fd_store_ware_trade_qc_d_v5`，按 `sale_source_name1` 聚合 |
+| 某天各门店订单数和客单价 | 选 `ads_cockpit_fd_store_ware_trade_qc_d_v5`，订单数用 `BITMAP_COUNT(order_id_normal)` |
+| 某供应商当天订货量和到货率 | 选 `ads_cockpit_fd_supply_ware_d`，算 `scm_receive_num / scm_book_num` |
+| 期望到货准确率 | 选 `ads_cockpit_fd_supply_ware_d`，算 `actual_receive_num_expect_dt / expect_book_num` |
+
+---
+
+## 9. 禁用规则
+
+- 不要把订单数和商品数混为一谈。
+- 不要把含税和未税混用。
+- 不要把门店名、商品名、供应商名和编码混在一起输出。
+- 不要在 bitmap 字段上直接 `COUNT(*)` 代替去重计数。
+- 不要把预警字段当连续数值做均值。
+- 不要在没有明确 group_id 时随意选错分表。
+
+---
+
+## 10. 维护建议
+
+当新增字段、指标或 join 时，必须同步更新：
+
+1. 指标词典
+2. 维度词典
+3. 连接规则
+4. 默认过滤规则
+5. 示例查询
+
+如果后续要接入程序消费，建议把本文件同步输出为：
+- `ads_cockpit_freedom.semantic.json`
+- `ads_cockpit_freedom.semantic.yaml`
+
+这样 NL2SQL、AI 分析师、RCA、订阅和仪表盘都能直接复用。

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 from app.config import get_settings
 from app.utils.llm_client import get_llm_client, LLMError, LLMClient
+from app.utils.semantic_context import build_semantic_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +112,9 @@ class SqlOptimizer:
             logger.warning("[SQL优化] 提示词为空，跳过 LLM 优化")
             return None
 
+        semantic_doc = build_semantic_snapshot("", 0, None)
         messages = [
-            {"role": "system", "content": prompt},
+            {"role": "system", "content": prompt + ("\n\n" + semantic_doc if semantic_doc else "")},
             {"role": "user", "content": f"<sql>\n{sql}\n</sql>"},
         ]
 
