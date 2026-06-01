@@ -20,12 +20,13 @@ from app.services.query_service import QueryService
 from app.repositories.data_source_repository import DataSourceRepository
 from app.repositories.semantic_metric_repository import SemanticMetricRepository
 from app.utils.sql_validator import SQLValidator
-from app.utils.sql_normalizer import strip_trailing_semicolon
+from app.utils.sql_normalizer import strip_trailing_semicolon, has_multi_level_table_reference, has_foreign_schema_reference, has_forbidden_sql_tokens
 from app.schemas.query import SQLQueryRequest
 from app.schemas.ai_analyst import AIAnalystChatResponse, AIAnalystMessage, AIAnalystToolCall
 from app.schemas.semantic_metric import SemanticMetricQueryRequest
 from app.services.semantic_metric_query_service import SemanticMetricQueryService
 from app.utils.semantic_runtime_context import build_semantic_runtime_context
+from app.utils.chart_axis_inference import infer_chart_axes
 from app.models.user import User
 from app.core.redis import get_redis
 
@@ -77,12 +78,15 @@ class AIAnalystService:
 
 重要规则：
 - 只执行 SELECT 查询，绝不执行 INSERT/UPDATE/DELETE/DROP 等修改操作
-- SQL 表名必须带库名前缀
-- 运行时语义层文档是数据逻辑来源；生成 SQL、选择工具或解释结果前，必须先依据语义层文档理解字段含义、指标口径、维度、关联关系和过滤条件
-- 如果语义层文档与实时 schema、字段名猜测或模型常识冲突，以语义层文档为准
-- 当不确定数据结构时，先查看 schema
-- 回答要简洁清晰，重点突出
-- 用户明确要求生成图表时，必须先执行 SQL 查询获取数据，然后立即调用 generate_chart 工具生成图表，不要反问用户
+|- SQL 表名必须带库名前缀
+|- 只使用当前数据源支持的 SQL 语法和函数，遇到不确定语法先用 get_schema/语义层确认后再写 SQL
+|- 明确禁止使用 QUALIFY、SELECT * 以外的未确认方言特性，复杂 TopN/去重/窗口逻辑优先使用子查询或 CTE 改写
+|- 运行时语义层文档是数据逻辑来源；生成 SQL、选择工具或解释结果前，必须先依据语义层文档理解字段含义、指标口径、维度、关联关系和过滤条件
+|- 如果语义层文档与实时 schema、字段名猜测或模型常识冲突，以语义层文档为准
+|- 当不确定数据结构时，先查看 schema
+|- 门店名不能默认从事实表取；需要展示门店名时，必须按 `(group_id, store_code)` JOIN 门店维表后，再从维表选择 `store_name`
+|- 只有当语义层或 schema 明确写出事实表自带 `store_name` 时，才允许直接引用事实表中的 `store_name`
+
 - execute_sql 执行成功后，如果用户要图表，不要再问用户图表类型，直接用柱状图（bar）生成
 """
 
@@ -156,6 +160,8 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         """执行 SQL 查询工具"""
         # 验证 SQL 安全
         sql = strip_trailing_semicolon(sql)
+        if has_forbidden_sql_tokens(sql):
+            return {"success": False, "error": "SQL 验证失败: 不允许使用 QUALIFY", "columns": [], "rows": [], "total": 0}
         is_valid, msg = SQLValidator.validate(sql)
         if not is_valid:
             return {"success": False, "error": f"SQL 验证失败: {msg}", "columns": [], "rows": [], "total": 0}
@@ -165,12 +171,20 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         if not ds:
             return {"success": False, "error": "数据源不存在", "columns": [], "rows": [], "total": 0}
 
+        if has_multi_level_table_reference(sql):
+            return {"success": False, "error": "SQL 表名格式错误：只允许 库名.表名，不允许多级前缀", "columns": [], "rows": [], "total": 0}
+        if has_foreign_schema_reference(sql, ds.database or ""):
+            return {"success": False, "error": "SQL 表名不属于当前数据源", "columns": [], "rows": [], "total": 0}
+
         try:
             from app.utils.db_executor import execute_query
             rows, columns = execute_query(ds, sql)
             total = len(rows)
-            # 限制返回数据量避免 token 爆炸
+            # 限制返回数据量避免 token 爆炸，并把行数据转成 dict，保证图表能按字段名读取
             preview_rows = rows[:100]
+            if preview_rows and columns:
+                if not isinstance(preview_rows[0], dict):
+                    preview_rows = [dict(zip(columns, row)) if isinstance(row, (list, tuple)) else row for row in preview_rows]
             return {
                 "success": True,
                 "columns": columns,
@@ -373,7 +387,6 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
             if isinstance(row, dict):
                 if field in row:
                     return row[field]
-                # 尝试数值索引
                 try:
                     idx = int(field)
                     keys = list(row.keys())
@@ -382,33 +395,32 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
                 except (ValueError, TypeError):
                     pass
                 return None
-            else:
-                if field in columns:
-                    return row[columns.index(field)]
-                # 尝试数值索引
-                try:
-                    idx = int(field)
-                    if 0 <= idx < len(row):
-                        return row[idx]
-                except (ValueError, TypeError, IndexError):
-                    pass
-                return None
+            if field in columns:
+                return row[columns.index(field)]
+            try:
+                idx = int(field)
+                if 0 <= idx < len(row):
+                    return row[idx]
+            except (ValueError, TypeError, IndexError):
+                pass
+            return None
 
+        x_axis_field, y_axis_field = infer_chart_axes(columns, data, x_axis_field, y_axis_field)
         x_data = [_safe_get(row, x_axis_field, columns) for row in data]
         y_data = [_safe_get(row, y_axis_field, columns) for row in data]
 
-        # 转数值
         try:
             y_data = [float(v) if v is not None else 0 for v in y_data]
         except (ValueError, TypeError):
             pass
 
         series_name = y_axis_field
+
         chart_config = {
             "title": {"text": title or f"{y_axis_field} by {x_axis_field}"},
             "tooltip": {"trigger": "axis"},
             "legend": {"data": [series_name]},
-            "xAxis": {"type": "category", "data": [str(v) for v in x_data]},
+            "xAxis": {"type": "category", "data": ["未命名" if v is None else str(v) for v in x_data]},
             "yAxis": {"type": "value"},
             "series": [
                 {
