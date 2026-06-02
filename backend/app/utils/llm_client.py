@@ -496,6 +496,69 @@ class LLMClient:
         return ""
 
 
+    def chat_stream(self, messages: List[Dict[str, str]], temperature: float = 0.0):
+        """
+        流式调用 LLM，逐 token 产出。
+
+        Yields:
+            str: 每个 token 的文本内容
+        """
+        if self.adapter in (LLMAdapter.LANGCHAIN,):
+            yield from self._stream_langchain(messages, temperature)
+        elif self.provider == LLMProvider.OPENAI:
+            yield from self._stream_openai(messages, temperature)
+        else:
+            # 不支持流式的 provider 回退到完整响应
+            yield self.chat(messages, temperature)
+
+    def _stream_langchain(self, messages, temperature):
+        """LangChain 流式调用"""
+        lc_messages = self._build_langchain_messages(messages)
+        model = self._build_langchain_chat_model(temperature)
+        for chunk in model.stream(lc_messages):
+            content = chunk.content if hasattr(chunk, "content") else str(chunk)
+            if content:
+                yield content
+
+    def _stream_openai(self, messages, temperature):
+        """OpenAI 原生 httpx 流式调用"""
+        import urllib3
+        if not self.settings.ssl_verify_enabled:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        url = f"{self.settings.llm_api_base}/chat/completions"
+        data = {
+            "model": self.settings.llm_model or "gpt-3.5-turbo",
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.settings.llm_api_key}",
+        }
+
+        try:
+            with httpx.Client(timeout=self.timeout, verify=self.settings.ssl_verify_enabled) as client:
+                with client.stream("POST", url, json=data, headers=headers) as resp:
+                    for line in resp.iter_lines():
+                        if not line or line.startswith(":") or line.startswith("data: [DONE]"):
+                            continue
+                        if line.startswith("data: "):
+                            try:
+                                chunk = json.loads(line[6:])
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield content
+                            except json.JSONDecodeError:
+                                continue
+        except Exception as e:
+            logger.error("OpenAI stream error: %s", e)
+            # fallback: complete response
+            yield self.chat(messages, temperature)
+
+
 def get_llm_client(provider: str = None) -> LLMClient:
     """获取 LLM 客户端实例"""
     return LLMClient(provider)

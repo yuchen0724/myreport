@@ -23,12 +23,15 @@ from app.utils.sql_validator import SQLValidator
 from app.utils.sql_normalizer import strip_trailing_semicolon, has_multi_level_table_reference, has_foreign_schema_reference, has_forbidden_sql_tokens
 from app.schemas.query import SQLQueryRequest
 from app.schemas.ai_analyst import AIAnalystChatResponse, AIAnalystMessage, AIAnalystToolCall
+from pydantic import BaseModel, Field
 from app.schemas.semantic_metric import SemanticMetricQueryRequest
 from app.services.semantic_metric_query_service import SemanticMetricQueryService
 from app.utils.semantic_runtime_context import build_semantic_runtime_context
+import hashlib
 from app.utils.chart_axis_inference import infer_chart_axes
 from app.models.user import User
 from app.core.redis import get_redis
+from app.services.nl2sql.prompt_utils import PromptManager
 
 logger = logging.getLogger(__name__)
 
@@ -37,80 +40,86 @@ MAX_HISTORY = 20  # 保留最近 N 轮对话
 _REDIS_CONVERSATION_PREFIX = "ai_analyst:conversation:"
 
 
+class AgentAction(BaseModel):
+    """结构化输出：LLM 工具调用或最终回答"""
+    thought: str = Field(description="思考过程")
+    tool: Optional[str] = Field(None, description="要调用的工具名，无工具调用时为 null")
+    tool_input: Optional[Dict[str, Any]] = Field(None, description="工具参数")
+    final_answer: Optional[str] = Field(None, description="最终回复，无工具调用时提供")
+
+
 class AIAnalystService:
     """AI 数据分析师服务"""
 
-    SYSTEM_PROMPT = """你是一个专业的 AI 数据分析师。你的职责是帮助用户分析数据、生成查询、创建可视化图表。
-
-你可以使用以下工具来完成任务：
-
-1. **execute_sql** - 执行 SQL 查询
-   - 当你需要查询数据时使用此工具
-   - 只能执行 SELECT 查询（只读）
-   - SQL 必须使用完整的 库名.表名 格式
-
-2. **get_schema** - 获取数据库表结构
-   - 当你不确定表名或字段名时，先使用此工具查看可用的表和列
-   - 可以查看所有表或指定表的结构
-
-3. **generate_chart** - 生成图表配置
-   - 当查询结果需要可视化时，使用此工具生成 ECharts 图表配置
-   - 支持: bar（柱状图）, line（折线图）, pie（饼图）, scatter（散点图）, area（面积图）
-
-4. **analyze_data** - 数据分析洞察
-   - 当用户需要对查询结果进行统计分析、趋势分析、异常检测等时使用
-   - 会自动对已有数据进行分析并给出洞察
-
-5. **list_metrics** - 查看当前用户可用的统一业务指标
-   - 当用户提到销售额、成交金额、订单数等业务指标时，优先用此工具查找可用指标
-
-6. **query_metric** - 按统一口径查询语义指标
-   - 当用户问题命中可用指标时，优先用此工具查询，而不是自行拼接指标 SQL
-
-工作流程建议：
-1. 如果用户的问题涉及业务指标，先用 list_metrics 查找统一指标口径
-2. 如果匹配到指标，用 query_metric 查询指标
-3. 如果用户的问题模糊，先用 get_schema 了解可用数据
-4. 根据问题编写 SQL 并用 execute_sql 执行
-5. 如果结果需要可视化，用 generate_chart 生成图表
-6. 如果需要深入分析，用 analyze_data 进行分析
-7. 综合以上结果，用自然语言给用户清晰的结论和建议
-
-重要规则：
-- 只执行 SELECT 查询，绝不执行 INSERT/UPDATE/DELETE/DROP 等修改操作
-|- SQL 表名必须带库名前缀
-|- 只使用当前数据源支持的 SQL 语法和函数，遇到不确定语法先用 get_schema/语义层确认后再写 SQL
-|- 明确禁止使用 QUALIFY、SELECT * 以外的未确认方言特性，复杂 TopN/去重/窗口逻辑优先使用子查询或 CTE 改写
-|- 运行时语义层文档是数据逻辑来源；生成 SQL、选择工具或解释结果前，必须先依据语义层文档理解字段含义、指标口径、维度、关联关系和过滤条件
-|- 如果语义层文档与实时 schema、字段名猜测或模型常识冲突，以语义层文档为准
-|- 当不确定数据结构时，先查看 schema
-|- 门店名不能默认从事实表取；需要展示门店名时，必须按 `(group_id, store_code)` JOIN 门店维表后，再从维表选择 `store_name`
-|- 只有当语义层或 schema 明确写出事实表自带 `store_name` 时，才允许直接引用事实表中的 `store_name`
-|- 同一个 SQL/同一轮工具链里，遇到已明确报过的错误类型（如 QUALIFY、字段不存在、多级库名前缀、错误表名、缺失 JOIN 键）后，必须先停下来重新检查 schema/语义层/字段映射，再换写法；禁止在同一错误方向上连续重复提交同类 SQL
-
-- execute_sql 执行成功后，如果用户要图表，不要再问用户图表类型，直接用柱状图（bar）生成
-"""
+    # 系统提示词将从外部 prompt 文件加载（支持热更新）
+    SYSTEM_PROMPT = None  # 将在 _load_system_prompt() 中惰性初始化
 
     def __init__(self, db: Session):
         self.db = db
         self.ds_repo = DataSourceRepository(db)
         self.query_service = QueryService(db)
+        self._prompt_mgr = PromptManager()
+        self._system_prompt_cache: Optional[str] = None
+
+    def _load_system_prompt(self) -> str:
+        """从外部文件加载系统提示词（支持热更新）"""
+        if self._system_prompt_cache:
+            return self._system_prompt_cache
+        settings = get_settings()
+        prompt_path = getattr(settings, 'ai_analyst_system_prompt_path', None) or "prompts/ai_analyst/system_prompt.md"
+        template = self._prompt_mgr.load_template(prompt_path, "ai_analyst_system")
+        if template:
+            self._system_prompt_cache = template
+            return template
+        # Fallback 硬编码
+        logger.warning("AI Analyst system prompt 文件未找到，使用硬编码 fallback")
+        return "你是一个专业的 AI 数据分析师。请帮助用户分析数据。"
 
     def _get_llm_client(self) -> LLMClient:
         """获取 LLM 客户端"""
         return get_llm_client()
 
+    @staticmethod
+    def _cache_key(message: str, data_source_id: int, group_id: Optional[int] = None) -> str:
+        """生成语义缓存 key（精确匹配）"""
+        raw = f"{message}:{data_source_id}:{group_id or ''}"
+        return f"ai_analyst:cache:{hashlib.md5(raw.encode()).hexdigest()}"
+
+    def _get_cached_response(self, cache_key: str) -> Optional[str]:
+        """读取缓存"""
+        try:
+            r = get_redis()
+            raw = r.get(cache_key)
+            return raw.decode() if raw else None
+        except Exception:
+            return None
+
+    def _set_cached_response(self, cache_key: str, response_text: str, ttl: int = 300):
+        """写入缓存（默认 5 分钟）"""
+        try:
+            r = get_redis()
+            r.setex(cache_key, ttl, response_text)
+        except Exception:
+            pass
+
     def _get_conversation_history(self, conversation_id: str) -> List[Dict[str, str]]:
-        """获取对话历史（Redis）"""
+        """获取对话历史（Redis），超 20 条时对早期消息做摘要"""
         try:
             r = get_redis()
             key = f"{_REDIS_CONVERSATION_PREFIX}{conversation_id}"
             raw = r.get(key)
             if not raw:
                 return []
-            return json.loads(raw)
+            history = json.loads(raw)
+            # 滑动窗口：保留最近 10 轮，对早期做摘要
+            if len(history) > MAX_HISTORY:
+                recent = history[-MAX_HISTORY:]
+                early = history[:-MAX_HISTORY]
+                # 摘要格式
+                summary = f"[历史摘要: 用户进行了 {len(early)//2} 轮对话后继续当前话题]"
+                return [{"role": "system", "content": summary}] + recent
+            return history
         except Exception:
-            # Redis 不可用时：保持系统可用性，退回为空历史（不保证记忆）
             return []
 
     def _save_conversation_history(self, conversation_id: str, history: List[Dict[str, str]]):
@@ -127,51 +136,15 @@ class AIAnalystService:
 
 
     def _build_tools_prompt(self, data_source_id: int) -> str:
-        """构建可用工具描述（告知 LLM 可用工具和参数格式）"""
-        return f"""
-当前可用工具（以 JSON 格式调用）。按优先级排序：
-
-1. **execute_sql** — 执行 SQL 查询（只读 SELECT）
-   输入: {{"tool": "execute_sql", "input": {{"sql": "SELECT ...", "data_source_id": {data_source_id}}}}}
-   使用时机：当你有足够的表结构和字段信息后，立即使用此工具查询数据，不要反复查看 schema。
-
-2. **get_schema** — 获取数据库表结构
-   输入: {{"tool": "get_schema", "input": {{"data_source_id": {data_source_id}}}}}
-   可选参数: "table_name": "表名"（指定只看某张表的完整字段）
-   使用时机：不确定表名或字段名时使用。**最多调用 2 次**，获取足够信息后立即转到 execute_sql。
-
-3. **list_metrics** — 查看当前用户可用的统一业务指标
-   输入: {{"tool": "list_metrics", "input": {{"data_source_id": {data_source_id}}}}}
-   使用时机：用户提到销售额、成交金额、订单数等业务指标时，优先查找可用指标。
-
-4. **query_metric** — 按统一口径查询语义指标
-   输入: {{"tool": "query_metric", "input": {{"metric_key": "gmv", "data_source_id": {data_source_id}, "dimensions": ["store_id"], "start_time": "2026-05-01", "end_time": "2026-06-01", "filters": {{}}, "page": 1, "page_size": 50}}}}
-
-5. **generate_chart** — 生成 ECharts 图表配置（交互式，支持缩放和图例切换）
-   输入（单系列）：{{"tool": "generate_chart", "input": {{"chart_type": "bar|line|pie|scatter", "data": [...], "x_axis_field": "字段名", "y_axis_field": "字段名", "title": "图表标题"}}}}
-   输入（多系列/多条线）：{{"tool": "generate_chart", "input": {{"chart_type": "line", "data": [...], "x_axis_field": "日期字段", "y_axis_field": "第一个值字段", "title": "标题", "series_fields": ["门店1", "门店2", "门店3"]}}}}
-   说明：多系列模式适用于多个实体(门店/品类)对比趋势，每个字段一条不同颜色的线，带 dataZoom 缩放滑块和图例切换。数据格式为 wide format（每行一个时间点，每个门店一列）。
-
-6. **analyze_data** — 数据分析洞察
-   输入: {{"tool": "analyze_data", "input": {{"data": [...], "columns": [...], "question": "用户问题"}}}}
-   使用时机：需要对已有数据进行统计分析、趋势分析、异常检测时使用。
-
----
-
-**重要规则**：
-- 先通过 get_schema（最多 2 次）了解表结构，然后立即用 execute_sql 查询数据
-- 同一个工具不要连续重复调用（尤其是 get_schema）
-- 调用 execute_sql 时，SQL 必须使用完整的 库名.表名 格式
-- **Doris SQL 提示**：日期过滤使用 `dt >= 20260501 AND dt < 20260601` 整数比较格式，不要使用 DATE_FORMAT/DATE_SUB 函数
-- **分步执行**：先执行简单 SQL 确认表有数据（如 `SELECT COUNT(*) FROM 库.表 WHERE dt >= 20260501`），不要一步写出复杂 SQL
-- **不要生成 HTML/JS 代码**：需要图表时请使用 generate_chart 工具，不要在文字回复中写 HTML、JS 或 echarts 代码。不要告诉用户"复制代码另存为 html"——图表直接由系统渲染。
-- **每次都需要调 generate_chart**：即使用户的后续追问是同一批数据，也必须重新调用 generate_chart 工具来生成图表配置。禁止在文字中写"图表已生成"而不实际调用工具。
-
-当你需要使用工具时，请输出如下格式（一行 JSON）：
-ACTION: {{"tool": "工具名", "input": {{参数}}}}
-
-当你不需要使用工具，直接回答用户问题时，正常输出文字即可。
-"""
+        """从外部文件加载工具描述 prompt（支持热更新）"""
+        settings = get_settings()
+        prompt_path = getattr(settings, 'ai_analyst_tools_prompt_path', None) or "prompts/ai_analyst/tools.md"
+        template = self._prompt_mgr.load_template(prompt_path, "ai_analyst_tools")
+        if template:
+            # 注入 data_source_id
+            return template.replace("{data_source_id}", str(data_source_id))
+        logger.warning("AI Analyst tools prompt 文件未找到，使用精简 fallback")
+        return f"可用工具: execute_sql, get_schema, generate_chart, analyze_data, list_metrics, query_metric (data_source_id={data_source_id})"
     # ── 工具执行 ──────────────────────────────────────────────────
 
     def execute_sql_tool(self, sql: str, data_source_id: int) -> Dict[str, Any]:
@@ -801,12 +774,25 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         if not conversation_id:
             conversation_id = str(uuid.uuid4())
 
+        # 精确缓存检查
+        cache_key = self._cache_key(message, data_source_id, group_id)
+        cached = self._get_cached_response(cache_key)
+        if cached:
+            return AIAnalystChatResponse(
+                conversation_id=conversation_id,
+                message=AIAnalystMessage(
+                    role="assistant",
+                    content=cached,
+                ),
+            )
+
         history = self._get_conversation_history(conversation_id)
         tools_prompt = self._build_tools_prompt(data_source_id)
         semantic_context = build_semantic_runtime_context(self.db, data_source_id, message)
 
         # 构建完整对话
-        system_msg = self.SYSTEM_PROMPT + "\n\n" + tools_prompt + "\n\n" + semantic_context
+        system_prompt = self._load_system_prompt()
+        system_msg = system_prompt + "\n\n" + tools_prompt + "\n\n" + semantic_context
         if group_id:
             system_msg += f"\n\n当前用户集团ID: {group_id}（查询时需过滤此集团数据）"
 
@@ -822,7 +808,22 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         for step in range(15):
             llm_client = self._get_llm_client()
             try:
-                response_text = llm_client.chat(messages, temperature=0.0)
+                # 优先使用结构化输出（格式保证），不支持时回退文本解析
+                action = None
+                if llm_client.supports_structured_output:
+                    try:
+                        structured = llm_client.chat_structured(messages, AgentAction, temperature=0.0)
+                        if structured.get("tool") and structured.get("tool_input"):
+                            action = {"tool": structured["tool"], "input": structured["tool_input"]}
+                        else:
+                            response_text = structured.get("final_answer") or structured.get("thought", "")
+                    except Exception:
+                        # 结构化失败，回退文本
+                        response_text = llm_client.chat(messages, temperature=0.0)
+                        action = self._parse_action(response_text)
+                else:
+                    response_text = llm_client.chat(messages, temperature=0.0)
+                    action = self._parse_action(response_text)
             except LLMError as e:
                 return AIAnalystChatResponse(
                     conversation_id=conversation_id,
@@ -832,11 +833,11 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
                     ),
                 )
 
-            # 检查是否有工具调用
-            action = self._parse_action(response_text)
+            # 没有工具调用则直接返回
             if action is None:
                 # 没有工具调用，直接返回
                 all_text.append(response_text)
+                self._set_cached_response(cache_key, response_text)
                 self._save_conversation_history(conversation_id, [
                     {"role": "user", "content": message},
                     {"role": "assistant", "content": response_text},
@@ -915,7 +916,8 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
         tools_prompt = self._build_tools_prompt(data_source_id)
         semantic_context = build_semantic_runtime_context(self.db, data_source_id, message)
 
-        system_msg = self.SYSTEM_PROMPT + "\n\n" + tools_prompt + "\n\n" + semantic_context
+        system_prompt = self._load_system_prompt()
+        system_msg = system_prompt + "\n\n" + tools_prompt + "\n\n" + semantic_context
         if group_id:
             system_msg += f"\n\n当前用户集团ID: {group_id}（查询时需过滤此集团数据）"
 
@@ -932,20 +934,23 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
             llm_client = self._get_llm_client()
 
             try:
-                # 尝试流式调用
-                response_text = await self._stream_llm_call(llm_client, messages)
+                # 流式调用 LLM，逐 token yield 的同时累积完整文本
+                stream_buffer = []
+                async for token in self._stream_llm_call(llm_client, messages):
+                    stream_buffer.append(token)
+                response_text = "".join(stream_buffer)
             except Exception as e:
-                logger.error(f"[AI-Analyst] LLM 调用失败: {e}")
+                logger.error("[AI-Analyst] LLM 调用失败: %s", e)
                 yield {"type": "error", "error": str(e)}
                 return
 
             # 检查是否有工具调用
             action = self._parse_action(response_text)
             if action is None:
-                # 直接输出最终回复
+                # 真流式：逐 token 推送
                 all_text.append(response_text)
-                # 逐 token 发送（这里非流式，一次性发送）
-                yield {"type": "token", "content": response_text}
+                for token in stream_buffer:
+                    yield {"type": "token", "content": token}
 
                 self._save_conversation_history(conversation_id, [
                     {"role": "user", "content": message},
@@ -994,9 +999,18 @@ ACTION: {{"tool": "工具名", "input": {{参数}}}}
             yield {"type": "token", "content": fallback_text}
         yield {"type": "done", "conversation_id": conversation_id}
 
-    async def _stream_llm_call(self, llm_client: LLMClient, messages: List[Dict[str, str]]) -> str:
-        """调用 LLM 获取完整响应文本（使用同步调用，可靠返回完整结果）"""
-        return llm_client.chat(messages, temperature=0.0)
+    async def _stream_llm_call(self, llm_client: LLMClient, messages: List[Dict[str, str]]):
+        """
+        流式调用 LLM，逐 token yield。
+
+        调用方 collect tokens 即得完整文本。
+        """
+        try:
+            for token in llm_client.chat_stream(messages, temperature=0.0):
+                yield token
+        except Exception as e:
+            logger.error("[AI-Analyst] stream error: %s", e)
+            raise
 
     # ── Schema 查询 ──────────────────────────────────────────────
 
