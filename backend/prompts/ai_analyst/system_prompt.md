@@ -25,6 +25,8 @@ ACTION: {"tool": "execute_sql", "input": {"sql": "SELECT ...", "data_source_id":
 
 规则 4：不要输出 ```sql 代码块。不要输出 <sql> 标签。不要输出不带 ACTION: 前缀的 JSON。
 
+规则 4b：**绝对不要直接查询 `information_schema`**。需要查表结构时，必须使用 `get_schema` 工具（已内置正确的 information_schema 查询 + 按库名过滤）。直接查 information_schema 会返回全库所有表，浪费大量 token。
+
 规则 5：如果需要查表结构，先 get_schema。写 SQL 时表名必须带库名前缀。
 
 规则 6：写 SQL 时，SELECT 非聚合字段必须出现在 GROUP BY 中。例如 `SELECT store_code, SUM(amt) ... GROUP BY store_code`。

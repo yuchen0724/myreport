@@ -173,6 +173,10 @@ class AIAnalystService:
         sql = strip_trailing_semicolon(sql)
         if has_forbidden_sql_tokens(sql):
             return {"success": False, "error": "SQL 验证失败: 不允许使用 QUALIFY", "columns": [], "rows": [], "total": 0}
+        # 禁止直接查询 information_schema（应使用 get_schema 工具）
+        sql_upper = sql.upper()
+        if "FROM INFORMATION_SCHEMA" in sql_upper or "JOIN INFORMATION_SCHEMA" in sql_upper:
+            return {"success": False, "error": "禁止直接查询 information_schema。请使用 get_schema 工具来获取表结构。", "columns": [], "rows": [], "total": 0}
         is_valid, msg = SQLValidator.validate(sql)
         if not is_valid:
             return {"success": False, "error": f"SQL 验证失败: {msg}", "columns": [], "rows": [], "total": 0}
