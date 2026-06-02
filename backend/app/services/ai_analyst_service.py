@@ -1083,6 +1083,10 @@ class AIAnalystService:
 
             # 检查是否有工具调用
             action = self._parse_action(response_text)
+            logger.info("[AI-Analyst] step=%d/%d action=%s preview=%s",
+                         step + 1, self.MAX_AGENT_STEPS,
+                         action.get("tool") if action else None,
+                         response_text[:120].replace("\n", " "))
 
             # 智能回退时：先输出文字部分，再执行工具
             smart_fallback = False
