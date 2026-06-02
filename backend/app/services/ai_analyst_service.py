@@ -914,7 +914,7 @@ class AIAnalystService:
 
         history = self._get_conversation_history(conversation_id)
         tools_prompt = self._build_tools_prompt(data_source_id)
-        semantic_context = build_semantic_runtime_context(self.db, data_source_id, message, max_chars=12000)
+        semantic_context = build_semantic_runtime_context(self.db, data_source_id, message, max_chars=0)
 
         # 构建完整对话
         system_prompt = self._load_system_prompt()
@@ -1045,7 +1045,7 @@ class AIAnalystService:
 
         history = self._get_conversation_history(conversation_id)
         tools_prompt = self._build_tools_prompt(data_source_id)
-        semantic_context = build_semantic_runtime_context(self.db, data_source_id, message, max_chars=12000)
+        semantic_context = build_semantic_runtime_context(self.db, data_source_id, message, max_chars=0)
 
         system_prompt = self._load_system_prompt()
         system_msg = (

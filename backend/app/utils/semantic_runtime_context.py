@@ -35,7 +35,7 @@ def build_semantic_runtime_context(
         if snapshot:
             selected_doc = snapshot + "\n\n" + selected_doc
 
-        if len(selected_doc) > max_chars:
+        if max_chars > 0 and len(selected_doc) > max_chars:
             selected_doc = selected_doc[:max_chars].rstrip() + "\n\n...（语义层文档已按长度截断）"
 
         doc_names = service._get_loaded_doc_names(data_source_id)
