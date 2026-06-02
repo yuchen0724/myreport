@@ -67,7 +67,7 @@ class AIAnalystService:
         if self._system_prompt_cache:
             return self._system_prompt_cache
         settings = get_settings()
-        prompt_path = getattr(settings, 'ai_analyst_system_prompt_path', None) or "prompts/ai_analyst/system_prompt.md"
+        prompt_path = getattr(settings, 'ai_analyst_system_prompt_path', None) or "../prompts/ai_analyst/system_prompt.md"
         template = self._prompt_mgr.load_template(prompt_path, "ai_analyst_system")
         if template:
             self._system_prompt_cache = template
@@ -159,7 +159,7 @@ class AIAnalystService:
     def _build_tools_prompt(self, data_source_id: int) -> str:
         """从外部文件加载工具描述 prompt（支持热更新）"""
         settings = get_settings()
-        prompt_path = getattr(settings, 'ai_analyst_tools_prompt_path', None) or "prompts/ai_analyst/tools.md"
+        prompt_path = getattr(settings, 'ai_analyst_tools_prompt_path', None) or "../prompts/ai_analyst/tools.md"
         template = self._prompt_mgr.load_template(prompt_path, "ai_analyst_tools")
         if template:
             # 注入 data_source_id
