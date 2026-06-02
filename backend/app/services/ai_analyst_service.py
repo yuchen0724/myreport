@@ -669,6 +669,21 @@ class AIAnalystService:
                                 pass
                         break
             brace_start = text.find("{", brace_start + 1)
+        # ── 格式3: DESCRIBE table_name / SHOW TABLES 等元数据命令 ──
+        desc_match = re.search(
+            r'(DESCRIBE|DESC|SHOW\s+TABLES|SHOW\s+COLUMNS)\s+([`\"]?)(\w+)\2',
+            text, re.IGNORECASE
+        )
+        if desc_match:
+            command = desc_match.group(1).upper()
+            table_name = desc_match.group(3)
+            # 从文本中提取 data_source_id（通常在命令后单独一行）
+            ds_match = re.search(r'(\d+)', text[desc_match.end():])
+            ds_id = int(ds_match.group(1)) if ds_match else 0
+            if ds_id:
+                return {"tool": "get_schema", "input": {"data_source_id": ds_id, "table_name": table_name},
+                        "_smart_fallback": True, "_text_before": text[:desc_match.start()].strip()}
+
         return None
 
     @staticmethod
@@ -1121,19 +1136,34 @@ class AIAnalystService:
             }
             all_tool_calls.append(tool_calls_record)
 
-            # 记录 SQL 失败次数，连续 3 次后自动注入 schema 信息
+            # SQL 失败处理：自动注入 schema + 指导
             if tool_name == "execute_sql":
                 if tool_result.get("success"):
                     sql_fail_count = 0
                     last_successful_result = tool_result
                 else:
+                    error_msg = tool_result.get("error", "")
                     sql_fail_count += 1
+
+                    # 首次失败：提取表名，自动注入该表 schema
+                    if sql_fail_count <= 2:
+                        import re as _re
+                        table_in_error = _re.search(r'FROM\s+(\S+)', response_text, _re.IGNORECASE)
+                        table_name = table_in_error.group(1).split(".")[-1].strip("`\"'") if table_in_error else None
+                        if table_name:
+                            schema_info = self.get_schema_tool(data_source_id, table_name=table_name)
+                            if schema_info.get("success"):
+                                schema_text = json.dumps(schema_info.get("tables", []), ensure_ascii=False, default=str)[:3000]
+                                hint = f"表 `{table_name}` 的结构如下:\n{schema_text}\n\n注意: 门店名不在事实表中，需要 JOIN dim_store 维表获取。请基于此表结构重新编写 SQL。"
+                                messages.append({"role": "system", "content": hint})
+                                yield {"type": "tool_result", "tool_name": "system", "tool_output": f"已注入 `{table_name}` 表结构"}
+
+                    # 第3次失败：注入完整数据库表列表
                     if sql_fail_count == 3:
-                        # 自动注入 schema 信息帮助 LLM 修正 SQL
                         schema_hint = self._build_schema_hint(data_source_id)
                         if schema_hint:
-                            messages.append({"role": "system", "content": f"## 表结构参考\n{schema_hint}\n\n请基于以上表结构重新编写正确的 SQL。注意：1) SELECT 非聚合字段必须出现在 GROUP BY 中 2) 门店名需要 JOIN dim_store 获取"})
-                            yield {"type": "tool_result", "tool_name": "system", "tool_output": "已注入表结构信息，请重新编写 SQL"}
+                            messages.append({"role": "system", "content": f"## 完整表结构参考\n{schema_hint}\n\n请基于以上表结构重新编写正确的 SQL。注意：1) SELECT 非聚合字段必须出现在 GROUP BY 中 2) 门店名需要 JOIN dim_store 获取"})
+                            yield {"type": "tool_result", "tool_name": "system", "tool_output": "已注入全部表结构信息"}
 
             if tool_name == "generate_chart" and tool_result.get("success"):
                 chart_config = tool_result.get("chart_config")
