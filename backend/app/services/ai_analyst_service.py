@@ -677,19 +677,21 @@ class AIAnalystService:
                         "_smart_fallback": True, "_text_before": text_before}
 
         # 检测全文中的 SELECT...FROM（含文字前缀）
-        select_match = re.search(
-            r'(SELECT\s+.+?FROM\s+\S+.*?)(?:;|\n|$)', text, re.IGNORECASE | re.DOTALL
-        )
-        if select_match:
-            sql = select_match.group(1).strip()
-            # 清理：去除尾部 HTML/XML 标签及之后的所有内容
-            # 如 "WHERE id = 812</sql>" → "WHERE id = 812"
-            sql = re.sub(r'\s*</?\w+[^>]*>.*$', '', sql).strip()
-            # 避免误抓非 SQL（如 "我的SELECT查询返回了结果"）
-            if sql.upper().startswith("SELECT") and len(sql) > 20:
-                text_before = text[:select_match.start()].strip()
-                return {"tool": "execute_sql", "input": {"sql": sql},
-                        "_smart_fallback": True, "_text_before": text_before}
+        # 但跳过：如果 SELECT 前面有 JSON/对话结构（如 "data_source_id"、"{")
+        select_prefix = text[:text.upper().find("SELECT")] if "SELECT" in text.upper() else text
+        if select_prefix.strip() and ("\"data_source_id\"" in select_prefix or "\"sql\"" in select_prefix):
+            pass  # SQL 嵌在 JSON 中，不触发智能回退
+        else:
+            select_match = re.search(
+                r'(SELECT\s+.+?FROM\s+\S+.*?)(?:;|\n|$)', text, re.IGNORECASE | re.DOTALL
+            )
+            if select_match:
+                sql = select_match.group(1).strip()
+                sql = re.sub(r'\s*</?\w+[^>]*>.*$', '', sql).strip()
+                if sql.upper().startswith("SELECT") and len(sql) > 20:
+                    text_before = text[:select_match.start()].strip()
+                    return {"tool": "execute_sql", "input": {"sql": sql},
+                            "_smart_fallback": True, "_text_before": text_before}
 
         # 兜底：纯 SELECT 开头的文本（无文字前缀）
         clean = text.strip().strip("`").strip()
