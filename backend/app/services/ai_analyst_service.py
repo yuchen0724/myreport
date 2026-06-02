@@ -53,6 +53,7 @@ class AIAnalystService:
 
     # 系统提示词将从外部 prompt 文件加载（支持热更新）
     SYSTEM_PROMPT = None  # 将在 _load_system_prompt() 中惰性初始化
+    MAX_AGENT_STEPS = 30  # Agent 循环最大步数（LLM 工具调用轮次）
 
     def __init__(self, db: Session):
         self.db = db
@@ -935,7 +936,7 @@ class AIAnalystService:
         tool_calls = []
         all_text = []
         last_successful_result = None
-        for step in range(15):
+        for step in range(self.MAX_AGENT_STEPS):
             llm_client = self._get_llm_client()
             try:
                 # 优先使用结构化输出（格式保证），不支持时回退文本解析
@@ -1066,7 +1067,7 @@ class AIAnalystService:
         last_successful_result = None
         sql_fail_count = 0  # 连续 SQL 失败次数
 
-        for step in range(15):
+        for step in range(self.MAX_AGENT_STEPS):
             llm_client = self._get_llm_client()
 
             try:
