@@ -669,20 +669,33 @@ class AIAnalystService:
                                 pass
                         break
             brace_start = text.find("{", brace_start + 1)
-        # ── 格式3: DESCRIBE table_name / SHOW TABLES 等元数据命令 ──
-        desc_match = re.search(
-            r'(DESCRIBE|DESC|SHOW\s+TABLES|SHOW\s+COLUMNS)\s+([`\"]?)(\w+)\2',
-            text, re.IGNORECASE
-        )
-        if desc_match:
-            command = desc_match.group(1).upper()
-            table_name = desc_match.group(3)
-            # 从文本中提取 data_source_id（通常在命令后单独一行）
-            ds_match = re.search(r'(\d+)', text[desc_match.end():])
+        # ── 格式3: DESCRIBE table / SHOW COLUMNS FROM table 等元数据命令 ──
+        table_name = None
+        ds_id = None
+        # DESCRIBE/DESC table
+        m = re.search(r'(?:DESCRIBE|DESC)\s+([`\"]?)(\w+)\1', text, re.IGNORECASE)
+        if m:
+            table_name = m.group(2)
+        # SHOW COLUMNS FROM/IN table
+        if not table_name:
+            m = re.search(r'SHOW\s+COLUMNS\s+(?:FROM|IN)\s+([`\"]?)(\w+)\1', text, re.IGNORECASE)
+            if m:
+                table_name = m.group(2)
+        # SHOW TABLES (no table name needed, get all schema)
+        if not table_name:
+            m = re.search(r'SHOW\s+TABLES', text, re.IGNORECASE)
+            if m:
+                table_name = ""  # empty = get all tables
+        if table_name is not None:
+            # 从文本中提取 data_source_id
+            ds_match = re.search(r'(\d+)', text)
             ds_id = int(ds_match.group(1)) if ds_match else 0
             if ds_id:
-                return {"tool": "get_schema", "input": {"data_source_id": ds_id, "table_name": table_name},
-                        "_smart_fallback": True, "_text_before": text[:desc_match.start()].strip()}
+                kwargs = {"data_source_id": ds_id}
+                if table_name:
+                    kwargs["table_name"] = table_name
+                return {"tool": "get_schema", "input": kwargs,
+                        "_smart_fallback": True, "_text_before": text.split("\n")[0].strip()}
 
         return None
 
