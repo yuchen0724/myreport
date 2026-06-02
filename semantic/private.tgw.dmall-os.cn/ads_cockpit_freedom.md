@@ -178,6 +178,9 @@
 - **说明**: 核心店品日汇总宽表。
 - **粒度**: `dt + group_id + store_code + matnr + supplier_code + sell_type`
 - **分表规则**: `group_id` 对应后缀表；已知 812、57362 需要使用带后缀表。
+  - 812  ->ads_cockpit_fd_store_ware_d_812
+  - 57362->ads_cockpit_fd_store_ware_d_57362
+  - 其它  ->ads_cockpit_fd_store_ware_d
 - **适用场景**: 销售、毛利、库存、预警、类目、供应链综合分析。
 - **默认过滤**:
   - `exclude_flag != 1`
