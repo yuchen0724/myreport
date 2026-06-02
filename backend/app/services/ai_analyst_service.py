@@ -610,6 +610,62 @@ class AIAnalystService:
 
     # ── Agent 核心 ──────────────────────────────────────────────
 
+    @staticmethod
+    def _extract_json_with_ds_id(text: str) -> Optional[Dict[str, Any]]:
+        """提取文本中第一个包含 data_source_id 的完整 JSON 对象"""
+        import re
+        # 尝试匹配多行 JSON 对象
+        brace_start = text.find("{")
+        while brace_start != -1:
+            depth = 0
+            in_string = False
+            escaped = False
+            for idx in range(brace_start, len(text)):
+                ch = text[idx]
+                if in_string:
+                    if escaped:
+                        escaped = False
+                    elif ch == "\\":
+                        escaped = True
+                    elif ch == '"':
+                        in_string = False
+                    continue
+                if ch == '"':
+                    in_string = True
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[brace_start:idx + 1]
+                        if '"data_source_id"' in candidate:
+                            try:
+                                return json.loads(candidate)
+                            except json.JSONDecodeError:
+                                pass
+                        break
+            brace_start = text.find("{", brace_start + 1)
+        return None
+
+    @staticmethod
+    def _parse_json_as_action(obj: Dict[str, Any], full_text: str) -> Optional[Dict[str, Any]]:
+        """将 LLM 输出的 JSON 对象映射为工具调用 action"""
+        # 格式1: {"sql": "...", "data_source_id": N} → execute_sql
+        if "sql" in obj and "data_source_id" in obj:
+            sql = obj["sql"].strip()
+            sql = sql.replace('\\"', '"').replace("\\n", "\n").replace("\\t", "\t")
+            if sql.upper().startswith("SELECT") or sql.upper().startswith("WITH"):
+                text_before = full_text[:full_text.find(json.dumps(obj, ensure_ascii=False)[:30])].strip() if len(json.dumps(obj, ensure_ascii=False)) > 30 else ""
+                return {"tool": "execute_sql", "input": {"sql": sql, "data_source_id": obj["data_source_id"]},
+                        "_smart_fallback": True, "_text_before": text_before}
+
+        # 格式2: {"table_name": "...", "data_source_id": N} → get_schema
+        if "table_name" in obj and "data_source_id" in obj:
+            return {"tool": "get_schema", "input": {"data_source_id": obj["data_source_id"], "table_name": obj["table_name"]},
+                    "_smart_fallback": True, "_text_before": ""}
+
+        return None
+
     def _parse_action(self, text: str) -> Optional[Dict[str, Any]]:
         """从 LLM 输出中解析 ACTION: {...} 指令"""
         import re
@@ -666,18 +722,13 @@ class AIAnalystService:
             except json.JSONDecodeError:
                 return None
 
-        # ── 智能回退：LLM 忘记用 ACTION: 格式时自动检测 SQL ──
-        # 优先检测 JSON 格式: {"sql": "...", "data_source_id": N} — LLM 最常输出此格式
-        json_match = re.search(r'\{[^}]*"sql"\s*:\s*"([^"]+)"[^}]*"data_source_id"\s*:\s*(\d+)[^}]*\}', text, re.DOTALL)
-        if json_match:
-            sql = json_match.group(1).strip()
-            # JSON 中的 SQL 可能含转义引号，需要反转义
-            sql = sql.replace('\\"', '"').replace("\\n", "\n").replace("\\t", "\t")
-            if sql.upper().startswith("SELECT") or sql.upper().startswith("WITH"):
-                ds_id = int(json_match.group(2))
-                text_before = text[:json_match.start()].strip()
-                return {"tool": "execute_sql", "input": {"sql": sql, "data_source_id": ds_id},
-                        "_smart_fallback": True, "_text_before": text_before}
+        # ── 智能回退：LLM 忘记用 ACTION: 格式时自动检测工具调用 ──
+        # 通用 JSON 检测：提取文本中第一个包含 data_source_id 的完整 JSON 对象
+        json_obj = self._extract_json_with_ds_id(text)
+        if json_obj:
+            result = self._parse_json_as_action(json_obj, text)
+            if result:
+                return result
 
         # 检测 ```sql ... ``` 代码块（允许 sql 后直接跟 SQL，无换行）
         sql_block = re.search(r'```sql\s*(.*?)```', text, re.DOTALL)
