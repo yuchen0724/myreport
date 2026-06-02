@@ -1,6 +1,15 @@
 import warnings
 import logging
+import sys
 from fastapi import FastAPI
+
+# 配置根日志级别，确保所有模块的 INFO 日志可见
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    stream=sys.stdout,
+    force=True,
+)
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
