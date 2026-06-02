@@ -635,81 +635,90 @@ class AIAnalystService:
     # ── Agent 核心 ──────────────────────────────────────────────
 
     @staticmethod
-    def _extract_json_with_ds_id(text: str) -> Optional[Dict[str, Any]]:
-        """提取文本中第一个包含 data_source_id 的完整 JSON 对象"""
-        import re
-        # 尝试匹配多行 JSON 对象
+    def _extract_json_obj(text: str) -> Optional[Dict[str, Any]]:
+        """提取文本中第一个包含 JSON 对象的完整内容"""
         brace_start = text.find("{")
-        while brace_start != -1:
-            depth = 0
-            in_string = False
-            escaped = False
-            for idx in range(brace_start, len(text)):
-                ch = text[idx]
-                if in_string:
-                    if escaped:
-                        escaped = False
-                    elif ch == "\\":
-                        escaped = True
-                    elif ch == '"':
-                        in_string = False
-                    continue
-                if ch == '"':
-                    in_string = True
-                elif ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        candidate = text[brace_start:idx + 1]
-                        if '"data_source_id"' in candidate:
-                            try:
-                                return json.loads(candidate)
-                            except json.JSONDecodeError:
-                                pass
-                        break
-            brace_start = text.find("{", brace_start + 1)
-        # ── 格式3: DESCRIBE table / SHOW COLUMNS FROM table 等元数据命令 ──
-        table_name = None
-        ds_id = None
-        # DESCRIBE/DESC table
-        m = re.search(r'(?:DESCRIBE|DESC)\s+([`\"]?)(\w+)\1', text, re.IGNORECASE)
-        if m:
-            table_name = m.group(2)
-        # SHOW COLUMNS FROM/IN table
-        if not table_name:
-            m = re.search(r'SHOW\s+COLUMNS\s+(?:FROM|IN)\s+([`\"]?)(\w+)\1', text, re.IGNORECASE)
-            if m:
-                table_name = m.group(2)
-        # SHOW TABLES (no table name needed, get all schema)
-        if not table_name:
-            m = re.search(r'SHOW\s+TABLES', text, re.IGNORECASE)
-            if m:
-                table_name = ""  # empty = get all tables
-        if table_name is not None:
-            # 从文本中提取 data_source_id
-            ds_match = re.search(r'(\d+)', text)
-            ds_id = int(ds_match.group(1)) if ds_match else 0
-            if ds_id:
-                kwargs = {"data_source_id": ds_id}
-                if table_name:
-                    kwargs["table_name"] = table_name
-                return {"tool": "get_schema", "input": kwargs,
-                        "_smart_fallback": True, "_text_before": text.split("\n")[0].strip()}
-
+        if brace_start == -1:
+            return None
+        depth = 0
+        in_string = False
+        escaped = False
+        for idx in range(brace_start, len(text)):
+            ch = text[idx]
+            if in_string:
+                if escaped: escaped = False
+                elif ch == "\\": escaped = True
+                elif ch == '"': in_string = False
+                continue
+            if ch == '"': in_string = True
+            elif ch == "{": depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[brace_start:idx + 1])
+                    except json.JSONDecodeError:
+                        return None
         return None
 
-    @staticmethod
-    def _parse_json_as_action(obj: Dict[str, Any], full_text: str) -> Optional[Dict[str, Any]]:
+    def _extract_action_via_llm(self, text: str) -> Optional[Dict[str, Any]]:
+        """
+        当 LLM 输出未包含合法 tool JSON 时，使用 LLM 自身提取工具调用。
+        避免脆弱的正则匹配。
+        """
+        # 仅当文本包含明显的工具调用意图时才触发二次 LLM 调用
+        tool_keywords = ["SELECT", "FROM", "DESCRIBE", "SHOW TABLES", "SHOW COLUMNS",
+                         "execute_sql", "get_schema", "generate_chart", "data_source_id"]
+        if not any(kw in text.upper() for kw in tool_keywords):
+            return None
+
+        try:
+            reformat_prompt = (
+                "从以下文本中提取工具调用。如果有 SQL 查询意图，输出 JSON: "
+                '{"tool": "execute_sql", "input": {"sql": "...", "data_source_id": N}}。'
+                "如果有查看表结构意图，输出 JSON: "
+                '{"tool": "get_schema", "input": {"data_source_id": N, "table_name": "..."}}。'
+                "如果没有明显的工具调用意图，输出: {}。\n\n"
+                f"文本:\n{text[:2000]}"
+            )
+            llm_client = self._get_llm_client()
+            result = llm_client.chat(
+                [{"role": "user", "content": reformat_prompt}],
+                temperature=0.0,
+            )
+            import re as _re
+            json_match = _re.search(r'\{.*\}', result, _re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+                tool = parsed.get("tool")
+                inp = parsed.get("input", {})
+                if tool == "execute_sql" and inp.get("sql"):
+                    return {"tool": "execute_sql", "input": inp,
+                            "_smart_fallback": True, "_text_before": text.split("\n")[0].strip()}
+                if tool == "get_schema" and inp.get("data_source_id"):
+                    return {"tool": "get_schema", "input": inp,
+                            "_smart_fallback": True, "_text_before": text.split("\n")[0].strip()}
+                if tool == "generate_chart" and inp.get("data"):
+                    return {"tool": "generate_chart", "input": inp,
+                            "_smart_fallback": True, "_text_before": ""}
+        except Exception as e:
+            logger.debug("[AI-Analyst] LLM reformat failed: %s", e)
+        return None
+
+    def _parse_json_as_action(self, obj: Dict[str, Any], full_text: str) -> Optional[Dict[str, Any]]:
         """将 LLM 输出的 JSON 对象映射为工具调用 action"""
+        # 标准格式: {"tool": "xxx", "input": {...}}
+        if "tool" in obj and "input" in obj:
+            return {"tool": obj["tool"], "input": obj["input"],
+                    "_smart_fallback": False, "_text_before": ""}
+
         # 格式1: {"sql": "...", "data_source_id": N} → execute_sql
         if "sql" in obj and "data_source_id" in obj:
             sql = obj["sql"].strip()
             sql = sql.replace('\\"', '"').replace("\\n", "\n").replace("\\t", "\t")
             if sql.upper().startswith("SELECT") or sql.upper().startswith("WITH"):
-                text_before = full_text[:full_text.find(json.dumps(obj, ensure_ascii=False)[:30])].strip() if len(json.dumps(obj, ensure_ascii=False)) > 30 else ""
                 return {"tool": "execute_sql", "input": {"sql": sql, "data_source_id": obj["data_source_id"]},
-                        "_smart_fallback": True, "_text_before": text_before}
+                        "_smart_fallback": True, "_text_before": ""}
 
         # 格式2: {"table_name": "...", "data_source_id": N} → get_schema
         if "table_name" in obj and "data_source_id" in obj:
@@ -774,49 +783,15 @@ class AIAnalystService:
             except json.JSONDecodeError:
                 return None
 
-        # ── 智能回退：LLM 忘记用 ACTION: 格式时自动检测工具调用 ──
-        # 通用 JSON 检测：提取文本中第一个包含 data_source_id 的完整 JSON 对象
-        json_obj = self._extract_json_with_ds_id(text)
+        # ── 智能回退：提取 JSON 或使用 LLM 自身提取工具调用（避免正则） ──
+        json_obj = self._extract_json_obj(text)
         if json_obj:
             result = self._parse_json_as_action(json_obj, text)
             if result:
                 return result
 
-        # 检测 ```sql ... ``` 代码块（允许 sql 后直接跟 SQL，无换行）
-        sql_block = re.search(r'```sql\s*(.*?)```', text, re.DOTALL)
-        if sql_block:
-            sql = sql_block.group(1).strip()
-            if sql.upper().startswith("SELECT"):
-                text_before = text[:sql_block.start()].strip()
-                return {"tool": "execute_sql", "input": {"sql": sql},
-                        "_smart_fallback": True, "_text_before": text_before}
-
-        # 检测全文中的 SELECT...FROM（含文字前缀）
-        # 但跳过：如果 SELECT 前面有 JSON/对话结构（如 "data_source_id"、"{")
-        select_prefix = text[:text.upper().find("SELECT")] if "SELECT" in text.upper() else text
-        if select_prefix.strip() and ("\"data_source_id\"" in select_prefix or "\"sql\"" in select_prefix):
-            pass  # SQL 嵌在 JSON 中，不触发智能回退
-        else:
-            select_match = re.search(
-                r'(SELECT\s+.+?FROM\s+\S+.*?)(?:;|\n|$)', text, re.IGNORECASE | re.DOTALL
-            )
-            if select_match:
-                sql = select_match.group(1).strip()
-                sql = re.sub(r'\s*</?\w+[^>]*>.*$', '', sql).strip()
-                if sql.upper().startswith("SELECT") and len(sql) > 20:
-                    text_before = text[:select_match.start()].strip()
-                    return {"tool": "execute_sql", "input": {"sql": sql},
-                            "_smart_fallback": True, "_text_before": text_before}
-
-        # 兜底：纯 SELECT 开头的文本（无文字前缀）
-        clean = text.strip().strip("`").strip()
-        if clean.upper().startswith("SELECT") and not clean.upper().startswith("SELECTION"):
-            sql = clean.split("\n")[0] if "\n" in clean else clean
-            if "FROM" in sql.upper():
-                return {"tool": "execute_sql", "input": {"sql": sql},
-                        "_smart_fallback": True, "_text_before": ""}
-
-        return None
+        # 以上均未匹配 → 用 LLM 自身提取工具调用
+        return self._extract_action_via_llm(text)
 
     def _execute_tool(
         self,
