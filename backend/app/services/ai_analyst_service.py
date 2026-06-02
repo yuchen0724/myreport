@@ -910,13 +910,18 @@ class AIAnalystService:
 
         history = self._get_conversation_history(conversation_id)
         tools_prompt = self._build_tools_prompt(data_source_id)
-        semantic_context = build_semantic_runtime_context(self.db, data_source_id, message)
+        semantic_context = build_semantic_runtime_context(self.db, data_source_id, message, max_chars=6000)
 
         # 构建完整对话
         system_prompt = self._load_system_prompt()
-        system_msg = system_prompt + "\n\n" + tools_prompt + "\n\n" + semantic_context
+        system_msg = (
+            system_prompt + "\n\n"
+            + tools_prompt + "\n\n"
+            + "### 语义层文档（必须优先阅读，这是数据逻辑的唯一权威来源）\n\n"
+            + semantic_context
+        )
         if group_id:
-            system_msg += f"\n\n当前用户集团ID: {group_id}（查询时需过滤此集团数据）"
+            system_msg += f"\n\n当前集团ID: {group_id}"
 
         messages = [{"role": "system", "content": system_msg}]
         messages.extend(history)
@@ -1036,12 +1041,17 @@ class AIAnalystService:
 
         history = self._get_conversation_history(conversation_id)
         tools_prompt = self._build_tools_prompt(data_source_id)
-        semantic_context = build_semantic_runtime_context(self.db, data_source_id, message)
+        semantic_context = build_semantic_runtime_context(self.db, data_source_id, message, max_chars=6000)
 
         system_prompt = self._load_system_prompt()
-        system_msg = system_prompt + "\n\n" + tools_prompt + "\n\n" + semantic_context
+        system_msg = (
+            system_prompt + "\n\n"
+            + tools_prompt + "\n\n"
+            + "### 语义层文档（必须优先阅读，这是数据逻辑的唯一权威来源）\n\n"
+            + semantic_context
+        )
         if group_id:
-            system_msg += f"\n\n当前用户集团ID: {group_id}（查询时需过滤此集团数据）"
+            system_msg += f"\n\n当前集团ID: {group_id}"
 
         messages = [{"role": "system", "content": system_msg}]
         messages.extend(history)
