@@ -4,6 +4,7 @@
 输入: {"sql": "SELECT ...", "data_source_id": {data_source_id}}
 - 库名.表名 格式
 - Doris 日期: dt >= 20260501
+- **高效技巧**: 用 CTE(WITH)、子查询、JOIN 在一个 SQL 中完成多步计算，避免多次 execute_sql
 
 ## get_schema
 输入: {"data_source_id": {data_source_id}}
