@@ -678,10 +678,13 @@ class AIAnalystService:
 
         # 检测全文中的 SELECT...FROM（含文字前缀）
         select_match = re.search(
-            r'(SELECT\s+.+?FROM\s+.+?)(?:;|\n|$)', text, re.IGNORECASE | re.DOTALL
+            r'(SELECT\s+.+?FROM\s+\S+.*?)(?:;|\n|$)', text, re.IGNORECASE | re.DOTALL
         )
         if select_match:
             sql = select_match.group(1).strip()
+            # 清理：去除尾部 HTML/XML 标签及之后的所有内容
+            # 如 "WHERE id = 812</sql>" → "WHERE id = 812"
+            sql = re.sub(r'\s*</?\w+[^>]*>.*$', '', sql).strip()
             # 避免误抓非 SQL（如 "我的SELECT查询返回了结果"）
             if sql.upper().startswith("SELECT") and len(sql) > 20:
                 text_before = text[:select_match.start()].strip()
