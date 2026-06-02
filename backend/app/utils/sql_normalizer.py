@@ -44,6 +44,10 @@ def has_multi_level_table_reference(sql: str) -> bool:
     return any(ref.count(".") > 1 for ref in extract_table_references(sql))
 
 
+# 允许跨库查询的系统 schema（information_schema、mysql 等）
+_ALLOWED_FOREIGN_SCHEMAS = frozenset({"information_schema", "mysql", "performance_schema", "sys"})
+
+
 def has_foreign_schema_reference(sql: str, allowed_schema: str) -> bool:
     allowed_schema = (allowed_schema or "").strip()
     if not allowed_schema:
@@ -51,6 +55,6 @@ def has_foreign_schema_reference(sql: str, allowed_schema: str) -> bool:
     for ref in extract_table_references(sql):
         if ref.count(".") == 1:
             schema, _table = ref.split(".", 1)
-            if schema != allowed_schema:
+            if schema != allowed_schema and schema.lower() not in _ALLOWED_FOREIGN_SCHEMAS:
                 return True
     return False

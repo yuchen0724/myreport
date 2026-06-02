@@ -75,6 +75,26 @@ class AIAnalystService:
         logger.warning("AI Analyst system prompt 文件未找到，使用硬编码 fallback")
         return "你是一个专业的 AI 数据分析师。请帮助用户分析数据。"
 
+    def _build_schema_hint(self, data_source_id: int) -> str:
+        """获取数据库表结构摘要（用于在 SQL 失败时注入帮助 LLM）"""
+        try:
+            ds = self.ds_repo.get_by_id(data_source_id)
+            if not ds:
+                return ""
+            from app.utils.db_executor import execute_query
+            # 获取所有表名（最多 20 个）
+            rows, cols = execute_query(ds, "SELECT TABLE_NAME, TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() LIMIT 20")
+            if not rows:
+                return ""
+            lines = ["可用表:"]
+            for row in rows[:20]:
+                name = row[0] if isinstance(row, (list, tuple)) else row.get("TABLE_NAME", "")
+                comment = row[1] if isinstance(row, (list, tuple)) else row.get("TABLE_COMMENT", "")
+                lines.append(f"  - {name}  ({comment or '无注释'})")
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
     def _get_llm_client(self) -> LLMClient:
         """获取 LLM 客户端"""
         return get_llm_client()
@@ -1027,6 +1047,7 @@ class AIAnalystService:
         all_tool_calls = []
         all_text = []
         last_successful_result = None
+        sql_fail_count = 0  # 连续 SQL 失败次数
 
         for step in range(15):
             llm_client = self._get_llm_client()
@@ -1086,9 +1107,19 @@ class AIAnalystService:
             }
             all_tool_calls.append(tool_calls_record)
 
-            # 记录最后一次成功的 SQL 结果（用于 fallback）
-            if tool_name == "execute_sql" and tool_result.get("success"):
-                last_successful_result = tool_result
+            # 记录 SQL 失败次数，连续 3 次后自动注入 schema 信息
+            if tool_name == "execute_sql":
+                if tool_result.get("success"):
+                    sql_fail_count = 0
+                    last_successful_result = tool_result
+                else:
+                    sql_fail_count += 1
+                    if sql_fail_count == 3:
+                        # 自动注入 schema 信息帮助 LLM 修正 SQL
+                        schema_hint = self._build_schema_hint(data_source_id)
+                        if schema_hint:
+                            messages.append({"role": "system", "content": f"## 表结构参考\n{schema_hint}\n\n请基于以上表结构重新编写正确的 SQL。注意：1) SELECT 非聚合字段必须出现在 GROUP BY 中 2) 门店名需要 JOIN dim_store 获取"})
+                            yield {"type": "tool_result", "tool_name": "system", "tool_output": "已注入表结构信息，请重新编写 SQL"}
 
             if tool_name == "generate_chart" and tool_result.get("success"):
                 chart_config = tool_result.get("chart_config")
