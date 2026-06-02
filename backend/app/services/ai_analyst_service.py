@@ -667,6 +667,18 @@ class AIAnalystService:
                 return None
 
         # ── 智能回退：LLM 忘记用 ACTION: 格式时自动检测 SQL ──
+        # 优先检测 JSON 格式: {"sql": "...", "data_source_id": N} — LLM 最常输出此格式
+        json_match = re.search(r'\{[^}]*"sql"\s*:\s*"([^"]+)"[^}]*"data_source_id"\s*:\s*(\d+)[^}]*\}', text, re.DOTALL)
+        if json_match:
+            sql = json_match.group(1).strip()
+            # JSON 中的 SQL 可能含转义引号，需要反转义
+            sql = sql.replace('\\"', '"').replace("\\n", "\n").replace("\\t", "\t")
+            if sql.upper().startswith("SELECT") or sql.upper().startswith("WITH"):
+                ds_id = int(json_match.group(2))
+                text_before = text[:json_match.start()].strip()
+                return {"tool": "execute_sql", "input": {"sql": sql, "data_source_id": ds_id},
+                        "_smart_fallback": True, "_text_before": text_before}
+
         # 检测 ```sql ... ``` 代码块（允许 sql 后直接跟 SQL，无换行）
         sql_block = re.search(r'```sql\s*(.*?)```', text, re.DOTALL)
         if sql_block:
