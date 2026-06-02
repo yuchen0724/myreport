@@ -18,6 +18,7 @@
 ## generate_chart
 单系列: {"chart_type": "bar|line|pie|scatter", "data": [...], "x_axis_field": "...", "y_axis_field": "...", "title": "..."}
 多系列: {"chart_type": "line", "data": [...], "x_axis_field": "...", "y_axis_field": "...", "title": "...", "series_fields": ["门店1", "门店2"]}
+**重要：生成图表必须调用 generate_chart 工具。禁止只在文字中说"图表已生成"而不实际调用工具。**
 
 ## analyze_data
 输入: {"data": [...], "columns": [...], "question": "..."}

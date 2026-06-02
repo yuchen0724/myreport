@@ -31,3 +31,4 @@
 - 门店名从 JOIN dim_store 维表获取
 - 不要直接查 information_schema（用 get_schema）
 - 禁止 QUALIFY
+- 需要图表时必须调用 `generate_chart` 工具，禁止只在文字中说"图表已生成"
