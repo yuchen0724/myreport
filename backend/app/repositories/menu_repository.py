@@ -50,7 +50,7 @@ class MenuRepository:
         """创建菜单"""
         menu = Menu(**data)
         self.db.add(menu)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(menu)
         return menu
     
@@ -62,7 +62,7 @@ class MenuRepository:
         for key, value in data.items():
             if value is not None:
                 setattr(menu, key, value)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(menu)
         return menu
     
@@ -74,7 +74,7 @@ class MenuRepository:
         # 删除子菜单
         self.db.query(Menu).filter(Menu.parent_id == menu_id).delete()
         self.db.delete(menu)
-        self.db.commit()
+        self.db.flush()
         return True
     
     def get_count(self) -> int:

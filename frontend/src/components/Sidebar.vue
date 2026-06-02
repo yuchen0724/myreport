@@ -7,6 +7,7 @@
       text-color="#bfcbd9"
       active-text-color="#409eff"
       router
+      :collapse-transition="false"
     >
       <!-- 静态系统菜单 -->
       <el-menu-item index="/">
@@ -189,6 +190,7 @@ export default {
     // 首次加载菜单（非登录页才加载）
     onMounted(() => {
       if (!isLoginPage.value) {
+        // loadMenus 内有 loaded 守卫，多次调用不会重复拉取
         menuStore.loadMenus()
       }
     })

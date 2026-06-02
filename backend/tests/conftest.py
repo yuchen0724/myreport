@@ -114,6 +114,24 @@ def auth_headers(test_user):
     token = create_access_token(data={"sub": test_user.username, "user_id": test_user.id})
     return {"Authorization": f"Bearer {token}"}
 
+@pytest.fixture(scope="function", autouse=True)
+def mock_llm():
+    """全局 mock LLM 调用，防止测试中真实调用外部 API。
+
+    自动应用于所有测试函数。单个测试可通过 patch 覆盖此 mock。
+    chat() 返回固定 SQL 响应，避免真实 LLM 调用。
+    """
+    mock_content = """
+    ```sql
+    SELECT * FROM users LIMIT 10
+    ```
+    """
+    with patch("app.utils.llm_client.LLMClient.chat", return_value=mock_content) as mock_chat:
+        with patch("app.utils.llm_client.LLMClient.chat_structured") as mock_structured:
+            mock_structured.side_effect = Exception("Structured output disabled in tests")
+            yield mock_chat
+
+
 @pytest.fixture(scope="function")
 def test_template(db_session, test_user):
     """创建测试模板"""

@@ -28,7 +28,7 @@ class UserRepository:
             is_active=user_data.get("is_active", True),
         )
         self.db.add(db_user)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(db_user)
         return db_user
 
@@ -36,13 +36,13 @@ class UserRepository:
         for key, value in user_data.items():
             if hasattr(user, key) and value is not None:
                 setattr(user, key, value)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(user)
         return user
 
     def delete(self, user: User) -> bool:
         self.db.delete(user)
-        self.db.commit()
+        self.db.flush()
         return True
 
     def authenticate(self, username: str, password: str) -> Optional[User]:

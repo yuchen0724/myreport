@@ -133,19 +133,28 @@ class DataSourceService:
                     except Exception as e:
                         return DataSourceTestResponse(success=False, message=f"SOCKS5代理测试失败: {str(e)}")
                 
-                # 实际连接测试（统一使用 db_executor 的 socks_proxy_context）
-                from app.utils.db_executor import socks_proxy_context
+                # 实际连接测试（engine 级别代理，无全局 socket 污染）
+                from urllib.parse import quote_plus
+                encoded_password = quote_plus(request.password)
 
-                # 创建临时 ds 对象以复用代理设置逻辑
-                class _TempDS:
-                    pass
-                temp_ds = _TempDS()
-                temp_ds.use_proxy = use_proxy
-                temp_ds.proxy_server_id = request.proxy_server_id
-                temp_ds.host = request.host
-                temp_ds.port = request.port
-
-                with socks_proxy_context(temp_ds, timeout=20) as use_socks:
+                if proxy_type == "socks5":
+                    from app.utils.db_executor import create_socks_engine
+                    from sqlalchemy import text
+                    conn_url = f"mysql+pymysql://{request.username}:{encoded_password}@{request.host}:{request.port}/{request.database}"
+                    engine, _ = create_socks_engine(
+                        conn_url, proxy_host, proxy_port,
+                        pool_size=1, max_overflow=0,
+                    )
+                    try:
+                        with engine.connect() as conn:
+                            conn.execute(text("SELECT 1"))
+                        return DataSourceTestResponse(
+                            success=True,
+                            message="连接成功（通过SOCKS5代理）"
+                        )
+                    finally:
+                        engine.dispose()
+                else:
                     conn = pymysql.connect(
                         host=request.host,
                         port=request.port,
@@ -156,12 +165,10 @@ class DataSourceService:
                     )
                     conn.close()
                     msg = "连接成功"
-                    if use_socks:
-                        msg += "（通过SOCKS5代理）"
-                    elif proxy_type == "http":
+                    if proxy_type == "http":
                         msg += "（通过HTTP代理）"
-                    elif proxy_type:
-                        msg += f"（通过{proxy_type.upper()}代理）"
+                    elif use_proxy:
+                        msg += f"（通过代理）"
                     return DataSourceTestResponse(success=True, message=msg)
             
             # PostgreSQL 连接

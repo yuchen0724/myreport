@@ -190,7 +190,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getVersionDiff } from '@/api/template_version'
+import { getVersionDiff } from '@/api/template'
 
 const props = defineProps({
   templateId: {

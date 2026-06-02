@@ -134,7 +134,7 @@ class SemanticMetricRepository:
                 granted_by=granted_by,
             )
             self.db.add(permission)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(permission)
         return permission
 
@@ -143,13 +143,13 @@ class SemanticMetricRepository:
         if not permission:
             return False
         self.db.delete(permission)
-        self.db.commit()
+        self.db.flush()
         return True
 
     def create(self, data: dict, user_id: int) -> SemanticMetric:
         metric = SemanticMetric(**data, created_by=user_id)
         self.db.add(metric)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(metric)
         self.create_version(metric, user_id=user_id, change_summary="创建指标")
         return metric
@@ -164,7 +164,7 @@ class SemanticMetricRepository:
         for key, value in data.items():
             if hasattr(metric, key):
                 setattr(metric, key, value)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(metric)
         if data and user_id is not None:
             self.create_version(metric, user_id=user_id, change_summary=change_summary or "更新指标")
@@ -172,7 +172,7 @@ class SemanticMetricRepository:
 
     def delete(self, metric: SemanticMetric) -> None:
         self.db.delete(metric)
-        self.db.commit()
+        self.db.flush()
 
     def list_versions(self, metric_id: int) -> list[SemanticMetricVersion]:
         return (
@@ -206,7 +206,7 @@ class SemanticMetricRepository:
             created_by=user_id,
         )
         self.db.add(version)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(version)
         return version
 
@@ -218,7 +218,7 @@ class SemanticMetricRepository:
     ) -> SemanticMetric:
         for key in SNAPSHOT_FIELDS:
             setattr(metric, key, version.snapshot[key])
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(metric)
         self.create_version(
             metric,

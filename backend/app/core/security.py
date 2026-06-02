@@ -102,7 +102,8 @@ def decode_access_token(token: str) -> Optional[dict]:
         # 捕获所有 JWT 相关异常：过期、格式错误、签名错误等
         # 额外输出配置指纹，辅助定位“最后一次请求是否落到不同实例/配置”。
         try:
-            print(f"[JWT_DECODE_DEBUG] failed: {_debug_jwt_config_fingerprint()}")
+            logger = __import__('logging').getLogger(__name__)
+            logger.debug("JWT decode failed: %s", _debug_jwt_config_fingerprint())
         except Exception:
             pass
         return None

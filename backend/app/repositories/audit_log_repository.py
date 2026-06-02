@@ -13,7 +13,7 @@ class AuditLogRepository:
     def create(self, audit_log: AuditLog) -> AuditLog:
         """创建审计日志"""
         self.db.add(audit_log)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(audit_log)
         return audit_log
 

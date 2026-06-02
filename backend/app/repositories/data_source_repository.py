@@ -30,7 +30,7 @@ class DataSourceRepository:
             created_by=user_id,
         )
         self.db.add(db_ds)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(db_ds)
         return db_ds
 
@@ -41,11 +41,11 @@ class DataSourceRepository:
                 continue
             if hasattr(ds, key):
                 setattr(ds, key, value)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(ds)
         return ds
 
     def delete(self, ds: DataSource) -> bool:
         self.db.delete(ds)
-        self.db.commit()
+        self.db.flush()
         return True

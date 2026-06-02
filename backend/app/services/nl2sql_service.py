@@ -21,6 +21,8 @@ from app.repositories.data_source_repository import DataSourceRepository
 from app.repositories.semantic_metric_repository import SemanticMetricRepository
 from app.core.security import decrypt_password
 from app.models.user import User
+from app.services.nl2sql.prompt_utils import PromptManager, build_system_prompt as _build_system_prompt_standalone, build_repair_prompt as _build_repair_prompt_standalone, is_postgres_db_type as _is_postgres_db_type_standalone
+from app.services.nl2sql.schema import SchemaRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +38,8 @@ class NL2SQLService:
         self.db = db
         self.ds_repo = DataSourceRepository(db) if db else None
         self.llm_client: Optional[LLMClient] = None
-        self._prompt_template_cache: Dict[str, Dict[str, Any]] = {}
+        self._prompt_mgr = PromptManager()
+        self._schema_retriever = SchemaRetriever(db)
 
     def _get_llm_client(self) -> LLMClient:
         """获取 LLM 客户端（惰性初始化）"""
@@ -349,11 +352,10 @@ class NL2SQLService:
         cached_generation = self._get_cached_generation(question, data_source_id, cache_context)
         if cached_generation:
             logger.info("[NL2SQL] ✅ 命中 NL2SQL 生成缓存")
-            print(f"[NL2SQL] │   └─ 命中 NL2SQL 生成缓存", flush=True)
             return cached_generation
 
         # 2. 构建系统提示词
-        print(f"[NL2SQL] ├─ 步骤2: 构建系统提示词...", flush=True)
+        logger.info("[NL2SQL] 步骤2: 构建系统提示词...")
         system_prompt = self._build_system_prompt(
             db_type=db_type,
             db_limitations=db_limitations,
@@ -361,16 +363,11 @@ class NL2SQLService:
             group_id=group_id,
             semantic_metrics_prompt=semantic_metrics_prompt,
         )
-        print(f"[NL2SQL] │   └─ System prompt 长度: {len(system_prompt)} 字符", flush=True)
-        print(f"[NL2SQL] │   └─ Schema preview: {schema_prompt[:200]}...", flush=True)
+        logger.info("[NL2SQL] System prompt 长度: %d 字符", len(system_prompt))
 
         # 3. 调用 LLM
-        print(f"[NL2SQL] ├─ 步骤3: 调用 LLM 生成 SQL", flush=True)
-        print(f"[NL2SQL] │   ├─ Question: {question}", flush=True)
-        print(f"[NL2SQL] │   ├─ DataSourceID: {data_source_id}", flush=True)
-        print(f"[NL2SQL] │   ├─ LLM Client Timeout: {llm_client.timeout}s", flush=True)
-        if context:
-            print(f"[NL2SQL] │   ├─ Context provided: {context[:200]}...", flush=True)
+        logger.info("[NL2SQL] 步骤3: 调用 LLM 生成 SQL | question=%s ds_id=%s timeout=%ds",
+                     question[:80], data_source_id, llm_client.timeout)
         
         messages = [
             {"role": "system", "content": system_prompt},
@@ -380,33 +377,28 @@ class NL2SQLService:
             messages.append({"role": "system", "content": "## 多轮对话上下文\n以下是上一轮查询的结果摘要，请基于此修正或扩展你的回答：\n" + context})
         
         messages.append({"role": "user", "content": f"问题: {question}"})
-        
-        print(f"[NL2SQL] │   ├─ Messages prepared", flush=True)
-        
-        print(f"[NL2SQL] │   └─ 正在等待 LLM 响应...", flush=True)
+
+        logger.info("[NL2SQL] 等待 LLM 响应...")
         result = None
         if getattr(llm_client, "supports_structured_output", False):
             try:
                 result = llm_client.chat_structured(messages, GeneratedSQLResult, temperature=0.0)
-                print(f"[NL2SQL] │       └─ LLM 结构化响应获取成功", flush=True)
+                logger.info("[NL2SQL] LLM 结构化响应获取成功")
             except Exception as e:
-                logger.warning(f"[NL2SQL] 结构化输出失败，回退到文本解析: {e}")
-                print(f"[NL2SQL] │       └─ 结构化输出失败，回退到文本解析: {e}", flush=True)
+                logger.warning("[NL2SQL] 结构化输出失败，回退到文本解析: %s", e)
 
         if result is None:
             response = llm_client.chat(messages, temperature=0.0)
-            
-            print(f"[NL2SQL] │       └─ LLM 响应长度: {len(response)} 字符", flush=True)
-            print(f"[NL2SQL] │           └─ LLM 响应(前200字符): {response[:200]}...", flush=True)
+            logger.info("[NL2SQL] LLM 响应长度: %d 字符", len(response))
 
             # 4. 解析 JSON 响应
-            print(f"[NL2SQL] ├─ 步骤4: 解析 LLM JSON 响应", flush=True)
+            logger.info("[NL2SQL] 步骤4: 解析 LLM JSON 响应")
             result = self._parse_llm_response(response)
         else:
-            print(f"[NL2SQL] ├─ 步骤4: 使用 LLM 结构化响应", flush=True)
+            logger.info("[NL2SQL] 步骤4: 使用 LLM 结构化响应")
 
         if not result:
-            print(f"[NL2SQL] │   └─ ❌ 无法解析 LLM 响应为 JSON", flush=True)
+            logger.error("[NL2SQL] 无法解析 LLM 响应为 JSON")
             raise ValueError("无法解析 LLM 响应")
 
         sql = (result.get("sql") or "").strip()
@@ -422,13 +414,10 @@ class NL2SQLService:
                 "y_axis": chart_config_raw.get("y_axis", ""),
                 "reason": chart_config_raw.get("reason", "")
             }
-            print(f"[NL2SQL] │   ├─ 图表配置: {chart_config}", flush=True)
+            logger.info("[NL2SQL] 图表配置: %s", chart_config)
 
-        print(f"[NL2SQL] │   ├─ 解析成功:", flush=True)
-        print(f"[NL2SQL] │   │   ├─ SQL: {sql[:100]}..." if len(sql) > 100 else f"[NL2SQL] │   │   ├─ SQL: {sql}", flush=True)
-        print(f"[NL2SQL] │   │   ├─ Confidence: {confidence:.2%}", flush=True)
-        print(f"[NL2SQL] │   │   ├─ Explanation: {explanation[:80]}..." if len(explanation) > 80 else f"[NL2SQL] │   │   ├─ Explanation: {explanation}", flush=True)
-        print(f"[NL2SQL] │   │   └─ Chart Config: {chart_config}", flush=True)
+        logger.info("[NL2SQL] 解析成功 | sql=%s confidence=%.2f%%",
+                     sql[:80] if len(sql) > 80 else sql, confidence * 100)
         
         # 详细日志：提取 SQL 中使用的所有表名
         import re
@@ -442,11 +431,9 @@ class NL2SQLService:
         table_pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)'
         tables_used = re.findall(table_pattern, sql, re.IGNORECASE)
         if tables_used:
-            # 去重并按出现顺序排列
             unique_tables = list(dict.fromkeys(tables_used))
             table_list = [f"{db}.{tbl}" for db, tbl in unique_tables]
-            print(f"[NL2SQL] │   ├─ SQL 使用的表: {table_list}", flush=True)
-            logger.info(f"[NL2SQL] │   ├─ SQL 使用了 {len(unique_tables)} 个表: {table_list}")
+            logger.info("[NL2SQL] SQL 使用了 %d 个表: %s", len(unique_tables), table_list)
         else:
             # 尝试匹配不带库名的表名（可能存在问题），过滤掉 DUAL 和 SQL 关键字
             simple_table_pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)'
@@ -466,18 +453,16 @@ class NL2SQLService:
                 orig_len = len(simple_tables)
                 simple_tables = [t for t in simple_tables if t.upper() not in {n.upper() for n in cte_names}]
                 if len(simple_tables) < orig_len:
-                    print(f"[NL2SQL] │   ├─ 过滤掉 CTE 别名: {cte_names}", flush=True)
-            # 过滤掉短别名（1~2个字符，通常是子查询别名如 t, t1, tt, x 等）
+                    logger.debug("[NL2SQL] 过滤掉 CTE 别名: %s", cte_names)
             aliases = [t for t in simple_tables if len(t) <= 2]
             if aliases:
-                print(f"[NL2SQL] │   ├─ 过滤掉短别名: {aliases}", flush=True)
+                logger.debug("[NL2SQL] 过滤掉短别名: %s", aliases)
                 simple_tables = [t for t in simple_tables if len(t) > 2]
             if simple_tables:
-                print(f"[NL2SQL] │   ⚠️ SQL 中有表未带库名: {simple_tables}", flush=True)
-                logger.warning(f"[NL2SQL] │   ⚠️ SQL 中有表未带库名前缀: {simple_tables}")
+                logger.warning("[NL2SQL] SQL 中有表未带库名前缀: %s", simple_tables)
 
         if not sql:
-            print(f"[NL2SQL] │   └─ ❌ LLM 返回的 SQL 为空", flush=True)
+            logger.error("[NL2SQL] LLM 返回的 SQL 为空")
             raise ValueError("LLM 未返回有效的 SQL")
 
         self._cache_generation(
@@ -661,94 +646,20 @@ class NL2SQLService:
         group_id: Optional[int] = None,
         semantic_metrics_prompt: Optional[str] = None,
     ) -> str:
-        """构建 NL2SQL 系统提示词"""
-        from datetime import datetime
-        today_date = datetime.now().strftime("%Y-%m-%d")
-        group_context = (
-            f"**{group_id}**（已确认，该用户的查询应基于此集团的数据）"
-            if group_id
-            else "未知（未指定，按全局数据查询）"
-        )
-        table_name_rule = (
-            "【重要】所有表名必须带库名前缀，且 PostgreSQL 必须使用 `库名.public.表名` 格式"
-            "（例如 `mydb.public.dim_store`）"
-            if self._is_postgres_db_type(db_type)
-            else "【重要】所有表名必须带库名前缀，如 `库名.表名`"
-            "（例如 `ads_cockpit_freedom.store_sales`），否则跨库查询会失败！"
-        )
-        default_prompt = ""
-        settings = get_settings()
-        custom_template = self._load_prompt_template(
-            getattr(settings, "nl2sql_system_prompt_path", None),
-            "system",
-        )
-        if not custom_template:
-            logger.warning("[NL2SQL] system 提示词模板未配置或读取失败，当前使用空提示词")
-            return default_prompt
-
-        context = {
-            "db_type": db_type,
-            "db_limitations": db_limitations,
-            "schema_prompt": schema_prompt,
-            "semantic_metrics_prompt": semantic_metrics_prompt or "无可用语义指标。",
-            "group_context": group_context,
-            "table_name_rule": table_name_rule,
-            "today_date": today_date,
-        }
-        return self._render_prompt_template(
-            custom_template,
-            context=context,
-            template_name="system",
-            fallback=default_prompt,
+        """构建 NL2SQL 系统提示词（委托 prompt_utils）"""
+        return _build_system_prompt_standalone(
+            self._prompt_mgr, db_type, db_limitations, schema_prompt,
+            group_id=group_id, semantic_metrics_prompt=semantic_metrics_prompt,
         )
 
     @staticmethod
     def _is_postgres_db_type(db_type: Optional[str]) -> bool:
         """判断是否 PostgreSQL 数据源类型。"""
-        if not db_type:
-            return False
-        normalized = db_type.upper()
-        return normalized in {"POSTGRES", "POSTGRESQL", "PG"}
+        return _is_postgres_db_type_standalone(db_type)
 
     def _load_prompt_template(self, template_path: Optional[str], template_name: str) -> Optional[str]:
-        """从配置路径读取提示词模板（支持绝对路径或相对 backend/ 路径，含热更新）。"""
-        if not template_path:
-            return None
-
-        cache_key = f"{template_name}:{template_path}"
-        path = Path(template_path)
-        if not path.is_absolute():
-            path = Path(__file__).resolve().parents[2] / path
-
-        try:
-            stat_result = path.stat()
-        except OSError as e:
-            logger.warning(f"[NL2SQL] 读取 {template_name} 提示词模板失败: {path} ({e})")
-            self._prompt_template_cache.pop(cache_key, None)
-            return None
-
-        cached = self._prompt_template_cache.get(cache_key)
-        if (
-            cached
-            and cached.get("path") == str(path)
-            and cached.get("mtime_ns") == stat_result.st_mtime_ns
-        ):
-            return cached.get("content")
-
-        try:
-            template = path.read_text(encoding="utf-8")
-        except OSError as e:
-            logger.warning(f"[NL2SQL] 读取 {template_name} 提示词模板失败: {path} ({e})")
-            self._prompt_template_cache.pop(cache_key, None)
-            return None
-
-        self._prompt_template_cache[cache_key] = {
-            "path": str(path),
-            "mtime_ns": stat_result.st_mtime_ns,
-            "content": template,
-        }
-        logger.info(f"[NL2SQL] 加载/刷新 {template_name} 提示词模板: {path}")
-        return template
+        """委托 PromptManager.load_template"""
+        return self._prompt_mgr.load_template(template_path, template_name)
 
     def _render_prompt_template(
         self,
@@ -757,36 +668,12 @@ class NL2SQLService:
         template_name: str,
         fallback: str,
     ) -> str:
-        """渲染提示词模板；渲染失败时回退默认模板。"""
-        try:
-            return template.format(**context)
-        except Exception as e:
-            logger.warning(f"[NL2SQL] 渲染 {template_name} 提示词模板失败，回退默认模板: {e}")
-            return fallback
+        """委托 PromptManager.render_template"""
+        return self._prompt_mgr.render_template(template, context, template_name, fallback)
 
     def _build_repair_prompt(self, question: str, failed_sql: str, error_msg: str) -> str:
-        """构建 SQL 修复提示词，支持从配置文件读取模板。"""
-        default_prompt = ""
-        settings = get_settings()
-        custom_template = self._load_prompt_template(
-            getattr(settings, "nl2sql_repair_prompt_path", None),
-            "repair",
-        )
-        if not custom_template:
-            logger.warning("[NL2SQL] repair 提示词模板未配置或读取失败，当前使用空提示词")
-            return default_prompt
-
-        context = {
-            "question": question,
-            "failed_sql": failed_sql,
-            "error_msg": error_msg,
-        }
-        return self._render_prompt_template(
-            custom_template,
-            context=context,
-            template_name="repair",
-            fallback=default_prompt,
-        )
+        """构建 SQL 修复提示词（委托 prompt_utils）"""
+        return _build_repair_prompt_standalone(self._prompt_mgr, question, failed_sql, error_msg)
 
     def _repair_sql_with_llm(
         self,
@@ -1171,153 +1058,8 @@ class NL2SQLService:
             return f"数据源: {ds.name} ({ds.type})\n获取表结构失败: {str(e)}"
 
     def _fetch_schema_from_datasource(self, ds) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        从数据源获取表结构
-
-        Args:
-            ds: 数据源模型对象
-
-        Returns:
-            {表名: [列信息字典]} 格式的字典
-        """
-        import pymysql
-        import psycopg2
-        from sqlalchemy import create_engine, text
-
-        # 解密密码
-        password = decrypt_password(ds.password_encrypted)
-
-        # 构建连接 URL（使用解密后的密码）
-        ds_type = ds.type.upper() if ds.type else ""
-
-        # 构建连接参数
-        connect_args = {}
-        env_proxy_set = False
-        old_http_proxy = None
-        old_https_proxy = None
-        _socks_cleanup = None
-        if ds.use_proxy and ds.proxy_server_id:
-            from app.models.proxy_server import ProxyServer
-            if self.db:
-                proxy = self.db.query(ProxyServer).filter(ProxyServer.id == ds.proxy_server_id).first()
-            else:
-                proxy = None
-            if proxy and proxy.is_active:
-                if proxy.proxy_type == "socks5":
-                    from app.utils.db_executor import setup_socks
-                    _socks_cleanup = setup_socks(ds, db_session=self.db, timeout=60)
-                elif proxy.proxy_type == "http":
-                    if ds_type == "POSTGRESQL":
-                        env_proxy_set = True
-                        import os
-                        old_http_proxy = os.environ.get('HTTP_PROXY')
-                        old_https_proxy = os.environ.get('HTTPS_PROXY')
-                        proxy_url = f"http://{proxy.host}:{proxy.port}"
-                        os.environ['HTTP_PROXY'] = proxy_url
-                        os.environ['HTTPS_PROXY'] = proxy_url
-        
-        if ds_type == "MYSQL":
-            conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
-        elif ds_type == "POSTGRESQL":
-            conn_url = f"postgresql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
-        elif ds_type == "DORIS":
-            # Doris 使用 MySQL 协议
-            conn_url = f"mysql+pymysql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}"
-        else:
-            raise ValueError(f"不支持的数据源类型: {ds.type}")
-
-        engine = create_engine(conn_url, pool_pre_ping=True, connect_args=connect_args)
-
-        tables_info = {}
-
-        try:
-            try:
-                with engine.connect() as conn:
-                    # 获取表列表（含库名）
-                    if ds.type in ["MYSQL", "DORIS"]:
-                        # 从 information_schema 获取表及其所属库
-                        tables_result = conn.execute(text("""
-                            SELECT TABLE_SCHEMA, TABLE_NAME
-                            FROM information_schema.TABLES
-                            WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
-                            ORDER BY TABLE_SCHEMA, TABLE_NAME
-                        """))
-                        tables_with_schema = [(row[0], row[1]) for row in tables_result.fetchall()][:50]
-
-                        # 获取每个表的列信息
-                        for db_name, table_name in tables_with_schema:
-                            try:
-                                desc_result = conn.execute(text(f"DESCRIBE `{db_name}`.`{table_name}`"))
-                                columns = []
-                                for row in desc_result.fetchall():
-                                    columns.append({
-                                        "name": row[0],
-                                        "type": row[1],
-                                        "nullable": row[2],
-                                        "key": row[3] if len(row) > 3 else "",
-                                        "default": str(row[4]) if len(row) > 4 and row[4] is not None else "",
-                                        "comment": row[5] if len(row) > 5 else ""
-                                    })
-                                # 键名使用 "库名.表名" 格式
-                                tables_info[f"{db_name}.{table_name}"] = columns
-                            except Exception as e:
-                                logger.warning(f"获取表 {db_name}.{table_name} 结构失败: {e}")
-                                continue
-
-                    elif ds_type == "POSTGRESQL":
-                        # PostgreSQL 使用 information_schema，获取 schema（相当于库）
-                        tables_result = conn.execute(text(f"""
-                        SELECT table_schema, table_name
-                            FROM information_schema.tables
-                            WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
-                            ORDER BY table_schema, table_name
-                        """))
-                        tables_with_schema = [(row[0], row[1]) for row in tables_result.fetchall()][:50]
-
-                        for db_name, table_name in tables_with_schema:
-                            try:
-                                desc_result = conn.execute(text(f"""
-                                    SELECT
-                                        column_name,
-                                        data_type,
-                                        is_nullable,
-                                        column_default
-                                    FROM information_schema.columns
-                                    WHERE table_schema = :schema_name AND table_name = :table_name
-                                    ORDER BY ordinal_position
-                                """), {"schema_name": db_name, "table_name": table_name})
-
-                                columns = []
-                                for row in desc_result.fetchall():
-                                    columns.append({
-                                        "name": row[0],
-                                        "type": row[1],
-                                        "nullable": row[2],
-                                        "key": "",
-                                        "default": str(row[3]) if row[3] else "",
-                                        "comment": ""
-                                    })
-                                tables_info[f"{db_name}.{table_name}"] = columns
-                            except Exception as e:
-                                logger.warning(f"获取表 {db_name}.{table_name} 结构失败: {e}")
-                                continue
-            finally:
-                engine.dispose()
-            return tables_info
-        finally:
-            # 恢复 SOCKS5 socket
-            if _socks_cleanup is not None:
-                _socks_cleanup()
-            if env_proxy_set:
-                import os
-                if old_http_proxy is None:
-                    os.environ.pop('HTTP_PROXY', None)
-                else:
-                    os.environ['HTTP_PROXY'] = old_http_proxy
-                if old_https_proxy is None:
-                    os.environ.pop('HTTPS_PROXY', None)
-                else:
-                    os.environ['HTTPS_PROXY'] = old_https_proxy
+        """委托 SchemaRetriever.fetch_schema"""
+        return self._schema_retriever.fetch_schema(ds)
 
     def validate_sql(self, sql: str) -> bool:
         """
@@ -1767,18 +1509,20 @@ class NL2SQLService:
         conn_url = f"mysql+pymysql://{ds.username}:***@{ds.host}:{ds.port}/{ds.database}"
 
         # SOCKS5 代理处理
-        _socks_cleanup = None
+        proxy_info = None
         if ds.use_proxy and ds.proxy_server_id:
-            from app.models.proxy_server import ProxyServer
-            if self.db:
-                proxy = self.db.query(ProxyServer).filter(ProxyServer.id == ds.proxy_server_id).first()
-            else:
-                proxy = None
-            if proxy and proxy.is_active and proxy.proxy_type == "socks5":
-                from app.utils.db_executor import setup_socks
-                _socks_cleanup = setup_socks(ds, db_session=self.db, timeout=60)
+            from app.utils.db_executor import _get_proxy_info
+            proxy_info = _get_proxy_info(ds, db_session=self.db)
 
-        engine = create_engine(conn_url.replace('***', password), poolclass=QueuePool, pool_size=2, max_overflow=2, pool_pre_ping=True, connect_args={"connect_timeout": 5})
+        if proxy_info:
+            from app.utils.db_executor import _build_socks_creator
+            engine = create_engine(
+                conn_url.replace('***', password),
+                creator=_build_socks_creator(proxy_info['host'], proxy_info['port'], timeout=60),
+                poolclass=QueuePool, pool_size=2, max_overflow=2, pool_pre_ping=True,
+            )
+        else:
+            engine = create_engine(conn_url.replace('***', password), poolclass=QueuePool, pool_size=2, max_overflow=2, pool_pre_ping=True, connect_args={"connect_timeout": 5})
 
         try:
             with engine.connect() as conn:
@@ -1790,8 +1534,6 @@ class NL2SQLService:
             raise
         finally:
             engine.dispose()
-            if _socks_cleanup is not None:
-                _socks_cleanup()
 
         # 3. 写入 Redis 缓存（TTL=1小时）
         try:

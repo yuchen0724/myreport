@@ -70,6 +70,7 @@ class TemplateService:
             created_by=user_id
         )
         self.version_repo.create(version)
+        self.db.commit()
 
         return TemplateResponse(
             id=created_template.id,
@@ -225,6 +226,7 @@ class TemplateService:
             created_by=user_id
         )
         self.version_repo.create(version)
+        self.db.commit()
 
         return TemplateResponse(
             id=updated_template.id,
@@ -255,7 +257,9 @@ class TemplateService:
         """
         template = self._require_template(template_id)
         self._check_owner(template, user_id)
-        return self.template_repo.delete(template)
+        result = self.template_repo.delete(template)
+        self.db.commit()
+        return result
 
     def get_template_versions(self, template_id: int) -> List[TemplateVersionResponse]:
         """
@@ -320,6 +324,7 @@ class TemplateService:
             created_by=user_id
         )
         self.version_repo.create(new_version)
+        self.db.commit()
 
         return TemplateResponse(
             id=updated_template.id,

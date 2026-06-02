@@ -116,6 +116,9 @@ class Settings(BaseSettings):
     rca_task_time_limit: int = 600
     rca_task_max_retries: int = 1
 
+    # SSL verification
+    ssl_verify_enabled: bool = True  # 启用 SSL 证书校验（生产环境应保持 True）
+
     # SQL 优化器（LLM 驱动，可选）
     sql_optimizer_enabled: bool = True  # 启用 LLM 驱动 SQL 优化（需要 LLM_API_KEY）
     sql_optimizer_prompt_path: Optional[str] = "prompts/sql_optimizer.md"

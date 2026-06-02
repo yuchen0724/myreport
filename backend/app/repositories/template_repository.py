@@ -12,7 +12,7 @@ class TemplateRepository:
     def create(self, template: Template) -> Template:
         """创建模板"""
         self.db.add(template)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(template)
         return template
 
@@ -35,8 +35,7 @@ class TemplateRepository:
 
     def update(self, template: Template) -> Template:
         """更新模板"""
-        self.db.flush()  # 先确保修改写入数据库
-        self.db.commit()  # 提交事务
+        self.db.flush()
         self.db.refresh(template)
         return template
 
@@ -50,5 +49,5 @@ class TemplateRepository:
     def delete(self, template: Template) -> bool:
         """删除模板"""
         self.db.delete(template)
-        self.db.commit()
+        self.db.flush()
         return True

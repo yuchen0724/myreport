@@ -12,7 +12,7 @@ class TemplateVersionRepository:
     def create(self, version: TemplateVersion) -> TemplateVersion:
         """创建版本"""
         self.db.add(version)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(version)
         return version
 

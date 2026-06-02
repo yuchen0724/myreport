@@ -18,7 +18,7 @@ from app.services.datasource_engine_factory import DataSourceEngineFactory
 from app.services.query_executor import QueryExecutor
 from app.services.sql_pagination import SqlPaginator
 
-from app.utils.db_executor import socks_proxy_context
+from app.utils.db_executor import _get_proxy_info
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,12 @@ class QueryService:
         
         ds_type = ds.type.upper() if ds.type else ""
 
-        with socks_proxy_context(ds, db_session=self.db, timeout=60):
+        proxy_info = _get_proxy_info(ds, db_session=self.db)
+        if proxy_info:
+            engine = self.engine_factory.create_engine_with_proxy(
+                ds, proxy_info["host"], proxy_info["port"]
+            )
+        else:
             engine = self.engine_factory.create_engine(ds)
             
             # 使用连接池执行查询（带超时和重试）

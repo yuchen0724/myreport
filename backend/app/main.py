@@ -120,7 +120,7 @@ app.add_middleware(
 )
 
 # GZip 压缩中间件（对大响应进行压缩）
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(GZipMiddleware, minimum_size=4096)
 
 # 请求日志和性能监控中间件
 app.add_middleware(RequestLoggingMiddleware)

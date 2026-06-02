@@ -12,15 +12,8 @@ import httpx
 from pydantic import BaseModel
 from app.config import get_settings
 
-# 同时使用 logger 和 print，确保日志输出可见
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # 设置为 DEBUG 级别
 
-def log_print(*args, **kwargs):
-    """同时输出到 logger 和 stdout"""
-    msg = " ".join(str(a) for a in args)
-    print(f"[LLM] {msg}", flush=True)
-    logger.info(msg)
 
 class LLMProvider(str, Enum):
     """LLM 提供商枚举"""
@@ -47,57 +40,51 @@ class LLMError(Exception):
 
 class LLMClient:
     """LLM 客户端封装类"""
-    
+
     def __init__(self, provider: str = None):
         settings = get_settings()
         self.settings = settings
         self.adapter = (getattr(settings, 'llm_adapter', 'raw') or 'raw').lower()
         self.provider = (provider or settings.llm_provider or "openai").lower()
         self.max_retries = settings.nl2sql_max_retries or 2
-        self.timeout = settings.nl2sql_timeout or 300  # 从配置读取超时时间
-        self.api_mode = getattr(settings, 'llm_api_mode', 'chat') or 'chat'  # chat 或 responses
-        
-        print(f"[LLM] ═════════ 初始化 LLM Client ═════════", flush=True)
-        print(f"[LLM] ├─ Adapter: {self.adapter}", flush=True)
-        print(f"[LLM] ├─ Provider: {self.provider}", flush=True)
-        print(f"[LLM] ├─ Model: {settings.llm_model or 'default'}", flush=True)
-        print(f"[LLM] ├─ API Base: {settings.llm_api_base or 'default'}", flush=True)
-        print(f"[LLM] ├─ API Mode: {self.api_mode}", flush=True)
-        print(f"[LLM] ├─ Timeout: {self.timeout}s", flush=True)
-        print(f"[LLM] ├─ Max Retries: {self.max_retries}", flush=True)
-        print(f"[LLM] └─ API Key: {settings.llm_api_key[:10] if settings.llm_api_key else 'None'}...", flush=True)
-        
+        self.timeout = settings.nl2sql_timeout or 300
+        self.api_mode = getattr(settings, 'llm_api_mode', 'chat') or 'chat'
+
+        logger.info(
+            "LLM Client initialized | adapter=%s provider=%s model=%s api_base=%s mode=%s timeout=%ds",
+            self.adapter, self.provider, settings.llm_model or 'default',
+            settings.llm_api_base or 'default', self.api_mode, self.timeout,
+        )
+
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.0) -> str:
         """
         调用 LLM 生成响应
-        
+
         Args:
             messages: 消息列表 [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}]
             temperature: 温度参数，控制随机性
-            
+
         Returns:
             模型响应文本
         """
         start_time = time.time()
-        
-        print(f"[LLM] ════════════ LLM.chat() 被调用 ════════════", flush=True)
-        print(f"[LLM] ├─ Provider: {self.provider}", flush=True)
-        print(f"[LLM] ├─ Temperature: {temperature}", flush=True)
-        print(f"[LLM] ├─ Messages 数量: {len(messages)}", flush=True)
-        
-        # 打印消息摘要
-        for i, msg in enumerate(messages):
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
-            content_preview = content[:100] + "..." if len(content) > 100 else content
-            print(f"[LLM] │   └─ Message[{i}] role={role}, content_len={len(content)}", flush=True)
-            if i == 0:  # system 消息只打印长度
-                print(f"[LLM] │           └─ (system prompt 长度: {len(content)} 字符)", flush=True)
-            else:
-                print(f"[LLM] │           └─ {content_preview}", flush=True)
-        
-        print(f"[LLM] └─ 开始调用 LLM...", flush=True)
-        
+
+        logger.info("LLM.chat() called | provider=%s temperature=%s messages=%d",
+                     self.provider, temperature, len(messages))
+
+        # 消息摘要日志（DEBUG 级别）
+        if logger.isEnabledFor(logging.DEBUG):
+            for i, msg in enumerate(messages):
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                logger.debug("  Message[%d] role=%s content_len=%d", i, role, len(content))
+                if i == 0:
+                    logger.debug("    (system prompt length: %d chars)", len(content))
+                else:
+                    logger.debug("    %s", content[:150] if len(content) > 150 else content)
+
+        logger.info("Sending request to LLM...")
+
         if self.adapter == LLMAdapter.LANGCHAIN:
             result = self._call_langchain(messages, temperature)
         elif self.adapter != LLMAdapter.RAW:
@@ -112,14 +99,11 @@ class LLMClient:
             result = self._call_anthropic(messages, temperature)
         else:
             raise LLMError(f"Unsupported provider: {self.provider}")
-        
+
         elapsed = (time.time() - start_time) * 1000
         result_preview = result[:150] + "..." if len(result) > 150 else result
-        print(f"[LLM] ════════════ LLM.chat() 完成 ════════════", flush=True)
-        print(f"[LLM] ├─ 耗时: {elapsed:.2f}ms", flush=True)
-        print(f"[LLM] ├─ 响应长度: {len(result)} 字符", flush=True)
-        print(f"[LLM] └─ 响应内容: {result_preview}", flush=True)
-        
+        logger.info("LLM.chat() completed | elapsed=%.2fms response_len=%d preview=%s",
+                     elapsed, len(result), result_preview)
         return result
 
     @property
@@ -168,15 +152,11 @@ class LLMClient:
         lc_messages = self._build_langchain_messages(messages)
         model = self._build_langchain_chat_model(temperature)
 
-        print(f"[LLM:LangChain] ═══════════════════════════════", flush=True)
-        logger.info("[LLM:LangChain] ═══════════════════════════════")
-        print(f"[LLM:LangChain] ├─ Model: {self.settings.llm_model or 'gpt-3.5-turbo'}", flush=True)
-        print(f"[LLM:LangChain] ├─ Base URL: {self.settings.llm_api_base}", flush=True)
-        print(f"[LLM:LangChain] ├─ Timeout: {self.timeout}s", flush=True)
-        print(f"[LLM:LangChain] ├─ Temperature: {temperature}", flush=True)
-        print(f"[LLM:LangChain] ├─ Messages: {len(lc_messages)}", flush=True)
-        print(f"[LLM:LangChain] ├─ Max Retries: {self.max_retries}", flush=True)
-        print(f"[LLM:LangChain] └─ 发送请求...", flush=True)
+        logger.info(
+            "LangChain call | model=%s base_url=%s timeout=%ds temperature=%s messages=%d retries=%d",
+            self.settings.llm_model or 'gpt-3.5-turbo', self.settings.llm_api_base,
+            self.timeout, temperature, len(lc_messages), self.max_retries,
+        )
 
         for attempt in range(self.max_retries + 1):
             try:
@@ -193,20 +173,17 @@ class LLMClient:
                     elif "usage" in meta:
                         token_info = f", usage={meta['usage']}"
 
-                print(f"[LLM:LangChain] ✅ 请求成功", flush=True)
-                print(f"[LLM:LangChain] │   ├─ 耗时: {request_elapsed:.2f}ms{token_info}", flush=True)
-                print(f"[LLM:LangChain] │   ├─ 响应长度: {len(content)} 字符", flush=True)
-                print(f"[LLM:LangChain] │   └─ 响应预览: {content[:150]}...", flush=True)
+                logger.info("LangChain call succeeded | elapsed=%.2fms%s response_len=%d",
+                             request_elapsed, token_info, len(content))
                 return content
 
             except Exception as e:
-                msg = f"[LLM:LangChain] ❌ Attempt {attempt + 1}/{self.max_retries + 1} 失败: {type(e).__name__}: {e}"
-                print(msg, flush=True)
-                logger.warning(msg)
+                logger.warning("LangChain attempt %d/%d failed: %s: %s",
+                               attempt + 1, self.max_retries + 1, type(e).__name__, e)
                 if attempt >= self.max_retries:
-                    print(f"[LLM:LangChain] └─ 达到最大重试次数，放弃", flush=True)
+                    logger.error("LangChain max retries reached, giving up")
                     raise LLMError(f"LangChain OpenAI API error after {self.max_retries} retries: {e}", self.provider) from e
-                print(f"[LLM:LangChain] └─ 重试... ({attempt + 1}/{self.max_retries})", flush=True)
+                logger.warning("Retrying... (%d/%d)", attempt + 1, self.max_retries)
 
     def _call_langchain_structured(
         self,
@@ -218,12 +195,10 @@ class LLMClient:
         lc_messages = self._build_langchain_messages(messages)
         model = self._build_langchain_chat_model(temperature)
 
-        print(f"[LLM:LangChain-Structured] ═════════════════════════", flush=True)
-        logger.info("[LLM:LangChain-Structured] ═════════════════════════")
-        print(f"[LLM:LangChain-Structured] ├─ Model: {self.settings.llm_model or 'gpt-3.5-turbo'}", flush=True)
-        print(f"[LLM:LangChain-Structured] ├─ Response Model: {response_model.__name__}", flush=True)
-        print(f"[LLM:LangChain-Structured] ├─ Messages: {len(lc_messages)}", flush=True)
-        print(f"[LLM:LangChain-Structured] └─ 发送请求...", flush=True)
+        logger.info(
+            "LangChain structured call | model=%s response_model=%s messages=%d",
+            self.settings.llm_model or 'gpt-3.5-turbo', response_model.__name__, len(lc_messages),
+        )
 
         try:
             request_start = time.time()
@@ -231,15 +206,14 @@ class LLMClient:
             result = structured_model.invoke(lc_messages)
             request_elapsed = (time.time() - request_start) * 1000
 
-            print(f"[LLM:LangChain-Structured] ✅ 请求成功, 耗时: {request_elapsed:.2f}ms", flush=True)
             if isinstance(result, BaseModel):
-                preview = result.model_dump_json()[:200]
-                print(f"[LLM:LangChain-Structured] └─ 响应: {preview}", flush=True)
+                logger.info("LangChain structured succeeded | elapsed=%.2fms preview=%s",
+                             request_elapsed, result.model_dump_json()[:200])
+            else:
+                logger.info("LangChain structured succeeded | elapsed=%.2fms", request_elapsed)
             return result
         except Exception as e:
-            msg = f"[LLM:LangChain-Structured] ❌ 失败: {type(e).__name__}: {e}"
-            print(msg, flush=True)
-            logger.warning(msg)
+            logger.error("LangChain structured call failed: %s: %s", type(e).__name__, e)
             raise LLMError(f"LangChain structured output error: {str(e)}", self.provider) from e
 
     def _build_langchain_messages(self, messages: List[Dict[str, str]]) -> List[Any]:
@@ -317,25 +291,23 @@ class LLMClient:
                     parts.append(str(item))
             return "".join(parts)
         return str(content)
-    
+
     def _call_openai(self, messages: List[Dict[str, str]], temperature: float) -> str:
         """调用 OpenAI 兼容 API（使用原生 httpx）
-        
+
         根据 api_mode 选择:
         - chat: 使用 /chat/completions 端点
         - responses: 使用 /responses 端点 (新版本 API)
         """
-        import httpx
         import urllib3
-        
-        # 禁用 SSL 警告
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
+
+        # 仅当 SSL 验证关闭时抑制警告
+        if not self.settings.ssl_verify_enabled:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
         # 根据 API 模式选择端点
         if self.api_mode == "responses":
             url = f"{self.settings.llm_api_base}/responses"
-            # Responses API 格式：将 messages 转为 input
-            # 注意：某些模型（如 glm）不支持 temperature 参数，不传递
             data = {
                 "model": self.settings.llm_model or "gpt-3.5-turbo",
                 "input": messages
@@ -347,46 +319,36 @@ class LLMClient:
                 "messages": messages,
                 "temperature": temperature
             }
-        
+
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.settings.llm_api_key}"
         }
-        
-        logger.info("[LLM:OpenAI] ═══════════════════════════════")
-        logger.info(f"[LLM:OpenAI] ├─ API Mode: {self.api_mode}")
-        logger.info(f"[LLM:OpenAI] ├─ 请求URL: {url}")
-        logger.info(f"[LLM:OpenAI] ├─ Model: {data['model']}")
-        logger.info(f"[LLM:OpenAI] ├─ Timeout: {self.timeout}s")
-        logger.info(f"[LLM:OpenAI] ├─ SSL Verify: False")
-        logger.info(f"[LLM:OpenAI] ├─ Max Retries: {self.max_retries}")
-        logger.info(f"[LLM:OpenAI] └─ 准备发送请求...")
-        
+
+        logger.info("OpenAI call | mode=%s url=%s model=%s timeout=%ds ssl_verify=%s",
+                     self.api_mode, url, data['model'], self.timeout, self.settings.ssl_verify_enabled)
+
         for attempt in range(self.max_retries + 1):
             try:
-                logger.info(f"[LLM:OpenAI] ├─ Attempt {attempt + 1}/{self.max_retries + 1}: 发送请求...")
+                logger.debug("OpenAI attempt %d/%d: sending request...", attempt + 1, self.max_retries + 1)
                 request_start = time.time()
                 response = httpx.post(
-                    url, 
-                    json=data, 
-                    headers=headers, 
+                    url,
+                    json=data,
+                    headers=headers,
                     timeout=self.timeout,
-                    verify=False  # 禁用 SSL 验证
+                    verify=self.settings.ssl_verify_enabled,
                 )
                 request_elapsed = (time.time() - request_start) * 1000
-                
-                logger.info(f"[LLM:OpenAI] │   ├─ HTTP Status: {response.status_code}")
-                logger.info(f"[LLM:OpenAI] │   ├─ 响应耗时: {request_elapsed:.2f}ms")
-                logger.info(f"[LLM:OpenAI] │   ├─ 响应大小: {len(response.content)} bytes")
-                
+
+                logger.debug("OpenAI response | status=%d elapsed=%.2fms size=%d bytes",
+                              response.status_code, request_elapsed, len(response.content))
+
                 response.raise_for_status()
                 result = response.json()
-                
-                logger.info(f"[LLM:OpenAI] │   └─ 响应解析成功")
-                
+
                 # 根据 API 模式提取响应内容
                 if self.api_mode == "responses":
-                    # Responses API 格式: {"output": [{"content": [{"text": "..."}]}]}
                     content = ""
                     output = result.get("output", [])
                     for item in output:
@@ -396,60 +358,52 @@ class LLMClient:
                                     content = c.get("text", "")
                                     break
                     if content:
-                        logger.info(f"[LLM:OpenAI] ✅ (Responses模式) 成功获取 content: {content[:100]}...")
+                        logger.info("OpenAI (responses) succeeded | content=%s...", content[:100])
                         return content
-                    logger.error(f"[LLM:OpenAI] ❌ Responses 模式解析失败，原始响应: {result}")
+                    logger.error("OpenAI (responses) empty content, raw: %s", result)
                 else:
-                    # Chat Completions API 格式: {"choices": [{"message": {"content": "..."}}]}
                     content = result["choices"][0]["message"].get("content")
                     if content:
-                        logger.info(f"[LLM:OpenAI] ✅ 成功获取 content: {content[:100]}...")
+                        logger.info("OpenAI (chat) succeeded | content=%s...", content[:100])
                         return content
-                    # GLM 模型可能返回 reasoning
                     reasoning = result["choices"][0]["message"].get("reasoning")
                     if reasoning:
-                        logger.info(f"[LLM:OpenAI] ✅ 成功获取 reasoning: {reasoning[:100]}...")
+                        logger.info("OpenAI (chat) succeeded (reasoning) | content=%s...", reasoning[:100])
                         return reasoning
-                
-                logger.error(f"[LLM:OpenAI] ❌ LLM 返回空内容，原始响应: {result}")
+
+                logger.error("OpenAI returned empty content, raw: %s", result)
                 raise ValueError("LLM 返回空内容")
             except httpx.HTTPStatusError as e:
-                logger.error(f"[LLM:OpenAI] ═══════════════════════════════")
-                logger.error(f"[LLM:OpenAI] ├─ HTTP 错误: {e.response.status_code}")
-                logger.error(f"[LLM:OpenAI] ├─ 错误响应: {e.response.text[:200]}")
+                logger.error("OpenAI HTTP error | status=%d body=%s", e.response.status_code, e.response.text[:200])
                 if attempt >= self.max_retries:
-                    logger.error(f"[LLM:OpenAI] └─ 达到最大重试次数，放弃")
+                    logger.error("OpenAI max retries reached")
                     raise LLMError(f"OpenAI API error after {self.max_retries} retries: {str(e)}", "openai", e.response.status_code)
-                logger.warning(f"[LLM:OpenAI] ├─ 重试... ({attempt + 1}/{self.max_retries})")
+                logger.warning("OpenAI retrying (%d/%d)...", attempt + 1, self.max_retries)
             except httpx.TimeoutException as e:
-                logger.error(f"[LLM:OpenAI] ═══════════════════════════════")
-                logger.error(f"[LLM:OpenAI] ├─ 请求超时: {self.timeout}s")
+                logger.error("OpenAI timeout after %ds", self.timeout)
                 if attempt >= self.max_retries:
-                    logger.error(f"[LLM:OpenAI] └─ 达到最大重试次数，放弃")
+                    logger.error("OpenAI max retries reached on timeout")
                     raise LLMError(f"OpenAI API timeout after {self.max_retries} retries: {str(e)}", "openai")
-                logger.warning(f"[LLM:OpenAI] ├─ 重试... ({attempt + 1}/{self.max_retries})")
+                logger.warning("OpenAI retrying on timeout (%d/%d)...", attempt + 1, self.max_retries)
             except httpx.RequestError as e:
-                logger.error(f"[LLM:OpenAI] ═══════════════════════════════")
-                logger.error(f"[LLM:OpenAI] ├─ 请求错误: {type(e).__name__}: {str(e)}")
+                logger.error("OpenAI request error: %s: %s", type(e).__name__, str(e))
                 if attempt >= self.max_retries:
-                    logger.error(f"[LLM:OpenAI] └─ 达到最大重试次数，放弃")
+                    logger.error("OpenAI max retries reached on request error")
                     raise LLMError(f"OpenAI API error after {self.max_retries} retries: {str(e)}", "openai")
-                logger.warning(f"[LLM:OpenAI] ├─ 重试... ({attempt + 1}/{self.max_retries})")
-        
+                logger.warning("OpenAI retrying on error (%d/%d)...", attempt + 1, self.max_retries)
+
         return ""
-    
+
     def _call_azure(self, messages: List[Dict[str, str]], temperature: float) -> str:
         """调用 Azure OpenAI API (兼容新版 OpenAI SDK v1.0+)
-        
+
         如果未配置 azure_endpoint 但配置了 llm_api_base，自动回退到 OpenAI 兼容模式
         """
-        # 检查是否配置了 Azure 端点，如果没有但配置了 API_BASE，回退到 OpenAI 模式
         if not self.settings.azure_openai_endpoint and self.settings.llm_api_base:
-            print(f"[LLM:Azure] ⚠️ 未配置 azure_endpoint，检测到 llm_api_base，回退到 OpenAI 兼容模式", flush=True)
+            logger.warning("No azure_endpoint configured, llm_api_base detected, falling back to OpenAI compatible mode")
             return self._call_openai(messages, temperature)
-        
+
         try:
-            # 尝试使用 AzureOpenAI 客户端（新版本 SDK）
             from openai import AzureOpenAI
             client = AzureOpenAI(
                 api_key=self.settings.llm_api_key,
@@ -457,7 +411,6 @@ class LLMClient:
                 azure_endpoint=self.settings.azure_openai_endpoint
             )
         except ImportError:
-            # 回退到旧版方式
             from openai import OpenAI
             client = OpenAI(
                 api_key=self.settings.llm_api_key,
@@ -465,7 +418,7 @@ class LLMClient:
                 api_version="2024-02-01",
                 azure_endpoint=self.settings.azure_openai_endpoint
             )
-        
+
         for attempt in range(self.max_retries + 1):
             try:
                 response = client.chat.completions.create(
@@ -478,13 +431,13 @@ class LLMClient:
             except Exception as e:
                 if attempt >= self.max_retries:
                     raise LLMError(f"Azure OpenAI API error after {self.max_retries} retries: {str(e)}", "azure")
-        
+
         return ""
-    
+
     def _call_ollama(self, messages: List[Dict[str, str]], temperature: float) -> str:
         """调用 Ollama 本地模型"""
         base_url = self.settings.ollama_base_url or "http://localhost:11434"
-        
+
         for attempt in range(self.max_retries + 1):
             try:
                 with httpx.Client(timeout=self.timeout) as client:
@@ -498,7 +451,7 @@ class LLMClient:
                     )
                     if response.status_code != 200:
                         raise LLMError(f"Ollama API error: {response.text}", "ollama", response.status_code)
-                    
+
                     result = response.json()
                     return result.get("message", {}).get("content", "")
             except httpx.TimeoutException:
@@ -507,18 +460,17 @@ class LLMClient:
             except Exception as e:
                 if attempt >= self.max_retries:
                     raise LLMError(f"Ollama API error after {self.max_retries} retries: {str(e)}", "ollama")
-        
+
         return ""
-    
+
     def _call_anthropic(self, messages: List[Dict[str, str]], temperature: float) -> str:
         """调用 Anthropic API"""
         import anthropic
-        
+
         client = anthropic.Anthropic(
             api_key=self.settings.llm_api_key
         )
-        
-        # 将消息格式转换为 Anthropic 格式
+
         system_message = ""
         anthropic_messages = []
         for msg in messages:
@@ -526,7 +478,7 @@ class LLMClient:
                 system_message = msg.get("content", "")
             else:
                 anthropic_messages.append(msg)
-        
+
         for attempt in range(self.max_retries + 1):
             try:
                 response = client.messages.create(
@@ -540,7 +492,7 @@ class LLMClient:
             except Exception as e:
                 if attempt >= self.max_retries:
                     raise LLMError(f"Anthropic API error after {self.max_retries} retries: {str(e)}", "anthropic")
-        
+
         return ""
 
 

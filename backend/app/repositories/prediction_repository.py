@@ -11,7 +11,7 @@ class ForecastHistoryRepository:
     def create(self, **kwargs) -> ForecastHistory:
         record = ForecastHistory(**kwargs)
         self.db.add(record)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(record)
         return record
 
@@ -34,7 +34,7 @@ class PredictionModelRepository:
     def create(self, **kwargs) -> PredictionModel:
         model = PredictionModel(**kwargs)
         self.db.add(model)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(model)
         return model
 
@@ -53,7 +53,7 @@ class PredictionModelRepository:
         self.db.query(PredictionModel).filter(PredictionModel.id == model_id).update(
             {"status": status, **extra}
         )
-        self.db.commit()
+        self.db.flush()
 
     def get_by_id(self, model_id: int) -> Optional[PredictionModel]:
         return self.db.query(PredictionModel).filter(PredictionModel.id == model_id).first()
@@ -88,7 +88,7 @@ class PredictionResultRepository:
 
     def bulk_save(self, results: List[PredictionResult]) -> int:
         self.db.bulk_save_objects(results)
-        self.db.commit()
+        self.db.flush()
         return len(results)
 
     ALLOWED_SORT_FIELDS = {

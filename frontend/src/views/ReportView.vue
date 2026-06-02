@@ -353,13 +353,22 @@ const handleSortChange = ({ prop, order }) => {
   })
 }
 
-// 通过 path 查找菜单
+// 通过 path 查找菜单（尝试多种 path 格式）
 const findMenuIdByPath = async (path) => {
   try {
     const menus = await getMenus({ skip: 0, limit: 1000 })
     const menuList = Array.isArray(menus) ? menus : (menus.data || [])
-    const matched = menuList.find(m => m.path === path)
-    return matched ? matched.id : null
+    // 尝试精确匹配 + 去除 /report/ 前缀后匹配
+    const candidates = [
+      path,                                   // /report/rp1
+      path.replace(/^\/report\//, ''),       // rp1
+      '/' + path.replace(/^\/report\//, ''), // /rp1
+    ]
+    for (const candidate of candidates) {
+      const matched = menuList.find(m => m.path === candidate)
+      if (matched) return matched.id
+    }
+    return null
   } catch { return null }
 }
 

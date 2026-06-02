@@ -18,7 +18,7 @@ class ProxyServerRepository:
         
         ds = ProxyServer(**data, created_by=user_id)
         self.db.add(ds)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(ds)
         return ds
 
@@ -48,12 +48,12 @@ class ProxyServerRepository:
             elif key != 'password':
                 setattr(db_obj, key, value)
         
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(db_obj)
         return db_obj
 
     def delete(self, db_obj: ProxyServer) -> bool:
         """删除代理服务器"""
         self.db.delete(db_obj)
-        self.db.commit()
+        self.db.flush()
         return True

@@ -45,6 +45,9 @@ class DataSourceEngineFactory:
 
     def create_engine(self, ds):
         config = self.build_config(ds)
+        return self._build_engine(config, ds)
+
+    def _build_engine(self, config, ds=None, creator=None):
         kwargs = {
             "poolclass": QueuePool,
             "pool_size": self.pool_size,
@@ -52,9 +55,37 @@ class DataSourceEngineFactory:
             "pool_pre_ping": True,
             "pool_recycle": self.pool_recycle,
         }
-        if config.connect_args:
+        if creator is not None:
+            kwargs["creator"] = creator
+        elif config.connect_args:
             kwargs["connect_args"] = config.connect_args
         elif config.ds_type in ("MYSQL", "DORIS"):
             kwargs["connect_args"] = {}
 
         return create_engine(config.url, **kwargs)
+
+    def create_engine_with_proxy(self, ds, proxy_host: str, proxy_port: int):
+        """
+        创建带 SOCKS5 代理的 SQLAlchemy engine（engine 级别代理，无全局 socket 污染）。
+
+        Args:
+            ds: 数据源对象
+            proxy_host: SOCKS5 代理主机
+            proxy_port: SOCKS5 代理端口
+
+        Returns:
+            SQLAlchemy Engine 实例
+        """
+        config = self.build_config(ds)
+
+        def _socks_creator():
+            try:
+                import socks as _socks
+            except ImportError:
+                raise RuntimeError("SOCKS5 代理需要 PySocks 库: pip install PySocks")
+            s = _socks.socksocket()
+            s.settimeout(60)
+            s.set_proxy(_socks.SOCKS5, proxy_host, proxy_port)
+            return s
+
+        return self._build_engine(config, ds, creator=_socks_creator)

@@ -10,7 +10,7 @@ class QueryHistoryRepository:
     def create(self, history_data: dict) -> QueryHistory:
         db_history = QueryHistory(**history_data)
         self.db.add(db_history)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(db_history)
         return db_history
 
