@@ -666,6 +666,24 @@ class AIAnalystService:
             except json.JSONDecodeError:
                 return None
 
+        # ── 智能回退：LLM 忘记用 ACTION: 格式时自动检测 SQL ──
+        # 检测 ```sql ... ``` 代码块
+        sql_block = re.search(r'```sql\s*\n(.*?)```', text, re.DOTALL)
+        if sql_block:
+            sql = sql_block.group(1).strip()
+            if sql.upper().startswith("SELECT"):
+                text_before = text[:sql_block.start()].strip()
+                return {"tool": "execute_sql", "input": {"sql": sql},
+                        "_smart_fallback": True, "_text_before": text_before}
+
+        # 检测以 SELECT 开头或内容主要是 SELECT 的纯文本
+        clean = text.strip().strip("`").strip()
+        if clean.upper().startswith("SELECT") and not clean.upper().startswith("SELECTION"):
+            sql = clean.split("\n")[0] if "\n" in clean else clean
+            if "FROM" in sql.upper():
+                return {"tool": "execute_sql", "input": {"sql": sql},
+                        "_smart_fallback": True, "_text_before": ""}
+
         return None
 
     def _execute_tool(
@@ -946,6 +964,20 @@ class AIAnalystService:
 
             # 检查是否有工具调用
             action = self._parse_action(response_text)
+
+            # 智能回退时：先输出文字部分，再执行工具
+            smart_fallback = False
+            if action and action.get("_smart_fallback"):
+                smart_fallback = True
+                text_before = action.pop("_text_before", "")
+                if text_before.strip():
+                    # 先推送文字部分
+                    all_text.append(text_before)
+                    yield {"type": "token", "content": text_before}
+                # 真正的 tool action 去掉回退标记
+                clean_action = {"tool": action["tool"], "input": action["input"]}
+                action = clean_action
+
             if action is None:
                 # 真流式：逐 token 推送
                 all_text.append(response_text)
