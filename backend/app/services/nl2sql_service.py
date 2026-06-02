@@ -1096,6 +1096,7 @@ class NL2SQLService:
         try:
             ds = self.ds_repo.get_by_id(data_source_id)
             if not ds or not ds.database:
+                logger.info("语义层: data_source_id=%s 无数据源或无数据库名", data_source_id)
                 return None
 
             ds_name = ds.name.lower() if ds.name else ""
@@ -1103,62 +1104,52 @@ class NL2SQLService:
             semantic_dir = self._get_semantic_dir()
 
             if not semantic_dir or not semantic_dir.exists():
-                logger.warning(f"语义层目录不存在: {semantic_dir}")
+                logger.warning("语义层目录不存在: %s", semantic_dir)
                 return None
 
-            # 优先加载该数据源下所有的 .md 文件
+            logger.info("语义层: data_source_id=%s name=%s db=%s 语义目录=%s",
+                         data_source_id, ds.name, ds.database, semantic_dir)
+
+            # 策略1: semantic/{数据源名}/*.md
             ds_dir = semantic_dir / ds_name
             if ds_dir.exists() and ds_dir.is_dir():
                 md_files = sorted(ds_dir.glob("*.md"))
-                # 过滤掉 README.md（作为单独策略）
                 md_files = [f for f in md_files if f.name.upper() != "README.MD"]
-                
                 if md_files:
-                    contents = []
-                    for md_file in md_files:
-                        file_content = md_file.read_text(encoding="utf-8")
-                        # 使用文件名（不含扩展名）作为章节标题
-                        contents.append(f"## {md_file.stem}\n\n{file_content}")
-                    
-                    content = "\n\n".join(contents)
-                    logger.info(f"加载语义层文档(合并 {len(md_files)} 个文件): {ds_dir}")
-                    return content
+                    contents = [f"## {f.stem}\n\n{f.read_text(encoding='utf-8')}" for f in md_files]
+                    logger.info("语义层: 策略1命中 %s (%d 个文件)", ds_dir, len(md_files))
+                    return "\n\n".join(contents)
 
-            # 新增策略: semantic/{ds_name}.md
-            # 用于 data_source 名直接对应单文件的兼容结构。
-            ds_single_file = semantic_dir / f"{ds_name}.md"
-            if ds_single_file.exists():
-                content = ds_single_file.read_text(encoding="utf-8")
-                logger.info(f"加载语义层文档(新增单文件): {ds_single_file}")
-                return content
+            # 策略2: semantic/{ds_name}.md
+            ds_single = semantic_dir / f"{ds_name}.md"
+            if ds_single.exists():
+                logger.info("语义层: 策略2命中 %s", ds_single)
+                return ds_single.read_text(encoding="utf-8")
 
-            # 回退策略：按数据库名单个文件查找
+            # 策略3: semantic/{ds_name}/{db_name}.md
             single_file = semantic_dir / ds_name / f"{db_name}.md"
             if single_file.exists():
-                content = single_file.read_text(encoding="utf-8")
-                logger.info(f"加载语义层文档(单文件): {single_file}")
-                return content
+                logger.info("语义层: 策略3命中 %s", single_file)
+                return single_file.read_text(encoding="utf-8")
 
-            # 策略3: semantic/{数据源名}/{数据库名}/README.md
+            # 策略4: semantic/{ds_name}/{db_name}/README.md
             db_dir = semantic_dir / ds_name / db_name
-            readme_file = db_dir / "README.md"
-            if db_dir.exists() and db_dir.is_dir() and readme_file.exists():
-                content = readme_file.read_text(encoding="utf-8")
-                logger.info(f"加载语义层文档(目录): {readme_file}")
-                return content
-
-            # 策略4: semantic/{数据源名}/{数据库名}/*.md 合并
             if db_dir.exists() and db_dir.is_dir():
+                readme = db_dir / "README.md"
+                if readme.exists():
+                    logger.info("语义层: 策略4命中 %s", readme)
+                    return readme.read_text(encoding="utf-8")
+
+                # 策略5: semantic/{ds_name}/{db_name}/*.md
                 md_files = sorted(db_dir.glob("*.md"))
                 if md_files:
-                    contents = []
-                    for md_file in md_files:
-                        contents.append(f"## {md_file.stem}\n\n{md_file.read_text(encoding='utf-8')}")
-                    content = "\n\n".join(contents)
-                    logger.info(f"加载语义层文档(合并 {len(md_files)} 个文件): {db_dir}")
-                    return content
+                    contents = [f"## {f.stem}\n\n{f.read_text(encoding='utf-8')}" for f in md_files]
+                    logger.info("语义层: 策略5命中 %s (%d 个文件)", db_dir, len(md_files))
+                    return "\n\n".join(contents)
 
-            # 兼容策略: 找不到时回退到根目录查找
+            # 所有策略均未命中
+            logger.info("语义层: data_source=%s db=%s 在 %s 下未找到匹配的 .md 文件",
+                         ds.name, ds.database, semantic_dir)
             return self._load_semantic_doc_fallback(semantic_dir, db_name)
 
         except Exception as e:
