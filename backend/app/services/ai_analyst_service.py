@@ -671,8 +671,10 @@ class AIAnalystService:
         tool_keywords = ["SELECT", "FROM", "DESCRIBE", "SHOW TABLES", "SHOW COLUMNS",
                          "execute_sql", "get_schema", "generate_chart", "data_source_id"]
         if not any(kw in text.upper() for kw in tool_keywords):
+            logger.info("[AI-Analyst] LLM reformat: 文本无工具关键词，跳过")
             return None
 
+        logger.info("[AI-Analyst] LLM reformat: 触发二次LLM调用，文本前200chars=%s", text[:200].replace("\n", " "))
         try:
             reformat_prompt = (
                 "从以下文本中提取工具调用。如果有 SQL 查询意图，输出 JSON: "
@@ -694,16 +696,21 @@ class AIAnalystService:
                 tool = parsed.get("tool")
                 inp = parsed.get("input", {})
                 if tool == "execute_sql" and inp.get("sql"):
+                    logger.info("[AI-Analyst] LLM reformat ✅ 提取到 execute_sql")
                     return {"tool": "execute_sql", "input": inp,
                             "_smart_fallback": True, "_text_before": text.split("\n")[0].strip()}
                 if tool == "get_schema" and inp.get("data_source_id"):
+                    logger.info("[AI-Analyst] LLM reformat ✅ 提取到 get_schema")
                     return {"tool": "get_schema", "input": inp,
                             "_smart_fallback": True, "_text_before": text.split("\n")[0].strip()}
                 if tool == "generate_chart" and inp.get("data"):
+                    logger.info("[AI-Analyst] LLM reformat ✅ 提取到 generate_chart")
                     return {"tool": "generate_chart", "input": inp,
                             "_smart_fallback": True, "_text_before": ""}
+            else:
+                logger.info("[AI-Analyst] LLM reformat: 未提取到JSON或结果为{}")
         except Exception as e:
-            logger.debug("[AI-Analyst] LLM reformat failed: %s", e)
+            logger.warning("[AI-Analyst] LLM reformat 失败: %s", e)
         return None
 
     def _parse_json_as_action(self, obj: Dict[str, Any], full_text: str) -> Optional[Dict[str, Any]]:
@@ -1070,23 +1077,34 @@ class AIAnalystService:
         for step in range(self.MAX_AGENT_STEPS):
             llm_client = self._get_llm_client()
 
+            # ── LLM 调用日志 ──
+            msg_count = len(messages)
+            total_chars = sum(len(m.get("content", "")) for m in messages)
+            last_user = next((m["content"][:80] for m in reversed(messages) if m["role"] == "user"), "")
+            logger.info("[AI-Analyst] ═══ LLM 调用 #%02d ═══ messages=%d total_chars=%d query=%s",
+                         step + 1, msg_count, total_chars, last_user.replace("\n", " "))
+
             try:
                 # 流式调用 LLM，逐 token yield 的同时累积完整文本
                 stream_buffer = []
+                token_count = 0
                 async for token in self._stream_llm_call(llm_client, messages):
                     stream_buffer.append(token)
+                    token_count += 1
                 response_text = "".join(stream_buffer)
+                logger.info("[AI-Analyst] 📥 LLM 响应 #%02d | tokens=%d chars=%d | preview=%s",
+                             step + 1, token_count, len(response_text),
+                             response_text[:150].replace("\n", " "))
             except Exception as e:
-                logger.error("[AI-Analyst] LLM 调用失败: %s", e)
+                logger.error("[AI-Analyst] ❌ LLM 调用 #%02d 失败: %s", step + 1, e)
                 yield {"type": "error", "error": str(e)}
                 return
 
             # 检查是否有工具调用
             action = self._parse_action(response_text)
-            logger.info("[AI-Analyst] step=%d/%d action=%s preview=%s",
+            logger.info("[AI-Analyst] 🔧 step=%d/%d action=%s",
                          step + 1, self.MAX_AGENT_STEPS,
-                         action.get("tool") if action else None,
-                         response_text[:120].replace("\n", " "))
+                         action.get("tool") if action else "NONE(最终回答)")
 
             # 智能回退时：先输出文字部分，再执行工具
             smart_fallback = False
@@ -1102,6 +1120,7 @@ class AIAnalystService:
                 action = clean_action
 
             if action is None:
+                logger.info("[AI-Analyst] ✅ 最终回答 step=%d, 共 %d tokens", step + 1, len(stream_buffer))
                 # 真流式：逐 token 推送
                 all_text.append(response_text)
                 for token in stream_buffer:
@@ -1116,9 +1135,19 @@ class AIAnalystService:
 
             # 执行工具
             tool_name = action.get("tool", "unknown")
-            yield {"type": "tool_call", "tool_name": tool_name, "tool_input": action.get("input", {})}
+            tool_input = action.get("input", {})
+            logger.info("[AI-Analyst] 🛠️  step=%d 调用工具: %s | input=%s",
+                         step + 1, tool_name,
+                         json.dumps(tool_input, ensure_ascii=False)[:200])
+            yield {"type": "tool_call", "tool_name": tool_name, "tool_input": tool_input}
 
             tool_result = self._execute_tool(action, data_source_id, user_id=user_id)
+            tool_status = "✅" if tool_result.get("success") else "❌"
+            logger.info("[AI-Analyst] %s step=%d %s 结果 | success=%s rows=%d | error=%s",
+                         tool_status, step + 1, tool_name,
+                         tool_result.get("success"),
+                         len(tool_result.get("rows", []) or []),
+                         (tool_result.get("error", "") or "")[:120])
             tool_output = self._format_tool_output(tool_name, tool_result, limit=4000)
             yield {"type": "tool_result", "tool_name": tool_name, "tool_output": tool_output}
 
