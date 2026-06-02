@@ -667,8 +667,8 @@ class AIAnalystService:
                 return None
 
         # ── 智能回退：LLM 忘记用 ACTION: 格式时自动检测 SQL ──
-        # 检测 ```sql ... ``` 代码块
-        sql_block = re.search(r'```sql\s*\n(.*?)```', text, re.DOTALL)
+        # 检测 ```sql ... ``` 代码块（允许 sql 后直接跟 SQL，无换行）
+        sql_block = re.search(r'```sql\s*(.*?)```', text, re.DOTALL)
         if sql_block:
             sql = sql_block.group(1).strip()
             if sql.upper().startswith("SELECT"):
@@ -676,7 +676,19 @@ class AIAnalystService:
                 return {"tool": "execute_sql", "input": {"sql": sql},
                         "_smart_fallback": True, "_text_before": text_before}
 
-        # 检测以 SELECT 开头或内容主要是 SELECT 的纯文本
+        # 检测全文中的 SELECT...FROM（含文字前缀）
+        select_match = re.search(
+            r'(SELECT\s+.+?FROM\s+.+?)(?:;|\n|$)', text, re.IGNORECASE | re.DOTALL
+        )
+        if select_match:
+            sql = select_match.group(1).strip()
+            # 避免误抓非 SQL（如 "我的SELECT查询返回了结果"）
+            if sql.upper().startswith("SELECT") and len(sql) > 20:
+                text_before = text[:select_match.start()].strip()
+                return {"tool": "execute_sql", "input": {"sql": sql},
+                        "_smart_fallback": True, "_text_before": text_before}
+
+        # 兜底：纯 SELECT 开头的文本（无文字前缀）
         clean = text.strip().strip("`").strip()
         if clean.upper().startswith("SELECT") and not clean.upper().startswith("SELECTION"):
             sql = clean.split("\n")[0] if "\n" in clean else clean
