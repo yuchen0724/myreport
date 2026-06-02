@@ -433,7 +433,62 @@ class AIAnalystService:
                 seen.add(sv)
                 x_unique.append(sv)
 
-        # 预设颜色（12色，足够区分门店/品类）
+        # ── 多系列模式（支持 long format → auto-pivot） ────────────
+        if series_fields and len(series_fields) >= 1:
+            series_col = series_fields[0]  # 如 "store_code"
+            unique_series = sorted(set(str(_safe_get(r, series_col, columns)) for r in data))
+            if len(unique_series) > 1:
+                x_raw = [_safe_get(r, x_axis_field, columns) for r in data]
+                seen = set()
+                x_unique = []
+                for v in x_raw:
+                    sv = str(v)
+                    if sv not in seen:
+                        seen.add(sv)
+                        x_unique.append(sv)
+
+                colors = [
+                    "#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de",
+                    "#3ba272", "#fc8452", "#9a60b4", "#ea7ccc", "#1ab1ff",
+                ]
+                series_list = []
+                legend_data = []
+                for idx, series_val in enumerate(unique_series[:20]):
+                    series_map = {}
+                    for r in data:
+                        if str(_safe_get(r, series_col, columns)) == series_val:
+                            xv = str(_safe_get(r, x_axis_field, columns))
+                            yv = _safe_get(r, y_axis_field, columns)
+                            try:
+                                series_map[xv] = float(yv) if yv is not None else 0
+                            except (ValueError, TypeError):
+                                series_map[xv] = 0
+                    sdata = [series_map.get(x, 0) for x in x_unique]
+                    series_list.append({
+                        "name": series_val,
+                        "type": chart_type if chart_type in ("bar", "line", "scatter") else "line",
+                        "data": sdata,
+                        "smooth": chart_type == "line",
+                        "symbol": "circle",
+                        "symbolSize": 3,
+                        "lineStyle": {"width": 1.5},
+                        "itemStyle": {"color": colors[idx % len(colors)]},
+                    })
+                    legend_data.append(series_val)
+
+                chart_config = {
+                    "title": {"text": title or "多系列趋势图"},
+                    "tooltip": {"trigger": "axis"},
+                    "legend": {"data": legend_data, "top": 8, "textStyle": {"fontSize": 11}, "type": "scroll"},
+                    "grid": {"left": 60, "right": 24, "bottom": 60, "top": 48},
+                    "xAxis": {"type": "category", "data": x_unique, "axisLabel": {"rotate": 30, "fontSize": 10}},
+                    "yAxis": {"type": "value", "name": title or "", "nameTextStyle": {"fontSize": 11}},
+                    "dataZoom": [{"type": "inside"}, {"type": "slider", "height": 16, "bottom": 4}],
+                    "series": series_list,
+                }
+                return {"success": True, "chart_config": chart_config, "chart_type": chart_type, "series_count": len(unique_series)}
+
+        # ── 预设颜色（12色，足够区分门店/品类） ──
         colors = [
             "#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de",
             "#3ba272", "#fc8452", "#9a60b4", "#ea7ccc", "#1ab1ff",
