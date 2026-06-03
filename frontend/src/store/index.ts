@@ -31,11 +31,10 @@ export interface MenuItem {
 const STORAGE = window.sessionStorage
 
 // ── Migrate legacy localStorage → sessionStorage ────────
+// 注意：不删除 localStorage 源数据，避免多标签页同时加载时的竞争条件
 if (!STORAGE.getItem("token") && window.localStorage.getItem("token")) {
   STORAGE.setItem("token", window.localStorage.getItem("token")!)
   STORAGE.setItem("user", window.localStorage.getItem("user") || "")
-  window.localStorage.removeItem("token")
-  window.localStorage.removeItem("user")
 }
 
 export const useUserStore = defineStore("user", () => {

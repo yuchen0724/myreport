@@ -99,24 +99,7 @@ export default {
       }
     })
 
-    // 监听路由变化，始终确保登录页不发送认证请求
-    watch(isLoginPage, (newVal) => {
-      if (newVal) {
-        userStore.logout()
-      }
-    }, { immediate: true })
-
-    // 初始化时检查 token（非登录页才恢复）
-    onMounted(() => {
-      if (!isLoginPage.value) {
-        const token = localStorage.getItem('token')
-        const user = localStorage.getItem('user')
-        if (token && user) {
-          userStore.setToken(token)
-          userStore.setUser(JSON.parse(user))
-        }
-      }
-    })
+    // 路由守卫已处理 token 校验，无需在组件层重复拦截
 
     const handleCommand = (command) => {
       if (command === 'logout') {
