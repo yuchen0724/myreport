@@ -20,7 +20,7 @@ from app.services.query_service import QueryService
 from app.repositories.data_source_repository import DataSourceRepository
 from app.repositories.semantic_metric_repository import SemanticMetricRepository
 from app.utils.sql_validator import SQLValidator
-from app.utils.sql_normalizer import strip_trailing_semicolon, has_multi_level_table_reference, has_foreign_schema_reference, has_forbidden_sql_tokens
+from app.utils.sql_normalizer import strip_trailing_semicolon, has_multi_level_table_reference, has_forbidden_sql_tokens
 from app.schemas.query import SQLQueryRequest
 from app.schemas.ai_analyst import AIAnalystChatResponse, AIAnalystMessage, AIAnalystToolCall
 from pydantic import BaseModel, Field
