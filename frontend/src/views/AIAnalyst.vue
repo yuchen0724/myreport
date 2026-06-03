@@ -82,7 +82,7 @@
             <el-icon v-else :size="20"><MagicStick /></el-icon>
           </div>
           <div class="message-body">
-            <div class="message-role">{{ msg.role === 'user' ? '我' : 'AI 助手' }}</div>
+            <div class="message-role">{{ msg.role === 'user' ? '我' : 'AI 助手' }}<span class="msg-time">{{ msg.time || '' }}</span></div>
 
             <!-- 工具调用记录 -->
             <div v-if="msg.tool_calls && msg.tool_calls.length > 0" class="tool-calls">
@@ -331,10 +331,11 @@ export default {
       const msg = inputMessage.value.trim()
       inputMessage.value = ''
 
-      // 添加用户消息
+      // 添加用户消息（含时间戳）
       messages.value.push({
         role: 'user',
         content: msg,
+        time: new Date().toLocaleTimeString(),
       })
       persistState()
       scrollToBottom()
@@ -363,11 +364,12 @@ export default {
             scrollToBottom()
           },
           onToolCall(data) {
-            // 将当前累积的文字作为一条独立消息输出
+            // 将当前累积的文字作为一条独立消息输出（含时间戳）
             if (streamingMessage.value.trim()) {
               messages.value.push({
                 role: 'assistant',
                 content: streamingMessage.value,
+                time: new Date().toLocaleTimeString(),
               })
               streamingMessage.value = ''
             }
@@ -404,10 +406,11 @@ export default {
             scrollToBottom()
           },
           onDone(data) {
-            // 完成：将流式消息转为正式消息
+            // 完成：将流式消息转为正式消息（含时间戳）
             messages.value.push({
               role: 'assistant',
               content: streamingMessage.value,
+              time: new Date().toLocaleTimeString(),
               tool_calls: streamingToolCalls.value.length > 0
                 ? streamingToolCalls.value.map(tc => ({
                     tool_name: tc.tool_name,
@@ -433,6 +436,7 @@ export default {
             messages.value.push({
               role: 'assistant',
               content: `⚠️ 错误: ${error}`,
+              time: new Date().toLocaleTimeString(),
             })
             isStreaming.value = false
             streamingMessage.value = ''
@@ -656,6 +660,12 @@ export default {
   font-size: 12px;
   color: #909399;
   margin-bottom: 4px;
+}
+
+.msg-time {
+  font-size: 11px;
+  color: #c0c4cc;
+  margin-left: 8px;
 }
 
 .message-content {
