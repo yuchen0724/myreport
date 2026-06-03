@@ -27,7 +27,6 @@ from pydantic import BaseModel, Field
 from app.schemas.semantic_metric import SemanticMetricQueryRequest
 from app.services.semantic_metric_query_service import SemanticMetricQueryService
 from app.utils.semantic_runtime_context import build_semantic_runtime_context
-import asyncio
 import hashlib
 from app.utils.chart_axis_inference import infer_chart_axes
 from app.models.user import User
@@ -1167,12 +1166,10 @@ class AIAnalystService:
                 text_part = response_text[:json_start.start()].strip() if json_start else response_text
                 if text_part and not text_part.startswith("{"):
                     yield {"type": "token", "content": text_part}
-                    await asyncio.sleep(0.05)  # 让前端有机会渲染
             else:
                 # 最终回答：推送全部 token（逐 token 流式）
                 for token in stream_buffer:
                     yield {"type": "token", "content": token}
-                    await asyncio.sleep(0.01)  # 逐 token 延迟，让前端实时渲染
 
             logger.info("[AI-Analyst] 🔧 step=%d/%d action=%s",
                          step + 1, self.MAX_AGENT_STEPS,
@@ -1210,7 +1207,6 @@ class AIAnalystService:
                          step + 1, tool_name,
                          json.dumps(tool_input, ensure_ascii=False)[:200])
             yield {"type": "tool_call", "tool_name": tool_name, "tool_input": tool_input}
-            await asyncio.sleep(0.05)
 
             tool_result = self._execute_tool(action, data_source_id, user_id=user_id)
             tool_status = "✅" if tool_result.get("success") else "❌"
@@ -1219,7 +1215,6 @@ class AIAnalystService:
                          tool_result.get("success"),
                          len(tool_result.get("rows", []) or []),
                          (tool_result.get("error", "") or "")[:120])
-            await asyncio.sleep(0.05)
             tool_output = self._format_tool_output(tool_name, tool_result, limit=4000)
             yield {"type": "tool_result", "tool_name": tool_name, "tool_output": tool_output}
 
@@ -1261,7 +1256,6 @@ class AIAnalystService:
 
             if tool_name == "generate_chart" and tool_result.get("success"):
                 chart_config = tool_result.get("chart_config")
-                await asyncio.sleep(0.05)
                 yield {"type": "chart", "chart_config": chart_config}
 
             # 反馈给 LLM

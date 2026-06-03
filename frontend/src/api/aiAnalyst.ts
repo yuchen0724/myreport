@@ -72,48 +72,60 @@ export function chatStream(
       const decoder = new TextDecoder()
       let buffer = ""
 
+      /** 异步事件队列：逐事件处理，给 Vue 时间渲染 DOM */
+      async function processEvents(events: Array<Record<string, unknown>>) {
+        for (const event of events) {
+          switch (event.type) {
+            case "token":
+              callbacks.onToken?.(event.content as string)
+              break
+            case "tool_call":
+              callbacks.onToolCall?.({
+                tool_name: event.tool_name as string,
+                tool_input: (event.tool_input as Record<string, unknown>) || {},
+              })
+              break
+            case "tool_result":
+              callbacks.onToolResult?.({
+                tool_name: event.tool_name as string,
+                tool_output: (event.tool_output as string) || "",
+              })
+              break
+            case "chart":
+              callbacks.onChart?.(event.chart_config as Record<string, unknown>)
+              break
+            case "done":
+              callbacks.onDone?.({ conversation_id: event.conversation_id as string })
+              break
+            case "error":
+              callbacks.onError?.((event.error as string) || "Unknown error")
+              break
+          }
+          // 每个事件之间 yield 给 Vue render cycle
+          await new Promise((r) => setTimeout(r, 0))
+        }
+      }
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split("\n")
-        buffer = lines.pop() || "" // keep incomplete line
+        buffer = lines.pop() || ""
 
+        const events: Array<Record<string, unknown>> = []
         for (const line of lines) {
           if (line.startsWith("data: ")) {
             try {
-              const event = JSON.parse(line.slice(6))
-              switch (event.type) {
-                case "token":
-                  callbacks.onToken?.(event.content)
-                  break
-                case "tool_call":
-                  callbacks.onToolCall?.({
-                    tool_name: event.tool_name,
-                    tool_input: event.tool_input || {},
-                  })
-                  break
-                case "tool_result":
-                  callbacks.onToolResult?.({
-                    tool_name: event.tool_name,
-                    tool_output: event.tool_output || "",
-                  })
-                  break
-                case "chart":
-                  callbacks.onChart?.(event.chart_config)
-                  break
-                case "done":
-                  callbacks.onDone?.({ conversation_id: event.conversation_id })
-                  break
-                case "error":
-                  callbacks.onError?.(event.error || "Unknown error")
-                  break
-              }
+              events.push(JSON.parse(line.slice(6)))
             } catch {
               // skip malformed SSE lines
             }
           }
+        }
+        if (events.length > 0) {
+          await processEvents(events)
         }
       }
     })
