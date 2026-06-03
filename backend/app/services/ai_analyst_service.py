@@ -725,7 +725,8 @@ class AIAnalystService:
         # 仅当文本包含明显的工具调用意图时才触发二次 LLM 调用
         tool_keywords = ["SELECT", "FROM", "DESCRIBE", "SHOW TABLES", "SHOW COLUMNS",
                          "execute_sql", "get_schema", "generate_chart", "data_source_id",
-                         "执行查询", "查一下", "查表", "查数据"]
+                         "执行查询", "查一下", "查表", "查数据",
+                         "图表", "趋势图", "如图所示", "下面展示"]
         if not any(kw in text.upper() for kw in tool_keywords):
             logger.info("[AI-Analyst] LLM reformat: 文本无工具关键词，跳过")
             return None
@@ -737,6 +738,8 @@ class AIAnalystService:
                 '{"tool": "execute_sql", "input": {"sql": "...", "data_source_id": N}}。'
                 "如果有查看表结构意图，输出 JSON: "
                 '{"tool": "get_schema", "input": {"data_source_id": N, "table_name": "..."}}。'
+                "如果描述了需要生成图表，输出 JSON: "
+                '{"tool": "generate_chart", "input": {"chart_type": "bar", "data": [...], "x_axis_field": "...", "y_axis_field": "...", "title": "..."}}。'
                 "如果没有明显的工具调用意图，输出: {}。\n\n"
                 f"文本:\n{text[:2000]}"
             )
@@ -759,10 +762,10 @@ class AIAnalystService:
                     logger.info("[AI-Analyst] LLM reformat ✅ 提取到 get_schema")
                     return {"tool": "get_schema", "input": inp,
                             "_smart_fallback": True, "_text_before": text.split("\n")[0].strip()}
-                if tool == "generate_chart" and inp.get("data"):
+                if tool == "generate_chart" and (inp.get("data") or inp.get("chart_type")):
                     logger.info("[AI-Analyst] LLM reformat ✅ 提取到 generate_chart")
                     return {"tool": "generate_chart", "input": inp,
-                            "_smart_fallback": True, "_text_before": ""}
+                            "_smart_fallback": True, "_text_before": text.split("\n")[0].strip()}
             else:
                 logger.info("[AI-Analyst] LLM reformat: 未提取到JSON或结果为{}")
         except Exception as e:
