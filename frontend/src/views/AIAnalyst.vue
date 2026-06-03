@@ -363,6 +363,14 @@ export default {
             scrollToBottom()
           },
           onToolCall(data) {
+            // 将当前累积的文字作为一条独立消息输出
+            if (streamingMessage.value.trim()) {
+              messages.value.push({
+                role: 'assistant',
+                content: streamingMessage.value,
+              })
+              streamingMessage.value = ''
+            }
             streamingToolCalls.value.push({
               tool_name: data.tool_name,
               tool_input: data.tool_input,
