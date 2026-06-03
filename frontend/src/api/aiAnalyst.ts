@@ -101,8 +101,8 @@ export function chatStream(
               callbacks.onError?.((event.error as string) || "Unknown error")
               break
           }
-          // 每个事件之间 yield 给 Vue render cycle
-          await new Promise((r) => setTimeout(r, 0))
+          // 每个事件之间等待一个 animation frame（确保 Vue DOM 已更新）
+          await new Promise((r) => requestAnimationFrame(r))
         }
       }
 
