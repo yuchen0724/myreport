@@ -190,9 +190,7 @@ class AIAnalystService:
         multi_error = has_multi_level_table_reference(sql)
         if multi_error:
             return {"success": False, "error": f"SQL 表名格式错误：只允许 库名.表名，不允许多级前缀。发现多级引用: {multi_error}", "columns": [], "rows": [], "total": 0}
-        foreign_error = has_foreign_schema_reference(sql, ds.database or "")
-        if foreign_error:
-            return {"success": False, "error": f"SQL 表名不属于当前数据源。当前数据源库名='{ds.database}'，但 SQL 中引用了其他库的表: {foreign_error}。请只使用当前数据源({ds.database})下的表，不要跨库查询。", "columns": [], "rows": [], "total": 0}
+        # 跨库查询（如 JOIN ads_cockpit_qck.dim_store）在 Doris 中允许，不拦截
 
         try:
             from app.utils.db_executor import execute_query
