@@ -724,7 +724,8 @@ class AIAnalystService:
         """
         # 仅当文本包含明显的工具调用意图时才触发二次 LLM 调用
         tool_keywords = ["SELECT", "FROM", "DESCRIBE", "SHOW TABLES", "SHOW COLUMNS",
-                         "execute_sql", "get_schema", "generate_chart", "data_source_id"]
+                         "execute_sql", "get_schema", "generate_chart", "data_source_id",
+                         "执行查询", "查一下", "查表", "查数据"]
         if not any(kw in text.upper() for kw in tool_keywords):
             logger.info("[AI-Analyst] LLM reformat: 文本无工具关键词，跳过")
             return None
