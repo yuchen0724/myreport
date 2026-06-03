@@ -1157,9 +1157,19 @@ class AIAnalystService:
 
             # 检查是否有工具调用
             action = self._parse_action(response_text)
-            # 先逐 token 推送 LLM 回复（让用户实时看到 LLM 输出）
-            for token in stream_buffer:
-                yield {"type": "token", "content": token}
+
+            # 推送 LLM 回复中的文字部分（不推送 JSON 工具调用）
+            if action:
+                # 工具调用轮次：只推送 JSON 之前的文字部分
+                import re as _re_clean
+                json_start = _re_clean.search(r'\{"tool"\s*:', response_text)
+                text_part = response_text[:json_start.start()].strip() if json_start else response_text
+                if text_part and not text_part.startswith("{"):
+                    yield {"type": "token", "content": text_part}
+            else:
+                # 最终回答：推送全部 token
+                for token in stream_buffer:
+                    yield {"type": "token", "content": token}
 
             logger.info("[AI-Analyst] 🔧 step=%d/%d action=%s",
                          step + 1, self.MAX_AGENT_STEPS,
