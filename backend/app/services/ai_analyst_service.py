@@ -187,10 +187,12 @@ class AIAnalystService:
         if not ds:
             return {"success": False, "error": "数据源不存在", "columns": [], "rows": [], "total": 0}
 
-        if has_multi_level_table_reference(sql):
-            return {"success": False, "error": "SQL 表名格式错误：只允许 库名.表名，不允许多级前缀", "columns": [], "rows": [], "total": 0}
-        if has_foreign_schema_reference(sql, ds.database or ""):
-            return {"success": False, "error": "SQL 表名不属于当前数据源", "columns": [], "rows": [], "total": 0}
+        multi_error = has_multi_level_table_reference(sql)
+        if multi_error:
+            return {"success": False, "error": f"SQL 表名格式错误：只允许 库名.表名，不允许多级前缀。发现多级引用: {multi_error}", "columns": [], "rows": [], "total": 0}
+        foreign_error = has_foreign_schema_reference(sql, ds.database or "")
+        if foreign_error:
+            return {"success": False, "error": f"SQL 表名不属于当前数据源。当前数据源库名='{ds.database}'，但 SQL 中引用了其他库的表: {foreign_error}。请只使用当前数据源({ds.database})下的表，不要跨库查询。", "columns": [], "rows": [], "total": 0}
 
         try:
             from app.utils.db_executor import execute_query

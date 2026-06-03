@@ -38,7 +38,8 @@
 
 ## SQL 规则
 
+- 维表 是 同一个数据源下各个数据库通用的
 - 非聚合字段必须 GROUP BY
-- 门店名从 JOIN dim_store 维表获取
+- 门店名从 JOIN ads_cockpit_qck.dim_store 维表获取
 - 禁止 QUALIFY
 - 表名用 `库名.表名`
