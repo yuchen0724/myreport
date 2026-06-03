@@ -385,6 +385,16 @@ export default {
             if (lastTc) {
               lastTc.done = true
               lastTc.tool_output = data.tool_output
+              // 每个工具调用完成后立即推送为独立消息
+              messages.value.push({
+                role: 'assistant',
+                tool_calls: [{
+                  tool_name: lastTc.tool_name,
+                  tool_input: lastTc.tool_input,
+                  tool_output: data.tool_output || '',
+                }],
+                time: new Date().toLocaleTimeString(),
+              })
             }
             scrollToBottom()
           },
@@ -406,20 +416,15 @@ export default {
             scrollToBottom()
           },
           onDone(data) {
-            // 完成：将流式消息转为正式消息（含时间戳）
-            messages.value.push({
-              role: 'assistant',
-              content: streamingMessage.value,
-              time: new Date().toLocaleTimeString(),
-              tool_calls: streamingToolCalls.value.length > 0
-                ? streamingToolCalls.value.map(tc => ({
-                    tool_name: tc.tool_name,
-                    tool_input: tc.tool_input,
-                    tool_output: tc.tool_output || '',
-                  }))
-                : null,
-              chart_config: streamingChart.value,
-            })
+            // 完成：将最终文字转为正式消息（工具调用已在上方独立推送）
+            if (streamingMessage.value.trim()) {
+              messages.value.push({
+                role: 'assistant',
+                content: streamingMessage.value,
+                time: new Date().toLocaleTimeString(),
+                chart_config: streamingChart.value,
+              })
+            }
             conversationId.value = data.conversation_id || conversationId.value
             // 先渲染图表到正式消息，再关流式区域（避免图表闪烁消失）
             renderCharts()
