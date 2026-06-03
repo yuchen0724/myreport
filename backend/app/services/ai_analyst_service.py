@@ -1157,6 +1157,10 @@ class AIAnalystService:
 
             # 检查是否有工具调用
             action = self._parse_action(response_text)
+            # 先逐 token 推送 LLM 回复（让用户实时看到 LLM 输出）
+            for token in stream_buffer:
+                yield {"type": "token", "content": token}
+
             logger.info("[AI-Analyst] 🔧 step=%d/%d action=%s",
                          step + 1, self.MAX_AGENT_STEPS,
                          action.get("tool") if action else "NONE(最终回答)")
@@ -1176,10 +1180,8 @@ class AIAnalystService:
 
             if action is None:
                 logger.info("[AI-Analyst] ✅ 最终回答 step=%d, 共 %d tokens", step + 1, len(stream_buffer))
-                # 真流式：逐 token 推送
                 all_text.append(response_text)
-                for token in stream_buffer:
-                    yield {"type": "token", "content": token}
+                # 注：tokens 已在上方统一 yield，此处不再重复推送
 
                 self._save_conversation_history(conversation_id, [
                     {"role": "user", "content": message},
