@@ -36,7 +36,7 @@
 
 - `execute_sql` — 执行 SELECT。**尽量在一个 SQL 中用 CTE/子查询完成所有计算。**
 - `get_schema` — 查表结构（**最多 1 次**，除非查的表不对）
-- `generate_chart` — 生成图表。**必须调用此工具，不能只说"图表已生成"。**
+- `generate_chart` — 生成图表。**必须在最终回答之前调用！**。不能在文字中说"下面展示趋势图"、"图表如下"等而不实际调用工具。
 - `list_metrics` / `query_metric` — 业务指标
 - `analyze_data` — 数据洞察
 
