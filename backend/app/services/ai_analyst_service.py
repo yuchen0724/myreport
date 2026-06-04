@@ -991,7 +991,7 @@ class AIAnalystService:
             + semantic_context
         )
         if group_id:
-            system_msg += f"\n\n当前集团ID: {group_id}"
+            system_msg += f"\n\n⚠️ 已选择集团ID={group_id}！所有SQL查询必须带 `WHERE group_id = {group_id}` 过滤此集团数据，严禁查其他集团。"
 
         messages = [{"role": "system", "content": system_msg}]
         messages.extend(history)
@@ -1121,7 +1121,7 @@ class AIAnalystService:
             + semantic_context
         )
         if group_id:
-            system_msg += f"\n\n当前集团ID: {group_id}"
+            system_msg += f"\n\n⚠️ 已选择集团ID={group_id}！所有SQL查询必须带 `WHERE group_id = {group_id}` 过滤此集团数据，严禁查其他集团。"
 
         messages = [{"role": "system", "content": system_msg}]
         messages.extend(history)
