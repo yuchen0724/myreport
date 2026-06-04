@@ -40,11 +40,19 @@
 - `list_metrics` / `query_metric` — 业务指标
 - `analyze_data` — 数据洞察
 
-## SQL 规则
+## SQL 规则（违反会导致查询失败）
 
+### 🔴 规则1：聚合查询必须 GROUP BY
+**只要 SQL 中包含 SUM/COUNT/AVG/MAX/MIN 等聚合函数，SELECT 中的每个非聚合字段都必须在 GROUP BY 中出现。这是 Doris 的硬性要求，遗漏必报错。**
+```
+✅ SELECT store_code, SUM(amt) FROM t GROUP BY store_code
+❌ SELECT store_code, SUM(amt) FROM t              -- 缺少 GROUP BY
+❌ SELECT store_code, store_name, SUM(amt) FROM t GROUP BY store_code  -- store_name 不在 GROUP BY 中
+```
+
+### 其他规则
 - **如果当前消息中指定了集团ID，所有SQL的WHERE条件必须带上该集团ID，严禁查询其他集团的数据。**
 - 维表是同一个数据源下各个数据库通用的
-- 非聚合字段必须 GROUP BY
 - 门店名从 JOIN 门店维表获取（具体维表名以语义层文档为准）
 - 禁止 QUALIFY
 - 表名用 `库名.表名`
@@ -75,5 +83,3 @@ WHERE dt >= CURRENT_DATE - INTERVAL 29 DAY                       -- 不支持
 2. 不要用 `DATE_SUB(CURRENT_DATE, 29)` 这种复杂嵌套函数
 3. 表中 `dt` 字段类型为 bigint（YYYYMMDD 格式），直接比较整数即可
 4. 如果需要对日期进行计算，先用 `CURRENT_DATE` 获取今天日期，再转换为 YYYYMMDD 整数
-- 禁止 QUALIFY
-- 表名用 `库名.表名`
