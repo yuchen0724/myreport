@@ -111,10 +111,10 @@
             <!-- 反馈按钮 -->
             <div v-if="msg.role === 'assistant' && !isStreaming" class="feedback-btns">
               <el-button size="small" text circle :type="msg._liked === true ? 'primary' : ''" @click="likeMessage(idx)">
-                <el-icon><ThumbsUp /></el-icon>
+                <el-icon><Promotion /></el-icon>
               </el-button>
               <el-button size="small" text circle :type="msg._liked === false ? 'danger' : ''" @click="showFeedback(idx)">
-                <el-icon><ThumbsDown /></el-icon>
+                <el-icon><CloseBold /></el-icon>
               </el-button>
             </div>
 
@@ -219,7 +219,7 @@
 <script>
 import { ref, nextTick, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { MagicStick, User, SetUp, Promotion, Close, ThumbsUp, ThumbsDown } from '@element-plus/icons-vue'
+import { MagicStick, User, SetUp, Promotion, CloseBold } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { chatStream } from '@/api/aiAnalyst'
 import { getGroups } from '@/api/nl2sql'
@@ -238,7 +238,7 @@ function renderMarkdown(text) {
 
 export default {
   name: 'AIAnalyst',
-  components: { MagicStick, User, SetUp, Promotion, Close, ThumbsUp, ThumbsDown },
+  components: { MagicStick, User, SetUp, Promotion, CloseBold },
   setup() {
     // 会话兜底：即使页面 full reload（例如调试器开关），也尽量保留 ai-analyst 对话内容
     const SESSION_KEY = 'ai_analyst_session_v1'
