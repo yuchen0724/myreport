@@ -1045,11 +1045,16 @@ class AIAnalystService:
         tools_prompt = self._build_tools_prompt(data_source_id)
         semantic_context = build_semantic_runtime_context(self.db, data_source_id, message, max_chars=0)
 
+        # 历史修正案例（few-shot 学习）
+        from app.services.sql_correction_service import SqlCorrectionService
+        few_shot = SqlCorrectionService(self.db).build_few_shot_prompt(message, data_source_id)
+
         # 构建完整对话
         system_prompt = self._load_system_prompt()
         system_msg = (
             system_prompt + "\n\n"
             + tools_prompt + "\n\n"
+            + few_shot + "\n\n"
             + "### 语义层文档（必须优先阅读，这是数据逻辑的唯一权威来源）\n\n"
             + semantic_context
         )
@@ -1176,10 +1181,15 @@ class AIAnalystService:
         tools_prompt = self._build_tools_prompt(data_source_id)
         semantic_context = build_semantic_runtime_context(self.db, data_source_id, message, max_chars=0)
 
+        # 历史修正案例（few-shot 学习）
+        from app.services.sql_correction_service import SqlCorrectionService
+        few_shot = SqlCorrectionService(self.db).build_few_shot_prompt(message, data_source_id)
+
         system_prompt = self._load_system_prompt()
         system_msg = (
             system_prompt + "\n\n"
             + tools_prompt + "\n\n"
+            + few_shot + "\n\n"
             + "### 语义层文档（必须优先阅读，这是数据逻辑的唯一权威来源）\n\n"
             + semantic_context
         )

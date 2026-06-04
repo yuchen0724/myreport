@@ -18,8 +18,11 @@ from app.schemas.ai_analyst import (
     AIAnalystChatResponse,
     AIAnalystSchemaRequest,
     AIAnalystSchemaResponse,
+    AIAnalystFeedbackRequest,
+    AIAnalystFeedbackResponse,
 )
 from app.services.ai_analyst_service import AIAnalystService
+from app.services.sql_correction_service import SqlCorrectionService
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +107,33 @@ async def chat_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/feedback", response_model=AIAnalystFeedbackResponse)
+async def feedback(
+    request: AIAnalystFeedbackRequest,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    """
+    提交 SQL 修正反馈，用于持续优化 LLM 生成质量。
+
+    - **data_source_id**: 数据源 ID
+    - **question**: 用户原始问题
+    - **original_sql**: LLM 生成的有问题的 SQL
+    - **corrected_sql**: 用户修正后的正确 SQL
+    - **user_feedback**: 用户的文字反馈（可选）
+    """
+    service = SqlCorrectionService(db)
+    record = service.save_correction(
+        data_source_id=request.data_source_id,
+        question=request.question,
+        original_sql=request.original_sql,
+        corrected_sql=request.corrected_sql,
+        user_feedback=request.user_feedback,
+        user_id=current_user_id,
+    )
+    return AIAnalystFeedbackResponse(id=record.id, message="感谢反馈，我们会持续优化")
 
 
 @router.get("/schema", response_model=AIAnalystSchemaResponse)

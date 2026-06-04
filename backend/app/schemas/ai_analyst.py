@@ -57,3 +57,18 @@ class AIAnalystSchemaResponse(BaseModel):
     """获取表结构响应"""
     tables: List[Dict[str, Any]] = Field(..., description="表结构信息")
     total_count: int = Field(..., description="表总数")
+
+
+class AIAnalystFeedbackRequest(BaseModel):
+    """SQL 修正反馈请求"""
+    data_source_id: int = Field(..., description="数据源 ID")
+    question: str = Field(..., description="用户原始问题")
+    original_sql: str = Field(..., description="LLM 生成的原始 SQL")
+    corrected_sql: str = Field(..., description="用户修正后的 SQL")
+    user_feedback: Optional[str] = Field(None, description="用户的文字反馈")
+
+
+class AIAnalystFeedbackResponse(BaseModel):
+    """SQL 修正反馈响应"""
+    id: int = Field(..., description="修正记录 ID")
+    message: str = Field("感谢反馈，我们会持续优化", description="提示消息")

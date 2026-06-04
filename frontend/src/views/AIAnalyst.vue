@@ -108,6 +108,35 @@
               </div>
             </div>
 
+            <!-- 反馈按钮 -->
+            <div v-if="msg.role === 'assistant' && !isStreaming" class="feedback-btns">
+              <el-button size="small" text circle :type="msg._liked === true ? 'primary' : ''" @click="likeMessage(idx)">
+                <el-icon><Promotion /></el-icon>
+              </el-button>
+              <el-button size="small" text circle :type="msg._liked === false ? 'danger' : ''" @click="showFeedback(idx)">
+                <el-icon><Close /></el-icon>
+              </el-button>
+            </div>
+
+            <!-- 反馈对话框 -->
+            <el-dialog v-model="msg._showFeedback" title="反馈问题" width="500px" :close-on-click-modal="false">
+              <el-form label-position="top">
+                <el-form-item label="原始 SQL">
+                  <pre class="code-block">{{ getToolSql(msg.tool_calls) }}</pre>
+                </el-form-item>
+                <el-form-item label="修正后的 SQL">
+                  <el-input v-model="msg._correctedSql" type="textarea" :rows="4" placeholder="请输入修正后的 SQL"></el-input>
+                </el-form-item>
+                <el-form-item label="补充说明（可选）">
+                  <el-input v-model="msg._userFeedback" type="textarea" :rows="2" placeholder="还有什么需要补充的？"></el-input>
+                </el-form-item>
+              </el-form>
+              <template #footer>
+                <el-button @click="msg._showFeedback = false">取消</el-button>
+                <el-button type="primary" @click="submitFeedback(idx)" :loading="msg._submitting">提交反馈</el-button>
+              </template>
+            </el-dialog>
+
             <!-- 图表展示 -->
             <div v-if="msg.chart_config" class="chart-container">
               <div :id="'chart-' + idx" class="chart"></div>
@@ -486,6 +515,61 @@ export default {
       }
     }
 
+    function getToolSql(toolCalls) {
+      if (!toolCalls || toolCalls.length === 0) return ''
+      const sqlCall = toolCalls.find(tc => tc.tool_name === 'execute_sql')
+      return sqlCall ? (sqlCall.tool_input?.sql || sqlCall.tool_output || '') : ''
+    }
+
+    function likeMessage(idx) {
+      const msg = messages.value[idx]
+      if (!msg) return
+      if (msg._liked === true) {
+        msg._liked = undefined
+      } else {
+        msg._liked = true
+        msg._disliked = false
+      }
+    }
+
+    function showFeedback(idx) {
+      const msg = messages.value[idx]
+      if (!msg) return
+      msg._showFeedback = true
+      msg._correctedSql = getToolSql(msg.tool_calls)
+      msg._userFeedback = ''
+      msg._liked = false
+    }
+
+    async function submitFeedback(idx) {
+      const msg = messages.value[idx]
+      if (!msg) return
+      msg._submitting = true
+      try {
+        const body = JSON.stringify({
+          data_source_id: dataSourceId.value,
+          question: messages.value.filter(m => m.role === 'user').pop()?.content || '',
+          original_sql: getToolSql(msg.tool_calls),
+          corrected_sql: msg._correctedSql || getToolSql(msg.tool_calls),
+          user_feedback: msg._userFeedback || '',
+        })
+        await fetch('/api/ai-analyst/feedback', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${sessionStorage.getItem('token')}`,
+          },
+          body,
+        })
+        ElMessage.success('感谢反馈！')
+        msg._showFeedback = false
+      } catch (e) {
+        ElMessage.error('提交失败: ' + e.message)
+      } finally {
+        msg._submitting = false
+      }
+    }
+
     onMounted(() => {
       // 恢复会话状态
       restoreState()
@@ -753,6 +837,15 @@ export default {
 .input-area .el-input {
   flex: 1;
 }
+
+.feedback-btns {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+.feedback-btns:hover { opacity: 1; }
 
 .streaming-indicator {
   display: inline-flex;
