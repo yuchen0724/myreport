@@ -168,16 +168,30 @@ class AIAnalystService:
         return f"可用工具: execute_sql, get_schema, generate_chart, analyze_data, list_metrics, query_metric (data_source_id={data_source_id})"
     # ── 工具执行 ──────────────────────────────────────────────────
 
+    def _precheck_sql(self, sql: str) -> Optional[str]:
+        """执行前快速语法检查，返回错误消息或 None"""
+        import re
+        upper = sql.upper().strip()
+        # 检查聚合查询是否缺少 GROUP BY
+        has_agg = any(re.search(rf'\b{fn}\s*\(', sql, re.IGNORECASE) for fn in ['SUM', 'COUNT', 'AVG', 'MAX', 'MIN', 'GROUP_CONCAT'])
+        has_group_by = 'GROUP BY' in upper
+        # 仅当有聚合函数且非子查询时检查
+        if has_agg and not has_group_by and ('SELECT' in upper):
+            # 提取 SELECT 后的非聚合字段
+            return "SQL 中使用了聚合函数(SUM/COUNT/AVG等)但没有 GROUP BY 子句。含聚合函数的查询必须 GROUP BY 所有非聚合字段。"
+        return None
+
     def execute_sql_tool(self, sql: str, data_source_id: int) -> Dict[str, Any]:
         """执行 SQL 查询工具"""
-        # 验证 SQL 安全
         sql = strip_trailing_semicolon(sql)
         if has_forbidden_sql_tokens(sql):
             return {"success": False, "error": "SQL 验证失败: 不允许使用 QUALIFY", "columns": [], "rows": [], "total": 0}
-        # 禁止直接查询 information_schema（应使用 get_schema 工具）
         sql_upper = sql.upper()
         if "FROM INFORMATION_SCHEMA" in sql_upper or "JOIN INFORMATION_SCHEMA" in sql_upper:
             return {"success": False, "error": "禁止直接查询 information_schema。请使用 get_schema 工具来获取表结构。", "columns": [], "rows": [], "total": 0}
+        precheck = self._precheck_sql(sql)
+        if precheck:
+            return {"success": False, "error": f"SQL 预检失败: {precheck}", "columns": [], "rows": [], "total": 0}
         is_valid, msg = SQLValidator.validate(sql)
         if not is_valid:
             return {"success": False, "error": f"SQL 验证失败: {msg}", "columns": [], "rows": [], "total": 0}
@@ -192,25 +206,74 @@ class AIAnalystService:
             return {"success": False, "error": f"SQL 表名格式错误：只允许 库名.表名，不允许多级前缀。发现多级引用: {multi_error}", "columns": [], "rows": [], "total": 0}
         # 跨库查询（如 JOIN ads_cockpit_qck.dim_store）在 Doris 中允许，不拦截
 
+        # SQL 结果缓存（同一SQL 5分钟内重复执行直接返回）
+        cache_key = f"sql_cache:{hashlib.md5(sql.encode()).hexdigest()}:{data_source_id}"
+        try:
+            r = get_redis()
+            cached = r.get(cache_key)
+            if cached:
+                logger.info("[AI-Analyst] SQL 缓存命中: %s", sql[:80])
+                return json.loads(cached)
+        except Exception:
+            pass
+
         try:
             from app.utils.db_executor import execute_query
             rows, columns = execute_query(ds, sql)
             total = len(rows)
-            # 限制返回数据量避免 token 爆炸，并把行数据转成 dict，保证图表能按字段名读取
             preview_rows = rows[:100]
             if preview_rows and columns:
                 if not isinstance(preview_rows[0], dict):
                     preview_rows = [dict(zip(columns, row)) if isinstance(row, (list, tuple)) else row for row in preview_rows]
-            return {
+            result = {
                 "success": True,
                 "columns": columns,
                 "rows": preview_rows,
                 "total": total,
                 "preview_truncated": total > 100,
             }
+            # 写入缓存
+            try:
+                r = get_redis()
+                r.setex(cache_key, 300, json.dumps(result, ensure_ascii=False, default=str))
+            except Exception:
+                pass
+            return result
         except Exception as e:
-            logger.error(f"[AI-Analyst] SQL 执行失败: {e}")
-            return {"success": False, "error": str(e), "columns": [], "rows": [], "total": 0}
+            error_msg = str(e)
+            logger.error("[AI-Analyst] SQL 执行失败: %s", error_msg)
+            # ── 自动重试：常见错误自动修正后重试一次 ──
+            retry_sql = None
+            # 1) Column 'xxx' cannot be resolved → 可能是多了别名前缀
+            if "cannot be resolved" in error_msg:
+                import re as _re_retry
+                # 尝试去掉表名前缀（如 sw.store_code → store_code）
+                stripped = _re_retry.sub(r'\b\w+\.(\w+)', r'\1', sql)
+                if stripped != sql:
+                    retry_sql = stripped
+            # 2) Unknown column → 尝试去掉所有表名前缀
+            if "Unknown column" in error_msg and retry_sql is None:
+                import re as _re_retry2
+                retry_sql = _re_retry2.sub(r'\b\w+\.(\w+)', r'\1', sql)
+            if retry_sql:
+                try:
+                    rows2, cols2 = execute_query(ds, retry_sql)
+                    preview2 = rows2[:100] if rows2 else []
+                    if preview2 and cols2 and not isinstance(preview2[0], dict):
+                        preview2 = [dict(zip(cols2, r)) if isinstance(r, (list, tuple)) else r for r in preview2]
+                    retry_result = {
+                        "success": True,
+                        "columns": cols2,
+                        "rows": preview2,
+                        "total": len(rows2),
+                        "preview_truncated": len(rows2) > 100,
+                        "auto_retried": True,
+                    }
+                    logger.info("[AI-Analyst] SQL 自动重试成功: 去掉了表名前缀")
+                    return retry_result
+                except Exception:
+                    pass
+            return {"success": False, "error": error_msg, "columns": [], "rows": [], "total": 0}
 
     def _is_admin_user(self, user_id: Optional[int]) -> bool:
         if user_id is None:
