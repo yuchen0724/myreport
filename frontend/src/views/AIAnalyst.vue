@@ -111,7 +111,7 @@
             <!-- 反馈按钮 -->
             <div v-if="msg.role === 'assistant' && !isStreaming && msg.tool_calls?.length" class="feedback-btns">
               <el-button size="small" text circle @click="showFeedback(idx)">
-                <el-icon><ChatLineSquare /></el-icon>
+                <el-icon><Promotion /></el-icon>
               </el-button>
             </div>
 
@@ -216,7 +216,7 @@
 <script>
 import { ref, nextTick, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { MagicStick, User, SetUp, Promotion, ChatLineSquare } from '@element-plus/icons-vue'
+import { MagicStick, User, SetUp, Promotion } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { chatStream } from '@/api/aiAnalyst'
 import { getGroups } from '@/api/nl2sql'
@@ -235,7 +235,7 @@ function renderMarkdown(text) {
 
 export default {
   name: 'AIAnalyst',
-  components: { MagicStick, User, SetUp, Promotion, ChatLineSquare },
+  components: { MagicStick, User, SetUp, Promotion },
   setup() {
     // 会话兜底：即使页面 full reload（例如调试器开关），也尽量保留 ai-analyst 对话内容
     const SESSION_KEY = 'ai_analyst_session_v1'
