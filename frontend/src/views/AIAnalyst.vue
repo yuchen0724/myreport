@@ -118,25 +118,6 @@
               </el-button>
             </div>
 
-            <!-- 反馈对话框 -->
-            <el-dialog v-model="msg._showFeedback" title="反馈问题" width="500px" :close-on-click-modal="false">
-              <el-form label-position="top">
-                <el-form-item label="原始 SQL">
-                  <pre class="code-block">{{ getToolSql(msg.tool_calls) }}</pre>
-                </el-form-item>
-                <el-form-item label="修正后的 SQL">
-                  <el-input v-model="msg._correctedSql" type="textarea" :rows="4" placeholder="请输入修正后的 SQL"></el-input>
-                </el-form-item>
-                <el-form-item label="补充说明（可选）">
-                  <el-input v-model="msg._userFeedback" type="textarea" :rows="2" placeholder="还有什么需要补充的？"></el-input>
-                </el-form-item>
-              </el-form>
-              <template #footer>
-                <el-button @click="msg._showFeedback = false">取消</el-button>
-                <el-button type="primary" @click="submitFeedback(idx)" :loading="msg._submitting">提交反馈</el-button>
-              </template>
-            </el-dialog>
-
             <!-- 图表展示 -->
             <div v-if="msg.chart_config" class="chart-container">
               <div :id="'chart-' + idx" class="chart"></div>
@@ -158,7 +139,26 @@
           </div>
         </div>
 
-        <!-- 流式消息占位 -->
+        <!-- 反馈对话框（单例） -->
+      <el-dialog v-model="feedbackDialogVisible" title="反馈问题" width="500px" :close-on-click-modal="false">
+        <el-form label-position="top">
+          <el-form-item label="原始 SQL">
+            <pre class="code-block">{{ feedbackSql }}</pre>
+          </el-form-item>
+          <el-form-item label="修正后的 SQL">
+            <el-input v-model="feedbackCorrectedSql" type="textarea" :rows="4" placeholder="请输入修正后的 SQL"></el-input>
+          </el-form-item>
+          <el-form-item label="补充说明（可选）">
+            <el-input v-model="feedbackUserText" type="textarea" :rows="2" placeholder="还有什么需要补充的？"></el-input>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="feedbackDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitFeedback" :loading="feedbackSubmitting">提交反馈</el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 流式消息占位 -->
         <div v-if="isStreaming && (streamingMessage || streamingChart)" class="message assistant">
           <div class="message-avatar">
             <el-icon :size="20"><MagicStick /></el-icon>
@@ -266,6 +266,12 @@ export default {
     ]
 
     const showGroupSelect = ref(false)
+    const feedbackDialogVisible = ref(false)
+    const feedbackTarget = ref(null)
+    const feedbackSql = ref('')
+    const feedbackCorrectedSql = ref('')
+    const feedbackUserText = ref('')
+    const feedbackSubmitting = ref(false)
 
     // 页面初始化：从 sessionStorage 恢复会话
     function persistState() {
@@ -535,23 +541,24 @@ export default {
     function showFeedback(idx) {
       const msg = messages.value[idx]
       if (!msg) return
-      msg._showFeedback = true
-      msg._correctedSql = getToolSql(msg.tool_calls)
-      msg._userFeedback = ''
-      msg._liked = false
+      feedbackTarget.value = idx
+      feedbackSql.value = getToolSql(msg.tool_calls)
+      feedbackCorrectedSql.value = feedbackSql.value
+      feedbackUserText.value = ''
+      feedbackDialogVisible.value = true
     }
 
-    async function submitFeedback(idx) {
-      const msg = messages.value[idx]
+    async function submitFeedback() {
+      const msg = messages.value[feedbackTarget.value]
       if (!msg) return
-      msg._submitting = true
+      feedbackSubmitting.value = true
       try {
         const body = JSON.stringify({
           data_source_id: dataSourceId.value,
           question: messages.value.filter(m => m.role === 'user').pop()?.content || '',
-          original_sql: getToolSql(msg.tool_calls),
-          corrected_sql: msg._correctedSql || getToolSql(msg.tool_calls),
-          user_feedback: msg._userFeedback || '',
+          original_sql: feedbackSql.value,
+          corrected_sql: feedbackCorrectedSql.value || feedbackSql.value,
+          user_feedback: feedbackUserText.value || '',
         })
         await fetch('/api/ai-analyst/feedback', {
           method: 'POST',
@@ -562,11 +569,11 @@ export default {
           body,
         })
         ElMessage.success('感谢反馈！')
-        msg._showFeedback = false
+        feedbackDialogVisible.value = false
       } catch (e) {
         ElMessage.error('提交失败: ' + e.message)
       } finally {
-        msg._submitting = false
+        feedbackSubmitting.value = false
       }
     }
 
@@ -637,6 +644,7 @@ export default {
       isStreaming,
       streamingMessage,
       streamingToolCalls,
+      streamingChart,
       dataSourceId,
       groupId,
       dataSources,
@@ -650,6 +658,14 @@ export default {
       clearChat,
       renderMarkdown,
       formatJson,
+      likeMessage,
+      showFeedback,
+      submitFeedback,
+      feedbackDialogVisible,
+      feedbackSql,
+      feedbackCorrectedSql,
+      feedbackUserText,
+      feedbackSubmitting,
     }
   },
 }
