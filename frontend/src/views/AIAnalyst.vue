@@ -109,12 +109,9 @@
             </div>
 
             <!-- 反馈按钮 -->
-            <div v-if="msg.role === 'assistant' && !isStreaming" class="feedback-btns">
-              <el-button size="small" text circle :type="msg._liked === true ? 'primary' : ''" @click="likeMessage(idx)">
-                <el-icon><Promotion /></el-icon>
-              </el-button>
-              <el-button size="small" text circle :type="msg._liked === false ? 'danger' : ''" @click="showFeedback(idx)">
-                <el-icon><CloseBold /></el-icon>
+            <div v-if="msg.role === 'assistant' && !isStreaming && msg.tool_calls?.length" class="feedback-btns">
+              <el-button size="small" text circle @click="showFeedback(idx)">
+                <el-icon><ChatLineSquare /></el-icon>
               </el-button>
             </div>
 
@@ -219,7 +216,7 @@
 <script>
 import { ref, nextTick, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { MagicStick, User, SetUp, Promotion, CloseBold } from '@element-plus/icons-vue'
+import { MagicStick, User, SetUp, Promotion, ChatLineSquare } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { chatStream } from '@/api/aiAnalyst'
 import { getGroups } from '@/api/nl2sql'
@@ -238,7 +235,7 @@ function renderMarkdown(text) {
 
 export default {
   name: 'AIAnalyst',
-  components: { MagicStick, User, SetUp, Promotion, CloseBold },
+  components: { MagicStick, User, SetUp, Promotion, ChatLineSquare },
   setup() {
     // 会话兜底：即使页面 full reload（例如调试器开关），也尽量保留 ai-analyst 对话内容
     const SESSION_KEY = 'ai_analyst_session_v1'
@@ -527,17 +524,6 @@ export default {
       return sqlCall ? (sqlCall.tool_input?.sql || sqlCall.tool_output || '') : ''
     }
 
-    function likeMessage(idx) {
-      const msg = messages.value[idx]
-      if (!msg) return
-      if (msg._liked === true) {
-        msg._liked = undefined
-      } else {
-        msg._liked = true
-        msg._disliked = false
-      }
-    }
-
     function showFeedback(idx) {
       const msg = messages.value[idx]
       if (!msg) return
@@ -658,7 +644,6 @@ export default {
       clearChat,
       renderMarkdown,
       formatJson,
-      likeMessage,
       showFeedback,
       submitFeedback,
       feedbackDialogVisible,
@@ -855,13 +840,8 @@ export default {
 }
 
 .feedback-btns {
-  display: flex;
-  gap: 4px;
   margin-top: 4px;
-  opacity: 0.4;
-  transition: opacity 0.2s;
 }
-.feedback-btns:hover { opacity: 1; }
 
 .streaming-indicator {
   display: inline-flex;
