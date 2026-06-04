@@ -48,5 +48,32 @@
 - 门店名从 JOIN 门店维表获取（具体维表名以语义层文档为准）
 - 禁止 QUALIFY
 - 表名用 `库名.表名`
+
+## Doris 日期函数（必须使用）
+
+当前数据源为 **Apache Doris/StarRocks**。日期过滤必须使用**整数比较**格式：
+```sql
+-- ✅ 正确
+WHERE dt >= 20260601 AND dt < 20260602
+WHERE dt BETWEEN 20260501 AND 20260601
+
+-- ❌ 错误（不要使用）
+WHERE dt >= DATE_FORMAT(DATE_SUB(CURRENT_DATE, 29), '%Y%m%d')  -- 不支持
+WHERE dt >= CURRENT_DATE - INTERVAL 29 DAY                       -- 不支持
+```
+
+**支持的日期函数**：
+- 获取当前日期: `CURRENT_DATE` 或 `CURDATE()`
+- 日期加减: `DATE_ADD(date, INTERVAL N DAY)`、`DATE_SUB(date, INTERVAL N DAY)`
+- 日期格式化: `DATE_FORMAT(date, '%Y%m%d')`
+- 字符串转日期: `STR_TO_DATE(str, '%Y%m%d')`
+- 日期差: `DATEDIFF(end, start)`
+- 获取日期部分: `YEAR(date)`、`MONTH(date)`、`DAY(date)`
+
+**最佳实践**：
+1. 日期范围过滤优先用整数比较：`dt >= 20260501 AND dt < 20260601`
+2. 不要用 `DATE_SUB(CURRENT_DATE, 29)` 这种复杂嵌套函数
+3. 表中 `dt` 字段类型为 bigint（YYYYMMDD 格式），直接比较整数即可
+4. 如果需要对日期进行计算，先用 `CURRENT_DATE` 获取今天日期，再转换为 YYYYMMDD 整数
 - 禁止 QUALIFY
 - 表名用 `库名.表名`
