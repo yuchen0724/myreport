@@ -512,13 +512,26 @@ class LLMClient:
             yield self.chat(messages, temperature)
 
     def _stream_langchain(self, messages, temperature):
-        """LangChain 流式调用"""
+        """LangChain 流式调用（兼容多种模型响应格式）"""
         lc_messages = self._build_langchain_messages(messages)
         model = self._build_langchain_chat_model(temperature)
         for chunk in model.stream(lc_messages):
-            content = chunk.content if hasattr(chunk, "content") else str(chunk)
-            if content:
-                yield content
+            raw = chunk.content if hasattr(chunk, "content") else chunk
+            # 兼容不同模型返回格式：str / list[dict] / list[str]
+            if isinstance(raw, str):
+                if raw:
+                    yield raw
+            elif isinstance(raw, list):
+                for item in raw:
+                    if isinstance(item, str):
+                        if item:
+                            yield item
+                    elif isinstance(item, dict):
+                        text = item.get("text") or item.get("content") or ""
+                        if text:
+                            yield text
+            elif raw:
+                yield str(raw)
 
     def _stream_openai(self, messages, temperature):
         """OpenAI 原生 httpx 流式调用"""
