@@ -42,6 +42,7 @@
 
 ## SQL 规则
 
+- **如果当前消息中指定了集团ID（如 `⚠️ 已选择集团ID=812`），所有 SQL 查询WHERE必须带 `group_id = 812`，严禁查询其他集团的数据。**
 - 维表 是 同一个数据源下各个数据库通用的
 - 非聚合字段必须 GROUP BY
 - 门店名从 JOIN ads_cockpit_qck.dim_store 维表获取
