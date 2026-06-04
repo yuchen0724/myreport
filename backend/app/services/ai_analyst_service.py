@@ -1194,7 +1194,8 @@ class AIAnalystService:
         all_tool_calls = []
         all_text = []
         last_successful_result = None
-        sql_fail_count = 0  # 连续 SQL 失败次数
+        sql_fail_count = 0
+        queried_schema = False  # 是否已调过 get_schema
 
         for step in range(self.MAX_AGENT_STEPS):
             llm_client = self._get_llm_client()
@@ -1274,6 +1275,53 @@ class AIAnalystService:
                          step + 1, tool_name,
                          json.dumps(tool_input, ensure_ascii=False)[:200])
             yield {"type": "tool_call", "tool_name": tool_name, "tool_input": tool_input}
+
+            # SQL 执行进度反馈：超 5 秒推送进度事件
+            if tool_name == "execute_sql":
+                import threading as _th
+                import time as _time
+                _tool_result_holder = []
+                _done_event = _th.Event()
+
+                def _run_tool():
+                    try:
+                        _tool_result_holder.append(self._execute_tool(action, data_source_id, user_id=user_id))
+                    except Exception as _e:
+                        _tool_result_holder.append({"success": False, "error": str(_e), "columns": [], "rows": [], "total": 0})
+                    finally:
+                        _done_event.set()
+
+                _t = _th.Thread(target=_run_tool, daemon=True)
+                _t.start()
+                _waited = 0
+                while not _done_event.is_set():
+                    _done_event.wait(timeout=1)
+                    _waited += 1
+                    if _waited >= 5:  # 5秒后推送进度
+                        yield {"type": "progress", "message": f"SQL 查询执行中，已等待 {_waited} 秒..."}
+                tool_result = _tool_result_holder[0] if _tool_result_holder else {"success": False, "error": "工具执行异常", "columns": [], "rows": [], "total": 0}
+            else:
+                tool_result = self._execute_tool(action, data_source_id, user_id=user_id)
+
+            # 自动 schema 注入：首次 execute_sql 前未调 get_schema 则自动注入
+            if tool_name == "execute_sql" and not queried_schema:
+                sql_text = tool_input.get("sql", "")
+                import re as _re_schema
+                tables_in_sql = _re_schema.findall(r'(?:FROM|JOIN)\s+(?:ads_cockpit_freedom\.)?(\w+)', sql_text, _re_schema.IGNORECASE)
+                injected = []
+                for tbl in set(tables_in_sql):
+                    schema_info = self.get_schema_tool(data_source_id, table_name=tbl)
+                    if schema_info.get("success") and schema_info.get("tables"):
+                        cols = schema_info["tables"][0].get("columns", [])
+                        col_list = ", ".join(f"{c['column']}({c['type']})" for c in cols[:30])
+                        injected.append(f"表 `{tbl}` 的字段:\n{col_list}")
+                if injected:
+                    hint = "## 自动注入的表结构\n" + "\n\n".join(injected) + "\n\n请基于这些字段名编写正确的 SQL。注意：门店名须 JOIN dim_store 维表获取。"
+                    messages.append({"role": "system", "content": hint})
+                    logger.info("[AI-Analyst] 首次 execute_sql 自动注入 %d 个表的 schema", len(injected))
+                queried_schema = True
+            if tool_name == "get_schema":
+                queried_schema = True
 
             tool_result = self._execute_tool(action, data_source_id, user_id=user_id)
             tool_status = "✅" if tool_result.get("success") else "❌"

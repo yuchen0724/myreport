@@ -14,6 +14,7 @@ export interface AiAnalysisResponse {
 
 export interface StreamCallbacks {
   onToken?: (content: string) => void
+  onProgress?: (message: string) => void
   onToolCall?: (data: { tool_name: string; tool_input: Record<string, unknown> }) => void
   onToolResult?: (data: { tool_name: string; tool_output: string }) => void
   onChart?: (config: Record<string, unknown>) => void
@@ -99,6 +100,9 @@ export function chatStream(
               break
             case "error":
               callbacks.onError?.((event.error as string) || "Unknown error")
+              break
+            case "progress":
+              callbacks.onProgress?.((event.message as string) || "")
               break
           }
           // 每个事件之间等待一个 animation frame（确保 Vue DOM 已更新）

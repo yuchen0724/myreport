@@ -363,6 +363,10 @@ export default {
             streamingMessage.value += content
             scrollToBottom()
           },
+          onProgress(msg) {
+            streamingMessage.value = '⏳ ' + msg
+            scrollToBottom()
+          },
           onToolCall(data) {
             // 将当前累积的文字作为一条独立消息输出（含时间戳）
             if (streamingMessage.value.trim()) {
