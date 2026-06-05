@@ -24,7 +24,23 @@ class SqlCorrectionService:
         corrected_sql: str,
         user_feedback: Optional[str] = None,
         user_id: Optional[int] = None,
-    ) -> SqlCorrection:
+    ) -> Optional[SqlCorrection]:
+        """保存一条修正记录（自动去重：同数据源同 corrected_sql 只保存一次）"""
+        if not corrected_sql:
+            return None
+        # 去重检查
+        existing = (
+            self.db.query(SqlCorrection)
+            .filter(
+                SqlCorrection.data_source_id == data_source_id,
+                SqlCorrection.corrected_sql == corrected_sql,
+            )
+            .first()
+        )
+        if existing:
+            logger.info("[SqlCorrection] 跳过重复: id=%s data_source=%d sql=%s",
+                         existing.id, data_source_id, corrected_sql[:60])
+            return existing
         """保存一条修正记录"""
         # 提取表名
         tables = self._extract_tables(original_sql) | self._extract_tables(corrected_sql)
