@@ -258,6 +258,28 @@ class AIAnalystService:
         except Exception as e:
             error_msg = str(e)
             logger.error("[AI-Analyst] SQL 执行失败: %s", error_msg)
+
+            # ── 函数兼容性学习：检测不支持的函数并记录 ──
+            import re as _re_fn
+            _fn_match = _re_fn.search(r"(?:function|'\w+')\s+(\w+)\s+(?:does not exist|not found|cannot be resolved|is not recognized)", error_msg, _re_fn.IGNORECASE)
+            if not _fn_match:
+                _fn_match = _re_fn.search(r"(?:Unknown|unrecognized|FunctionNotExist)\s+.*?['\"]?(\w+)\s*\(", error_msg, _re_fn.IGNORECASE)
+            if _fn_match:
+                _bad_fn = _fn_match.group(1).upper()
+                _fn_cache_key = f"bad_functions:{ds.database}:{_bad_fn}"
+                try:
+                    _r = get_redis()
+                    if not _r.get(_fn_cache_key):
+                        # 实际测试：SELECT bad_fn(1) 确认是否真的不支持
+                        try:
+                            execute_query(ds, f"SELECT {_bad_fn}(1) LIMIT 0")
+                            logger.info("[AI-Analyst] 函数 %s 实际可用，不拦截", _bad_fn)
+                        except Exception:
+                            _r.setex(_fn_cache_key, 86400, "1")
+                            logger.info("[AI-Analyst] 📚 学习到不支持的函数: %s", _bad_fn)
+                except Exception:
+                    pass
+
             # ── 自动重试：常见错误自动修正后重试一次 ──
             retry_sql = None
             # 1) Column 'xxx' cannot be resolved → 可能是多了别名前缀
@@ -1065,12 +1087,26 @@ class AIAnalystService:
         from app.services.sql_correction_service import SqlCorrectionService
         few_shot = SqlCorrectionService(self.db).build_few_shot_prompt(message, data_source_id)
 
+        # 从 Redis 加载不支持的函数列表
+        _bad_fn_list = ""
+        try:
+            _r = get_redis()
+            _ds_obj = self.ds_repo.get_by_id(data_source_id)
+            if _ds_obj and _ds_obj.database:
+                _bad_keys = _r.keys(f"bad_functions:{_ds_obj.database}:*")
+                if _bad_keys:
+                    _bad_names = [k.decode().split(":")[-1] for k in _bad_keys]
+                    _bad_fn_list = "\n## 当前数据库不支持的函数（已实际测试确认）\n以下函数在 Doris 中不可用，请不要使用:\n" + ", ".join(f"`{f}`" for f in sorted(_bad_names)) + "\n"
+        except Exception:
+            pass
+
         # 构建完整对话
         system_prompt = self._load_system_prompt()
         system_msg = (
             system_prompt + "\n\n"
             + tools_prompt + "\n\n"
             + few_shot + "\n\n"
+            + _bad_fn_list + "\n"
             + "### 语义层文档（必须优先阅读，这是数据逻辑的唯一权威来源）\n\n"
             + semantic_context
         )
@@ -1201,11 +1237,25 @@ class AIAnalystService:
         from app.services.sql_correction_service import SqlCorrectionService
         few_shot = SqlCorrectionService(self.db).build_few_shot_prompt(message, data_source_id)
 
+        # 从 Redis 加载不支持的函数列表
+        _bad_fn_list = ""
+        try:
+            _r = get_redis()
+            _ds_obj = self.ds_repo.get_by_id(data_source_id)
+            if _ds_obj and _ds_obj.database:
+                _bad_keys = _r.keys(f"bad_functions:{_ds_obj.database}:*")
+                if _bad_keys:
+                    _bad_names = [k.decode().split(":")[-1] for k in _bad_keys]
+                    _bad_fn_list = "\n## 当前数据库不支持的函数（已实际测试确认）\n以下函数在 Doris 中不可用，请不要使用:\n" + ", ".join(f"`{f}`" for f in sorted(_bad_names)) + "\n"
+        except Exception:
+            pass
+
         system_prompt = self._load_system_prompt()
         system_msg = (
             system_prompt + "\n\n"
             + tools_prompt + "\n\n"
             + few_shot + "\n\n"
+            + _bad_fn_list + "\n"
             + "### 语义层文档（必须优先阅读，这是数据逻辑的唯一权威来源）\n\n"
             + semantic_context
         )
