@@ -48,24 +48,32 @@ class SqlCorrectionService:
     def find_matches(
         self,
         question: str,
-        data_source_id: int,
+        data_source_id: Optional[int] = None,
         top_k: int = 3,
     ) -> List[Dict[str, Any]]:
         """根据问题和数据源查找最相关历史修正"""
-        # 提取当前问题的关键词和表名
         current_tables = self._extract_tables(question)
 
-        # 查询同一数据源的所有活跃修正
-        records = (
-            self.db.query(SqlCorrection)
-            .filter(
-                SqlCorrection.data_source_id == data_source_id,
-                SqlCorrection.is_active == True,
+        # 先查当前数据源
+        query = self.db.query(SqlCorrection).filter(SqlCorrection.is_active == True)
+        if data_source_id is not None:
+            query = query.filter(SqlCorrection.data_source_id == data_source_id)
+        records = query.order_by(SqlCorrection.created_at.desc()).limit(30).all()
+
+        # 如果当前数据源记录不足，补充跨数据源的记录
+        if len(records) < 5:
+            cross_records = (
+                self.db.query(SqlCorrection)
+                .filter(SqlCorrection.is_active == True)
+                .order_by(SqlCorrection.created_at.desc())
+                .limit(30)
+                .all()
             )
-            .order_by(SqlCorrection.created_at.desc())
-            .limit(20)
-            .all()
-        )
+            existing_ids = {r.id for r in records}
+            for r in cross_records:
+                if r.id not in existing_ids:
+                    records.append(r)
+                    existing_ids.add(r.id)
 
         if not records:
             return []
@@ -74,16 +82,18 @@ class SqlCorrectionService:
         scored = []
         for r in records:
             score = 0
-            # 表名匹配加分
             r_tables = set(t.strip() for t in (r.table_names or "").split(",") if t.strip())
             overlap = current_tables & r_tables
             score += len(overlap) * 3
 
-            # 关键词匹配加分
             q_words = set(re.findall(r'\w+', question.lower()))
             r_words = set(re.findall(r'\w+', r.question.lower()))
             common_words = q_words & r_words
             score += len(common_words)
+
+            # 优质案例加分（original_sql为空表示一次性成功）
+            if not r.original_sql:
+                score += 1
 
             if score > 0:
                 scored.append((score, r))
@@ -93,6 +103,7 @@ class SqlCorrectionService:
         for score, r in scored[:top_k]:
             results.append({
                 "id": r.id,
+                "data_source_id": r.data_source_id,
                 "question": r.question[:80],
                 "original_sql": r.original_sql,
                 "corrected_sql": r.corrected_sql,
@@ -103,7 +114,7 @@ class SqlCorrectionService:
         return results
 
     def build_few_shot_prompt(self, question: str, data_source_id: int) -> str:
-        """构建 few-shot 示例 prompt 段落"""
+        """构建 few-shot 示例 prompt 段落（跨数据源 RAG）"""
         matches = self.find_matches(question, data_source_id, top_k=3)
         if not matches:
             return ""
@@ -111,12 +122,13 @@ class SqlCorrectionService:
         parts = ["## 历史修正案例（请参考避免相同错误）\n"]
         for m in matches:
             parts.append(f"### 类似问题: {m['question']}")
-            parts.append(f"**原始 SQL（有问题的）**:")
-            parts.append(f"```sql\n{m['original_sql']}\n```")
-            parts.append(f"**修正后的 SQL**:")
+            if m.get("original_sql"):
+                parts.append(f"**原始 SQL（有问题的）**:")
+                parts.append(f"```sql\n{m['original_sql']}\n```")
+            parts.append(f"**正确的 SQL**:")
             parts.append(f"```sql\n{m['corrected_sql']}\n```")
             if m.get("user_feedback"):
-                parts.append(f"**反馈意见**: {m['user_feedback']}")
+                parts.append(f"**说明**: {m['user_feedback']}")
             parts.append("")
         return "\n".join(parts)
 

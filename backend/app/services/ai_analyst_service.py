@@ -217,9 +217,12 @@ class AIAnalystService:
         except Exception:
             pass
 
+        import time as _time_sql
+        _start_ts = _time_sql.time()
         try:
             from app.utils.db_executor import execute_query
             rows, columns = execute_query(ds, sql)
+            _elapsed = _time_sql.time() - _start_ts
             total = len(rows)
             preview_rows = rows[:100]
             if preview_rows and columns:
@@ -238,6 +241,19 @@ class AIAnalystService:
                 r.setex(cache_key, 300, json.dumps(result, ensure_ascii=False, default=str))
             except Exception:
                 pass
+            # ── 慢查询记录（>10秒自动保存为学习案例） ──
+            if _elapsed > 10:
+                try:
+                    from app.services.sql_correction_service import SqlCorrectionService as _Sc
+                    _Sc(self.db).save_correction(
+                        data_source_id=data_source_id, question="",
+                        original_sql="",
+                        corrected_sql=sql,
+                        user_feedback=f"慢查询: 耗时{_elapsed:.1f}秒, 返回{total}行",
+                    )
+                    logger.info("[AI-Analyst] 🐢 慢查询已记录: %.1fs %s", _elapsed, sql[:80])
+                except Exception:
+                    pass
             return result
         except Exception as e:
             error_msg = str(e)
@@ -1204,8 +1220,11 @@ class AIAnalystService:
         all_tool_calls = []
         all_text = []
         last_successful_result = None
+        last_failed_sql = None
+        last_failed_sql_error = None
+        auto_learned_this_turn = False
         sql_fail_count = 0
-        queried_schema = False  # 是否已调过 get_schema
+        queried_schema = False
 
         for step in range(self.MAX_AGENT_STEPS):
             llm_client = self._get_llm_client()
@@ -1350,13 +1369,51 @@ class AIAnalystService:
             }
             all_tool_calls.append(tool_calls_record)
 
-            # SQL 失败处理：自动注入 schema + 指导
+            # ── 自动学习：SQL 失败→成功自动保存修正案例 ──
             if tool_name == "execute_sql":
                 if tool_result.get("success"):
+                    # 如果上一次 SQL 失败了，这次成功了 → 自动保存修正案例
+                    if last_failed_sql is not None and last_failed_sql_error is not None:
+                        try:
+                            from app.services.sql_correction_service import SqlCorrectionService
+                            SqlCorrectionService(self.db).save_correction(
+                                data_source_id=data_source_id,
+                                question=message,
+                                original_sql=last_failed_sql,
+                                corrected_sql=tool_input.get("sql", ""),
+                                user_feedback=f"自动学习: {last_failed_sql_error[:200]}",
+                                user_id=user_id,
+                            )
+                            logger.info("[AI-Analyst] 📚 自动学习: 保存SQL修正案例")
+                        except Exception as _le:
+                            logger.warning("[AI-Analyst] 自动学习保存失败: %s", _le)
+                        last_failed_sql = None
+                        last_failed_sql_error = None
+                    elif last_failed_sql is None and not auto_learned_this_turn:
+                        # 首次直接成功 → 保存为优质案例
+                        try:
+                            from app.services.sql_correction_service import SqlCorrectionService
+                            SqlCorrectionService(self.db).save_correction(
+                                data_source_id=data_source_id,
+                                question=message,
+                                original_sql="",
+                                corrected_sql=tool_input.get("sql", ""),
+                                user_feedback="优质案例: 一次性执行成功",
+                                user_id=user_id,
+                            )
+                            logger.info("[AI-Analyst] ⭐ 自动学习: 保存优质SQL案例")
+                        except Exception:
+                            pass
                     sql_fail_count = 0
                     last_successful_result = tool_result
                 else:
                     error_msg = tool_result.get("error", "")
+                    # 记录失败的 SQL 和错误，供后续成功时自动学习
+                    failed_sql_text = tool_input.get("sql", "")
+                    # 只记录语法/列名错误（忽略超时等）
+                    if any(kw in error_msg.lower() for kw in ["cannot be resolved", "unknown column", "syntax error", "group by", "not in group by"]):
+                        last_failed_sql = failed_sql_text
+                        last_failed_sql_error = error_msg
                     sql_fail_count += 1
 
                     # 首次失败：提取表名，自动注入该表 schema
