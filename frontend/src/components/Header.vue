@@ -9,7 +9,6 @@
         :active-icon="Sunny"
         :inactive-icon="Moon"
         size="small"
-        @change="handleThemeToggle"
         class="theme-toggle"
       />
       <el-dropdown @command="handleCommand">
@@ -50,11 +49,7 @@ export default {
       }
     }
 
-    const handleThemeToggle = () => {
-      themeStore.toggleTheme()
-    }
-
-    return { user, handleCommand, themeStore, handleThemeToggle, Moon, Sunny }
+    return { user, handleCommand, themeStore, Moon, Sunny }
   }
 }
 </script>
