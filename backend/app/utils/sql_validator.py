@@ -31,8 +31,6 @@ class SQLValidator:
         "LOAD_FILE", "INTO OUTFILE", "INTO DUMPFILE", "BENCHMARK",
         "SLEEP", "WAITFOR", "DELAY", "UUID", "VERSION", "DATABASE",
         "USER", "CURRENT_USER", "LOAD_CONCATENATED_FILE", "READFILE",
-        # 新增
-        "CONCAT", "GROUP_CONCAT",
     ]
 
     # 常见注入模式
