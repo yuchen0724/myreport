@@ -278,6 +278,20 @@ class NL2SQLService:
             logger.warning(f"[NL2SQL] ⚠️ 修复 SQL 执行仍失败: {execute_error}")
             return None
 
+        # ── 自学习: 自动保存成功修复案例 ──
+        try:
+            from app.services.sql_correction_service import SqlCorrectionService
+            SqlCorrectionService(self.db).save_correction(
+                data_source_id=request.data_source_id,
+                question=question + " [自动修复]",
+                original_sql=failed_sql,
+                corrected_sql=repaired_sql,
+                user_feedback=f"LLM 自动修复成功, 置信度={repaired_confidence}",
+                user_id=user_id,
+            )
+        except Exception as learn_err:
+            logger.warning(f"[NL2SQL] ⚠️ 自动保存修复案例失败: {learn_err}")
+
         explanation = (
             f"{original_explanation}\n自动修复: {repaired_explanation}"
             if original_explanation
@@ -1506,25 +1520,37 @@ class NL2SQLService:
             proxy_info = _get_proxy_info(ds, db_session=self.db)
 
         if proxy_info:
-            from app.utils.db_executor import _build_socks_creator
-            engine = create_engine(
-                conn_url.replace('***', password),
-                creator=_build_socks_creator(proxy_info['host'], proxy_info['port'], timeout=60),
-                poolclass=QueuePool, pool_size=2, max_overflow=2, pool_pre_ping=True,
-            )
+            logger.info(f"[get_groups] 使用 SOCKS5 代理: {proxy_info['host']}:{proxy_info['port']} → {ds.host}:{ds.port}")
+            from app.utils.db_executor import socks5_patch
+            with socks5_patch(proxy_info['host'], proxy_info['port']):
+                engine = create_engine(
+                    conn_url.replace('***', password),
+                    poolclass=QueuePool, pool_size=1, max_overflow=0,
+                    connect_args={"connect_timeout": 10},
+                )
+                try:
+                    with engine.connect() as conn:
+                        result = conn.execute(text("SELECT DISTINCT group_id, group_name FROM ads_cockpit_qck.dim_store ORDER BY group_id"))
+                        rows = [{"group_id": row[0], "group_name": row[1]} for row in result.fetchall()]
+                        logger.info(f"[NL2SQL] └─ Doris 查询成功, 集团数: {len(rows)}")
+                except Exception as e:
+                    logger.error(f"[NL2SQL] ❌ 查询集团列表失败: {e}")
+                    raise
+                finally:
+                    engine.dispose()
         else:
-            engine = create_engine(conn_url.replace('***', password), poolclass=QueuePool, pool_size=2, max_overflow=2, pool_pre_ping=True, connect_args={"connect_timeout": 5})
-
-        try:
-            with engine.connect() as conn:
-                result = conn.execute(text("SELECT DISTINCT group_id, group_name FROM ads_cockpit_qck.dim_store ORDER BY group_id"))
-                rows = [{"group_id": row[0], "group_name": row[1]} for row in result.fetchall()]
-                logger.info(f"[NL2SQL] └─ Doris 查询成功, 集团数: {len(rows)}")
-        except Exception as e:
-            logger.error(f"[NL2SQL] ❌ 查询集团列表失败: {e}")
-            raise
-        finally:
-            engine.dispose()
+            logger.info(f"[get_groups] 直连（无代理）→ {ds.host}:{ds.port}")
+            engine = create_engine(conn_url.replace('***', password), poolclass=QueuePool, pool_size=1, max_overflow=0, connect_args={"connect_timeout": 5})
+            try:
+                with engine.connect() as conn:
+                    result = conn.execute(text("SELECT DISTINCT group_id, group_name FROM ads_cockpit_qck.dim_store ORDER BY group_id"))
+                    rows = [{"group_id": row[0], "group_name": row[1]} for row in result.fetchall()]
+                    logger.info(f"[NL2SQL] └─ Doris 查询成功, 集团数: {len(rows)}")
+            except Exception as e:
+                logger.error(f"[NL2SQL] ❌ 查询集团列表失败: {e}")
+                raise
+            finally:
+                engine.dispose()
 
         # 3. 写入 Redis 缓存（TTL=1小时）
         try:

@@ -77,3 +77,6 @@ backend/celerybeat-schedule
 backend/htmlcov/
 .coverage
 htmlcov/
+
+# AtomCode local-scope configs (machine-specific)
+.atomcode/local/

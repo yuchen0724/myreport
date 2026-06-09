@@ -46,6 +46,23 @@
             >
               新对话
             </el-button>
+            <el-input
+              v-model="searchQuery"
+              placeholder="搜索对话..."
+              clearable
+              size="small"
+              style="width: 160px; margin-left: 8px"
+              prefix-icon="Search"
+            />
+            <el-button
+              size="small"
+              plain
+              style="margin-left: 4px"
+              @click="exportConversation"
+              title="导出对话"
+            >
+              导出
+            </el-button>
           </div>
         </div>
       </template>
@@ -72,7 +89,7 @@
         </div>
 
         <div
-          v-for="(msg, idx) in messages"
+          v-for="(msg, idx) in filteredMessages"
           :key="idx"
           class="message"
           :class="[msg.role]"
@@ -100,8 +117,28 @@
                     <div class="tool-detail">
                       <div class="tool-detail-label">输入:</div>
                       <pre class="code-block">{{ formatJson(tc.tool_input) }}</pre>
-                      <div class="tool-detail-label">输出:</div>
-                      <pre class="code-block">{{ tc.tool_output }}</pre>
+                      <!-- P2-10: SQL 内联编辑与重新执行 -->
+                      <div v-if="tc.tool_name === 'execute_sql' && tc.tool_input?.sql">
+                        <div class="tool-detail-label">SQL 编辑与重新执行:</div>
+                        <el-input
+                          v-model="editingSqls[idx + '_' + tIdx]"
+                          :default-value="tc.tool_input.sql"
+                          type="textarea"
+                          :rows="4"
+                          class="sql-editor"
+                          placeholder="修改 SQL 后点击执行..."
+                        />
+                        <el-button
+                          size="small"
+                          type="primary"
+                          style="margin-top: 4px"
+                          @click="reRunSql(editingSqls[idx + '_' + tIdx] || tc.tool_input.sql, msg, idx)"
+                        >
+                          ▶ 执行
+                        </el-button>
+                      </div>
+                      <div v-if="tc.tool_output" class="tool-detail-label">输出:</div>
+                      <pre v-if="tc.tool_output" class="code-block">{{ tc.tool_output }}</pre>
                     </div>
                   </el-collapse-item>
                 </el-collapse>
@@ -214,9 +251,9 @@
 </template>
 
 <script>
-import { ref, nextTick, onMounted, watch } from 'vue'
+import { ref, nextTick, onMounted, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { MagicStick, User, SetUp, Promotion } from '@element-plus/icons-vue'
+import { MagicStick, User, SetUp, Promotion, Search } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { chatStream } from '@/api/aiAnalyst'
 import { getGroups } from '@/api/nl2sql'
@@ -269,6 +306,20 @@ export default {
     const feedbackCorrectedSql = ref('')
     const feedbackUserText = ref('')
     const feedbackSubmitting = ref(false)
+
+    // P2-10: 搜索、SQL编辑、导出
+    const searchQuery = ref('')
+    const editingSqls = ref({})
+    const filteredMessages = computed(() => {
+      if (!searchQuery.value) return messages.value
+      const q = searchQuery.value.toLowerCase()
+      return messages.value.filter(m =>
+        (m.content && m.content.toLowerCase().includes(q)) ||
+        (m.tool_calls && m.tool_calls.some(tc =>
+          JSON.stringify(tc).toLowerCase().includes(q)
+        ))
+      )
+    })
 
     // 页面初始化：从 sessionStorage 恢复会话
     function persistState() {
@@ -333,8 +384,12 @@ export default {
         groupLoading.value = true
         try {
           groups.value = await getGroups(dsId)
+          if (groups.value.length === 0) {
+            ElMessage.warning('该数据源暂无集团数据，或数据库连接失败')
+          }
         } catch (e) {
           groups.value = []
+          ElMessage.error('加载集团列表失败: ' + (e.message || '连接超时，请检查数据源网络'))
         } finally {
           groupLoading.value = false
         }
@@ -563,6 +618,85 @@ export default {
       }
     }
 
+    // P2-10: SQL 重新执行
+    async function reRunSql(sql, msg, msgIdx) {
+      if (!sql || !dataSourceId.value) return
+      streamingMessage.value = ''
+      streamingToolCalls.value = []
+      streamingChart.value = null
+      isStreaming.value = true
+
+      const streamRef = chatStream(
+        {
+          message: '请重新执行这个SQL并解释结果：\n```sql\n' + sql + '\n```',
+          data_source_id: dataSourceId.value,
+          conversation_id: conversationId.value,
+          group_id: groupId.value || undefined,
+        },
+        {
+          onToken(content) {
+            streamingMessage.value += content
+            scrollToBottom()
+          },
+          onToolCall(data) {
+            if (streamingMessage.value.trim()) {
+              messages.value.push({ role: 'assistant', content: streamingMessage.value, time: new Date().toLocaleTimeString() })
+              streamingMessage.value = ''
+            }
+            streamingToolCalls.value.push({ tool_name: data.tool_name, tool_input: data.tool_input, done: false })
+            scrollToBottom()
+          },
+          onToolResult(data) {
+            var lastTc = streamingToolCalls.value[streamingToolCalls.value.length - 1]
+            if (lastTc) {
+              lastTc.done = true
+              lastTc.tool_output = data.tool_output
+              messages.value.push({ role: 'assistant', tool_calls: [{ tool_name: lastTc.tool_name, tool_input: lastTc.tool_input, tool_output: data.tool_output || '' }], time: new Date().toLocaleTimeString() })
+            }
+            scrollToBottom()
+          },
+          onChart(config) {
+            streamingChart.value = config
+            messages.value.push({ role: 'assistant', chart_config: config, content: '📊 图表', time: new Date().toLocaleTimeString() })
+            streamingChart.value = null
+            scrollToBottom()
+          },
+          onDone() {
+            isStreaming.value = false
+            persistState()
+            renderCharts()
+          },
+          onError(error) {
+            ElMessage.error('重新执行失败: ' + error)
+            isStreaming.value = false
+          },
+        }
+      )
+    }
+
+    // P2-10: 导出对话
+    function exportConversation() {
+      var text = messages.value.map(function(m) {
+        var role = m.role === 'user' ? '我' : 'AI 助手'
+        var time = m.time || ''
+        var content = '[' + time + '] ' + role + ': ' + (m.content || '')
+        if (m.tool_calls) {
+          m.tool_calls.forEach(function(tc) {
+            content += '\n  🛠️ ' + tc.tool_name + ': ' + JSON.stringify(tc.tool_input)
+          })
+        }
+        return content
+      }).join('\n\n')
+      var blob = new Blob([text], { type: 'text/plain' })
+      var url = URL.createObjectURL(blob)
+      var a = document.createElement('a')
+      a.href = url
+      a.download = 'ai-analyst-' + new Date().toISOString().slice(0, 10) + '.txt'
+      a.click()
+      URL.revokeObjectURL(url)
+      ElMessage.success('对话已导出')
+    }
+
     onMounted(() => {
       // 恢复会话状态
       restoreState()
@@ -627,6 +761,7 @@ export default {
       inputRef,
       inputMessage,
       messages,
+      filteredMessages,
       isStreaming,
       streamingMessage,
       streamingToolCalls,
@@ -638,10 +773,14 @@ export default {
       groupLoading,
       showGroupSelect,
       quickQuestions,
+      searchQuery,
+      editingSqls,
       onDataSourceChange,
       sendMessage,
       sendQuickQuestion,
       clearChat,
+      reRunSql,
+      exportConversation,
       renderMarkdown,
       formatJson,
       showFeedback,
@@ -879,5 +1018,27 @@ export default {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* P2-10: SQL 编辑器样式 */
+.sql-editor {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.sql-editor :deep(.el-textarea__inner) {
+  font-family: 'Courier New', Courier, monospace;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border: 1px solid #333;
+}
+
+.tool-detail-label {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 8px;
+  margin-bottom: 4px;
 }
 </style>

@@ -59,7 +59,7 @@ class ConnectionPoolManager:
                 connect_args["connect_timeout"] = 30
                 connect_args["read_timeout"] = 300
             
-            # SOCKS5 代理处理（连接池使用 creator 参数，不污染全局 socket）
+            # SOCKS5 代理处理（通过临时 socket 补丁，不污染全局 socket）
             socks_host = None
             socks_port = None
             if use_proxy and proxy_server_id and ds_type.upper() in ("MYSQL", "DORIS"):
@@ -76,9 +76,10 @@ class ConnectionPoolManager:
                     pdb.close()
 
             if socks_host and socks_port:
-                from app.utils.db_executor import create_socks_engine
-                engine, _ = create_socks_engine(
-                    conn_url, socks_host, socks_port,
+                from app.utils.db_executor import socks5_pool_workaround
+                attach, _ = socks5_pool_workaround(socks_host, socks_port)
+                engine = create_engine(
+                    conn_url,
                     poolclass=QueuePool,
                     pool_size=5,
                     max_overflow=10,
@@ -86,6 +87,7 @@ class ConnectionPoolManager:
                     pool_recycle=3600,
                     connect_args=connect_args,
                 )
+                attach(engine)
             else:
                 engine = create_engine(
                 conn_url,

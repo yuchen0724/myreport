@@ -26,11 +26,15 @@ class DataSourceRepository:
             database=ds_data["database"],
             username=ds_data["username"],
             password_encrypted=encrypt_password(ds_data["password"]),
+            use_proxy=ds_data.get("use_proxy", False),
+            proxy_server_id=ds_data.get("proxy_server_id"),
+            load_group=ds_data.get("load_group", False),
             is_active=ds_data.get("is_active", True),
             created_by=user_id,
         )
         self.db.add(db_ds)
         self.db.flush()
+        self.db.commit()
         self.db.refresh(db_ds)
         return db_ds
 
@@ -42,10 +46,12 @@ class DataSourceRepository:
             if hasattr(ds, key):
                 setattr(ds, key, value)
         self.db.flush()
+        self.db.commit()
         self.db.refresh(ds)
         return ds
 
     def delete(self, ds: DataSource) -> bool:
         self.db.delete(ds)
         self.db.flush()
+        self.db.commit()
         return True

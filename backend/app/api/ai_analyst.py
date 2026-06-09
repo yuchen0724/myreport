@@ -85,10 +85,10 @@ async def chat_stream(
         try:
             async for chunk in service.chat_stream(
                 message=request.message,
-                data_source_id=request.data_source_id,
-                conversation_id=request.conversation_id,
-                group_id=request.group_id,
-                user_id=current_user_id,
+                ds_id=request.data_source_id,
+                cid=request.conversation_id,
+                gid=request.group_id,
+                uid=current_user_id,
             ):
                 event_type = chunk.get("type", "token")
                 data = json.dumps(chunk, ensure_ascii=False, default=str)

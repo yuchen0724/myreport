@@ -32,7 +32,9 @@ class DataSourceService:
             port=ds_data.port,
             database=ds_data.database,
             username=ds_data.username,
-            password=ds_data.password
+            password=ds_data.password,
+            use_proxy=ds_data.use_proxy,
+            proxy_server_id=ds_data.proxy_server_id,
         ))
         if not test_result.success:
             raise ValueError(f"连接测试失败: {test_result.message}")
@@ -64,10 +66,10 @@ class DataSourceService:
         # 处理更新数据：使用 exclude_unset=True 但后端需要更新布尔字段
         update_data = ds_data.model_dump(exclude_unset=True)
         
-        # 手动添加前端传来的布尔字段（即使值为 False）
+        # 手动添加前端传来的布尔/空值字段（即使值为 False/None）
         if hasattr(ds_data, 'use_proxy'):
             update_data['use_proxy'] = ds_data.use_proxy
-        if hasattr(ds_data, 'proxy_server_id') and ds_data.proxy_server_id is not None:
+        if hasattr(ds_data, 'proxy_server_id'):
             update_data['proxy_server_id'] = ds_data.proxy_server_id
         if hasattr(ds_data, 'load_group') and ds_data.load_group is not None:
             update_data['load_group'] = ds_data.load_group
@@ -92,14 +94,13 @@ class DataSourceService:
         """测试数据源连接（支持 HTTP/SOCKS5 代理）"""
         try:
             ds_type = request.type.upper() if request.type else ""
-            # 代理设置统一由 socks_proxy_context 处理
             
             # 测试 MySQL/Doris 连接
             if ds_type in ("MYSQL", "DORIS"):
                 import pymysql
-                import subprocess
+                from urllib.parse import quote_plus
                 
-                # 获取代理配置用于前置检查
+                # 获取代理配置
                 proxy_host = None
                 proxy_port = None
                 proxy_type = None
@@ -113,75 +114,70 @@ class DataSourceService:
                         proxy_port = p.port
                         proxy_type = p.proxy_type
                 
-                # HTTP 代理前置检查 curl 测试
-                if proxy_type == "http":
-                    proxy_url = f"http://{proxy_host}:{proxy_port}"
-                    test_cmd = f"curl --noproxy '*' -x {proxy_url} --connect-timeout 10 -s -o /dev/null -w '%{{http_code}}' http://{request.host}:{request.port}/"
+                encoded_password = quote_plus(request.password)
+                test_start = __import__("time").time()
+                
+                if proxy_type == "socks5":
+                    # SOCKS5：直接通过代理连接 MySQL，无需预检查
+                    from app.utils.db_executor import socks5_patch
+                    from sqlalchemy import create_engine, text
+                    from sqlalchemy.pool import QueuePool
+                    conn_url = f"mysql+pymysql://{request.username}:{encoded_password}@{request.host}:{request.port}/{request.database}"
+                    with socks5_patch(proxy_host, proxy_port, timeout=20):
+                        engine = create_engine(
+                            conn_url, poolclass=QueuePool, pool_size=1, max_overflow=0,
+                            connect_args={"connect_timeout": 10},
+                        )
+                        try:
+                            with engine.connect() as conn:
+                                conn.execute(text("SELECT 1"))
+                            elapsed = (__import__("time").time() - test_start) * 1000
+                            return DataSourceTestResponse(
+                                success=True,
+                                message=f"连接成功（通过SOCKS5代理，{elapsed:.0f}ms）"
+                            )
+                        except Exception as e:
+                            err_msg = self._format_conn_error(e, request.host, request.port)
+                            return DataSourceTestResponse(success=False, message=err_msg)
+                        finally:
+                            engine.dispose()
+                elif proxy_type == "http":
+                    # HTTP 代理：先用 curl 快速测试目标可达
+                    import subprocess
+                    conn_url = f"http://{request.host}:{request.port}/"
+                    test_cmd = f"curl --noproxy '*' -x http://{proxy_host}:{proxy_port} --connect-timeout 8 -s -o /dev/null -w '%{{http_code}}' '{conn_url}'"
                     try:
-                        result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=15)
-                        if result.returncode != 0 or result.stdout.strip() == "000":
-                            return DataSourceTestResponse(success=False, message=f"通过代理无法连接到目标服务器 {request.host}:{request.port}")
+                        result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=12)
+                        if result.returncode != 0 or result.stdout.strip() in ("", "000"):
+                            return DataSourceTestResponse(success=False, message=f"通过HTTP代理无法连接到目标服务器 {request.host}:{request.port}")
                     except Exception:
                         pass
-                elif proxy_type == "socks5":
-                    # SOCKS5 前置检查：测试代理是否可达
-                    test_cmd = f"curl --noproxy '*' --socks5 {proxy_host}:{proxy_port} --connect-timeout 10 -s -o /dev/null -w '%{{http_code}}' https://www.baidu.com"
-                    try:
-                        result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=15)
-                        if result.returncode != 0 or result.stdout.strip() != "200":
-                            return DataSourceTestResponse(success=False, message=f"SOCKS5代理不可达")
-                    except Exception as e:
-                        return DataSourceTestResponse(success=False, message=f"SOCKS5代理测试失败: {str(e)}")
-                
-                # 实际连接测试（engine 级别代理，无全局 socket 污染）
-                from urllib.parse import quote_plus
-                encoded_password = quote_plus(request.password)
-
-                if proxy_type == "socks5":
-                    from app.utils.db_executor import create_socks_engine
-                    from sqlalchemy import text
-                    conn_url = f"mysql+pymysql://{request.username}:{encoded_password}@{request.host}:{request.port}/{request.database}"
-                    engine, _ = create_socks_engine(
-                        conn_url, proxy_host, proxy_port,
-                        pool_size=1, max_overflow=0,
-                    )
-                    try:
-                        with engine.connect() as conn:
-                            conn.execute(text("SELECT 1"))
-                        return DataSourceTestResponse(
-                            success=True,
-                            message="连接成功（通过SOCKS5代理）"
-                        )
-                    finally:
-                        engine.dispose()
-                else:
+                    # 直连测试（HTTP 代理在 driver 层不支持，仅验证目标可达）
                     conn = pymysql.connect(
-                        host=request.host,
-                        port=request.port,
-                        user=request.username,
-                        password=request.password,
-                        database=request.database,
-                        connect_timeout=20
+                        host=request.host, port=request.port,
+                        user=request.username, password=request.password,
+                        database=request.database, connect_timeout=10,
                     )
                     conn.close()
-                    msg = "连接成功"
-                    if proxy_type == "http":
-                        msg += "（通过HTTP代理）"
-                    elif use_proxy:
-                        msg += f"（通过代理）"
-                    return DataSourceTestResponse(success=True, message=msg)
+                    return DataSourceTestResponse(success=True, message="连接成功（通过HTTP代理）")
+                else:
+                    # 无代理直连
+                    conn = pymysql.connect(
+                        host=request.host, port=request.port,
+                        user=request.username, password=request.password,
+                        database=request.database, connect_timeout=10,
+                    )
+                    conn.close()
+                    return DataSourceTestResponse(success=True, message="连接成功")
             
             # PostgreSQL 连接
             elif ds_type == "POSTGRESQL":
                 import psycopg2
                 try:
                     conn = psycopg2.connect(
-                        host=request.host,
-                        port=request.port,
-                        user=request.username,
-                        password=request.password,
-                        database=request.database,
-                        connect_timeout=15
+                        host=request.host, port=request.port,
+                        user=request.username, password=request.password,
+                        database=request.database, connect_timeout=10,
                     )
                     conn.close()
                     return DataSourceTestResponse(success=True, message="连接成功")
@@ -194,3 +190,19 @@ class DataSourceService:
             if "timed out" in err_msg.lower():
                 return DataSourceTestResponse(success=False, message=f"连接超时: {request.host}:{request.port} 无法访问")
             return DataSourceTestResponse(success=False, message=f"连接失败: {err_msg}")
+
+    @staticmethod
+    def _format_conn_error(e: Exception, host: str, port: int) -> str:
+        """格式化连接错误信息"""
+        err_msg = str(e)
+        if "timed out" in err_msg.lower() or "timeout" in err_msg.lower():
+            return f"连接超时: {host}:{port} 无法访问"
+        if "Connection refused" in err_msg:
+            return f"连接被拒绝: {host}:{port} 端口未开放"
+        if "Unknown host" in err_msg or "Name or service not known" in err_msg:
+            return f"无法解析主机: {host}"
+        if "Access denied" in err_msg:
+            return "用户名或密码错误"
+        if "Unknown database" in err_msg:
+            return "数据库不存在"
+        return f"连接失败: {err_msg}"

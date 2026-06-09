@@ -66,7 +66,7 @@ class DataSourceEngineFactory:
 
     def create_engine_with_proxy(self, ds, proxy_host: str, proxy_port: int):
         """
-        创建带 SOCKS5 代理的 SQLAlchemy engine（engine 级别代理，无全局 socket 污染）。
+        创建带 SOCKS5 代理的 SQLAlchemy engine（通过 event.listen 实现线程安全）。
 
         Args:
             ds: 数据源对象
@@ -77,15 +77,9 @@ class DataSourceEngineFactory:
             SQLAlchemy Engine 实例
         """
         config = self.build_config(ds)
+        engine = self._build_engine(config, ds)
 
-        def _socks_creator():
-            try:
-                import socks as _socks
-            except ImportError:
-                raise RuntimeError("SOCKS5 代理需要 PySocks 库: pip install PySocks")
-            s = _socks.socksocket()
-            s.settimeout(60)
-            s.set_proxy(_socks.SOCKS5, proxy_host, proxy_port)
-            return s
-
-        return self._build_engine(config, ds, creator=_socks_creator)
+        from app.utils.db_executor import socks5_pool_workaround
+        attach, _ = socks5_pool_workaround(proxy_host, proxy_port)
+        attach(engine)
+        return engine

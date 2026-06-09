@@ -71,6 +71,14 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o"
     llm_api_mode: str = "responses"  # chat (chat.completions) 或 responses (OpenAI Responses API)
     
+    # LLM 代理配置
+    llm_use_proxy: bool = False  # LLM API 是否使用代理
+    llm_proxy_type: str = "http"  # http, https, socks5
+    llm_proxy_host: str = ""
+    llm_proxy_port: int = 0
+    llm_proxy_username: str = ""
+    llm_proxy_password: str = ""
+    
     # Azure OpenAI
     azure_openai_endpoint: Optional[str] = None
     azure_openai_deployment: Optional[str] = None

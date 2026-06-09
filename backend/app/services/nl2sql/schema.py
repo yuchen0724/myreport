@@ -109,11 +109,13 @@ class SchemaRetriever:
 
     def _create_engine(self, conn_url: str, connect_args: dict, proxy_info: Optional[dict]):
         if proxy_info:
-            from app.utils.db_executor import _build_socks_creator
-            return create_engine(
+            from app.utils.db_executor import socks5_pool_workaround
+            attach, _ = socks5_pool_workaround(proxy_info['host'], proxy_info['port'])
+            engine = create_engine(
                 conn_url, pool_pre_ping=True, connect_args=connect_args,
-                creator=_build_socks_creator(proxy_info['host'], proxy_info['port'], timeout=60),
             )
+            attach(engine)
+            return engine
         return create_engine(conn_url, pool_pre_ping=True, connect_args=connect_args)
 
     def _fetch_mysql_tables(self, conn, ds_type: str) -> Dict[str, List[Dict[str, Any]]]:

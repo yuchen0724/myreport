@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "glob": "frontend/src/**/*.{js,vue}",
+        "command": "cd frontend && npx eslint src/ --fix --max-warnings 0 2>/dev/null || true"
+      },
+      {
+        "glob": "backend/app/api/**/*.py",
+        "command": "cd backend && pytest tests/ -x -q --tb=short 2>/dev/null; echo '⚠️ 编辑了 API 代码，建议检查测试结果'"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "**/.env*",
+        "block_message": "⚠️ 禁止直接编辑 .env 文件，请通过 backend/app/config.py 修改配置。"
+      },
+      {
+        "matcher": "**/package-lock.json",
+        "block_message": "⚠️ package-lock.json 应由 npm install/ci 自动管理，请勿手动编辑。"
+      },
+      {
+        "matcher": "**/poetry.lock",
+        "block_message": "⚠️ poetry.lock 应由 poetry install/lock 自动管理，请勿手动编辑。"
+      }
+    ]
+  }
+}

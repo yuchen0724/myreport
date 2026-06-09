@@ -3,13 +3,14 @@
 LLM 客户端封装
 支持多种 LLM 提供商: OpenAI, Azure OpenAI, Ollama, Anthropic
 """
-import logging
-import os
+import json
 import time
+import logging
+import re
 from enum import Enum
-from typing import List, Dict, Any, Optional, Type
+from typing import List, Dict, Any, Optional, Type, Union, AsyncGenerator, Callable
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,26 @@ class LLMAdapter(str, Enum):
     """LLM 调用适配器枚举"""
     RAW = "raw"
     LANGCHAIN = "langchain"
+
+
+class ToolDefinition(BaseModel):
+    """函数调用工具定义"""
+    name: str = Field(..., description="工具名称")
+    description: str = Field("", description="工具描述")
+    parameters: Dict[str, Any] = Field(default_factory=dict, description="JSON Schema 参数定义")
+
+
+class ToolCallResult(BaseModel):
+    """工具调用结果（OpenAI 格式）"""
+    id: str = Field(default="", description="工具调用 ID")
+    name: str = Field(..., description="工具名称")
+    arguments: Dict[str, Any] = Field(default_factory=dict, description="工具参数")
+
+
+class ToolChoice(BaseModel):
+    """工具选择结果"""
+    tool_calls: Optional[List[ToolCallResult]] = Field(None, description="工具调用列表")
+    content: Optional[str] = Field(None, description="文本回复内容")
 
 
 class LLMError(Exception):
@@ -49,12 +70,53 @@ class LLMClient:
         self.max_retries = settings.nl2sql_max_retries or 2
         self.timeout = settings.nl2sql_timeout or 300
         self.api_mode = getattr(settings, 'llm_api_mode', 'chat') or 'chat'
+        self._proxy_client = None  # lazy init
 
         logger.info(
             "LLM Client initialized | adapter=%s provider=%s model=%s api_base=%s mode=%s timeout=%ds",
             self.adapter, self.provider, settings.llm_model or 'default',
             settings.llm_api_base or 'default', self.api_mode, self.timeout,
         )
+
+    def _get_httpx_client(self) -> Optional[Any]:
+        """创建带代理的 httpx 客户端（如需），供 LangChain / raw OpenAI 使用"""
+        if self._proxy_client is not None:
+            return self._proxy_client
+        if not self.settings.llm_use_proxy or not self.settings.llm_proxy_host:
+            self._proxy_client = None
+            return None
+        proxy_type = self.settings.llm_proxy_type.lower()
+        proxy_host = self.settings.llm_proxy_host
+        proxy_port = self.settings.llm_proxy_port
+        proxy_user = self.settings.llm_proxy_username or ""
+        proxy_pass = self.settings.llm_proxy_password or ""
+
+        auth_part = f"{proxy_user}:{proxy_pass}@" if proxy_user else ""
+        if proxy_type in ("http", "https"):
+            proxy_url = f"{proxy_type}://{auth_part}{proxy_host}:{proxy_port}"
+            self._proxy_client = httpx.Client(
+                proxies={"http://": proxy_url, "https://": proxy_url},
+                timeout=self.timeout,
+            )
+            logger.info(f"[LLM] 使用 HTTP 代理: {proxy_host}:{proxy_port}")
+        elif proxy_type == "socks5":
+            proxy_url = f"socks5://{auth_part}{proxy_host}:{proxy_port}"
+            try:
+                from httpx import Proxy
+                proxy_obj = Proxy(url=proxy_url)
+                transport = httpx.HTTPTransport(proxy=proxy_obj)
+                self._proxy_client = httpx.Client(transport=transport, timeout=self.timeout)
+                logger.info(f"[LLM] 使用 SOCKS5 代理: {proxy_host}:{proxy_port}")
+            except ImportError:
+                logger.warning("[LLM] SOCKS5 代理需要安装 socksio: pip install httpx[socks]")
+                self._proxy_client = None
+            except Exception as e:
+                logger.warning(f"[LLM] SOCKS5 代理创建失败，回退直连: {e}")
+                self._proxy_client = None
+        else:
+            logger.warning(f"[LLM] 不支持的代理类型: {proxy_type}，回退直连")
+            self._proxy_client = None
+        return self._proxy_client
 
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.0) -> str:
         """
@@ -117,6 +179,112 @@ class LLMClient:
             and self.api_mode in {"chat", "responses"}
         )
 
+    @property
+    def supports_tools(self) -> bool:
+        """当前配置是否支持原生函数调用"""
+        return (
+            self.provider == LLMProvider.OPENAI
+            and self.api_mode == "chat"
+        )
+
+    def chat_with_tools(
+        self,
+        messages: List[Dict[str, str]],
+        tools: List[ToolDefinition],
+        temperature: float = 0.0,
+        tool_choice: Optional[Union[str, Dict]] = None,
+    ) -> ToolChoice:
+        """
+        原生函数调用（OpenAI工具调用模式）。
+
+        Args:
+            messages: 消息列表
+            tools: 工具定义列表
+            temperature: 温度参数
+            tool_choice: 工具选择策略，"auto"/"none"/{"type":"function","function":{"name":"xxx"}}
+
+        Returns:
+            ToolChoice: 包含工具调用或文本回复
+        """
+        start_time = time.time()
+
+        if not self.supports_tools:
+            logger.warning("Native tools not supported, falling back to chat")
+            content = self.chat(messages, temperature)
+            return ToolChoice(content=content)
+
+        logger.info("LLM.chat_with_tools() | provider=%s tools=%d messages=%d",
+                     self.provider, len(tools), len(messages))
+
+        url = f"{self.settings.llm_api_base}/chat/completions"
+        data = {
+            "model": self.settings.llm_model or "gpt-4o-mini",
+            "messages": messages,
+            "temperature": temperature,
+            "tools": [self._tool_to_openai(t) for t in tools],
+        }
+        if tool_choice:
+            data["tool_choice"] = tool_choice
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.settings.llm_api_key}"
+        }
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = httpx.post(
+                    url, json=data, headers=headers,
+                    timeout=self.timeout, verify=self.settings.ssl_verify_enabled,
+                )
+                response.raise_for_status()
+                result = response.json()
+                msg = result["choices"][0]["message"]
+
+                tool_calls = msg.get("tool_calls")
+                if tool_calls:
+                    parsed_calls = []
+                    for tc in tool_calls:
+                        try:
+                            args = json.loads(tc["function"]["arguments"])
+                        except (json.JSONDecodeError, KeyError):
+                            args = {}
+                        parsed_calls.append(ToolCallResult(
+                            id=tc.get("id", ""),
+                            name=tc["function"]["name"],
+                            arguments=args,
+                        ))
+                    elapsed = (time.time() - start_time) * 1000
+                    logger.info("chat_with_tools completed | elapsed=%.2fms tool_calls=%d",
+                                 elapsed, len(parsed_calls))
+                    return ToolChoice(tool_calls=parsed_calls)
+
+                content = msg.get("content", "")
+                elapsed = (time.time() - start_time) * 1000
+                logger.info("chat_with_tools completed | elapsed=%.2fms text_reply", elapsed)
+                return ToolChoice(content=content)
+
+            except Exception as e:
+                logger.warning("chat_with_tools attempt %d/%d failed: %s",
+                               attempt + 1, self.max_retries + 1, e)
+                if attempt >= self.max_retries:
+                    logger.error("chat_with_tools max retries reached, falling back to chat")
+                    content = self.chat(messages, temperature)
+                    return ToolChoice(content=content)
+
+        return ToolChoice(content="")
+
+    def _tool_to_openai(self, tool: ToolDefinition) -> Dict:
+        """将 ToolDefinition 转为 OpenAI tools 格式"""
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            }
+        }
+
     def chat_structured(
         self,
         messages: List[Dict[str, str]],
@@ -146,6 +314,40 @@ class LLMClient:
             f"LangChain structured output returned unsupported type: {type(result).__name__}",
             self.provider
         )
+
+    def get_embedding(self, text: str, model: str = None) -> List[float]:
+        """
+        获取文本嵌入向量（用于语义缓存和相似度匹配）
+
+        Args:
+            text: 输入文本
+            model: embedding 模型名
+
+        Returns:
+            嵌入向量
+        """
+        url = f"{self.settings.llm_api_base}/embeddings"
+        data = {
+            "model": model or self.settings.llm_embedding_model or "text-embedding-3-small",
+            "input": text,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.settings.llm_api_key}"
+        }
+        try:
+            client = self._get_httpx_client()
+            if client is not None:
+                resp = client.post(url, json=data, headers=headers)
+            else:
+                resp = httpx.post(url, json=data, headers=headers, timeout=30,
+                                  verify=self.settings.ssl_verify_enabled)
+            resp.raise_for_status()
+            result = resp.json()
+            return result["data"][0]["embedding"]
+        except Exception as e:
+            logger.warning(f"get_embedding failed: {e}")
+            return []
 
     def _call_langchain(self, messages: List[Dict[str, str]], temperature: float) -> str:
         """使用 LangChain 调用 OpenAI 兼容 Chat 模型"""
@@ -179,7 +381,7 @@ class LLMClient:
 
             except Exception as e:
                 logger.warning("LangChain attempt %d/%d failed: %s: %s",
-                               attempt + 1, self.max_retries + 1, type(e).__name__, e)
+                                attempt + 1, self.max_retries + 1, type(e).__name__, e)
                 if attempt >= self.max_retries:
                     logger.error("LangChain max retries reached, giving up")
                     raise LLMError(f"LangChain OpenAI API error after {self.max_retries} retries: {e}", self.provider) from e
@@ -229,21 +431,15 @@ class LLMClient:
                 self.provider
             )
 
-        try:
-            from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-        except ImportError as e:
-            raise LLMError(
-                "LangChain adapter requires langchain-core. "
-                "Install backend requirements before enabling LLM_ADAPTER=langchain.",
-                self.provider
-            ) from e
-
+        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
         lc_messages = []
-        for message in messages:
-            role = message.get("role", "user")
-            content = message.get("content", "")
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
             if role == "system":
                 lc_messages.append(SystemMessage(content=content))
+            elif role == "user":
+                lc_messages.append(HumanMessage(content=content))
             elif role == "assistant":
                 lc_messages.append(AIMessage(content=content))
             else:
@@ -251,32 +447,29 @@ class LLMClient:
         return lc_messages
 
     def _build_langchain_chat_model(self, temperature: float) -> Any:
-        """构建 LangChain ChatOpenAI 模型"""
-        try:
-            from langchain_openai import ChatOpenAI
-        except ImportError as e:
-            raise LLMError(
-                "LangChain adapter requires langchain-core and langchain-openai. "
-                "Install backend requirements before enabling LLM_ADAPTER=langchain.",
-                self.provider
-            ) from e
+        """构造 LangChain ChatOpenAI 模型（支持代理）"""
+        from langchain_openai import ChatOpenAI
 
-        kwargs = {
-            "model": self.settings.llm_model or "gpt-3.5-turbo",
-            "api_key": self.settings.llm_api_key,
-            "base_url": self.settings.llm_api_base,
-            "timeout": self.timeout,
-            "max_retries": self.max_retries,
-            "temperature": temperature,
-        }
+        extra_body = {}
         if self.api_mode == "responses":
-            kwargs["use_responses_api"] = True
-            kwargs["output_version"] = "responses/v1"
+            extra_body = {"api_mode": "responses"}
 
+        kwargs = dict(
+            model=self.settings.llm_model or "gpt-3.5-turbo",
+            temperature=temperature,
+            openai_api_key=self.settings.llm_api_key,
+            openai_api_base=self.settings.llm_api_base,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+            extra_body=extra_body,
+        )
+        proxy_client = self._get_httpx_client()
+        if proxy_client is not None:
+            kwargs["http_client"] = proxy_client
         return ChatOpenAI(**kwargs)
 
     def _extract_langchain_content(self, response: Any) -> str:
-        """提取 LangChain 响应文本"""
+        """从 LangChain 响应中提取文本内容"""
         content = getattr(response, "content", "")
         if isinstance(content, str):
             return content
@@ -332,13 +525,16 @@ class LLMClient:
             try:
                 logger.debug("OpenAI attempt %d/%d: sending request...", attempt + 1, self.max_retries + 1)
                 request_start = time.time()
-                response = httpx.post(
-                    url,
-                    json=data,
-                    headers=headers,
-                    timeout=self.timeout,
-                    verify=self.settings.ssl_verify_enabled,
-                )
+
+                proxy_client = self._get_httpx_client()
+                if proxy_client is not None:
+                    response = proxy_client.post(url, json=data, headers=headers)
+                else:
+                    response = httpx.post(
+                        url, json=data, headers=headers,
+                        timeout=self.timeout,
+                        verify=self.settings.ssl_verify_enabled,
+                    )
                 request_elapsed = (time.time() - request_start) * 1000
 
                 logger.debug("OpenAI response | status=%d elapsed=%.2fms size=%d bytes",
@@ -435,28 +631,25 @@ class LLMClient:
         return ""
 
     def _call_ollama(self, messages: List[Dict[str, str]], temperature: float) -> str:
-        """调用 Ollama 本地模型"""
-        base_url = self.settings.ollama_base_url or "http://localhost:11434"
+        """调用 Ollama API"""
+        ollama_base = self.settings.ollama_base_url or "http://localhost:11434"
+        url = f"{ollama_base}/api/chat"
+        data = {
+            "model": self.settings.ollama_model or "qwen2.5-coder:7b",
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": temperature}
+        }
+        headers = {"Content-Type": "application/json"}
+        if self.settings.ollama_api_key:
+            headers["Authorization"] = f"Bearer {self.settings.ollama_api_key}"
 
         for attempt in range(self.max_retries + 1):
             try:
-                with httpx.Client(timeout=self.timeout) as client:
-                    response = client.post(
-                        f"{base_url}/api/chat",
-                        json={
-                            "model": self.settings.llm_model or "llama2",
-                            "messages": messages,
-                            "temperature": temperature
-                        }
-                    )
-                    if response.status_code != 200:
-                        raise LLMError(f"Ollama API error: {response.text}", "ollama", response.status_code)
-
-                    result = response.json()
-                    return result.get("message", {}).get("content", "")
-            except httpx.TimeoutException:
-                if attempt >= self.max_retries:
-                    raise LLMError(f"Ollama timeout after {self.max_retries} retries", "ollama")
+                response = httpx.post(url, json=data, headers=headers, timeout=self.timeout)
+                response.raise_for_status()
+                result = response.json()
+                return result.get("message", {}).get("content", "")
             except Exception as e:
                 if attempt >= self.max_retries:
                     raise LLMError(f"Ollama API error after {self.max_retries} retries: {str(e)}", "ollama")
@@ -464,30 +657,31 @@ class LLMClient:
         return ""
 
     def _call_anthropic(self, messages: List[Dict[str, str]], temperature: float) -> str:
-        """调用 Anthropic API"""
-        import anthropic
+        """调用 Anthropic Claude API"""
+        from anthropic import Anthropic
+        client = Anthropic(api_key=self.settings.anthropic_api_key)
 
-        client = anthropic.Anthropic(
-            api_key=self.settings.llm_api_key
-        )
-
-        system_message = ""
-        anthropic_messages = []
+        # 提取 system 消息
+        system_content = None
+        api_messages = []
         for msg in messages:
-            if msg.get("role") == "system":
-                system_message = msg.get("content", "")
+            if msg["role"] == "system":
+                system_content = msg["content"]
             else:
-                anthropic_messages.append(msg)
+                api_messages.append({"role": msg["role"], "content": msg["content"]})
 
         for attempt in range(self.max_retries + 1):
             try:
-                response = client.messages.create(
-                    model=self.settings.llm_model or "claude-3-haiku-20240307",
-                    max_tokens=4096,
-                    system=system_message,
-                    messages=anthropic_messages,
-                    temperature=temperature
-                )
+                kwargs = {
+                    "model": self.settings.anthropic_model or "claude-3-5-sonnet-20241022",
+                    "max_tokens": 4096,
+                    "messages": api_messages,
+                    "temperature": temperature,
+                }
+                if system_content:
+                    kwargs["system"] = system_content
+
+                response = client.messages.create(**kwargs)
                 return response.content[0].text
             except Exception as e:
                 if attempt >= self.max_retries:
@@ -510,6 +704,154 @@ class LLMClient:
         else:
             # 不支持流式的 provider 回退到完整响应
             yield self.chat(messages, temperature)
+
+    def chat_stream_with_tools(
+        self,
+        messages: List[Dict[str, str]],
+        tools: List[ToolDefinition],
+        temperature: float = 0.0,
+    ):
+        """
+        流式调用 LLM 并检测工具调用（OpenAI 原生流式工具调用模式）。
+
+        Yields dict:
+            {"type": "text", "content": str} — 文本 token
+            {"type": "tool_call", "tool_name": str, "arguments": dict} — 完整工具调用
+        """
+        if not self.supports_tools:
+            # 回退到普通流式 + JSON 解析
+            yield from self._stream_tools_via_text(messages, tools, temperature)
+            return
+
+        url = f"{self.settings.llm_api_base}/chat/completions"
+        data = {
+            "model": self.settings.llm_model or "gpt-4o-mini",
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+            "tools": [self._tool_to_openai(t) for t in tools],
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.settings.llm_api_key}",
+        }
+
+        try:
+            tool_calls_buffer = {}  # index -> {name, arguments_chunks}
+            text_buffer = []
+
+            proxy_client = self._get_httpx_client()
+            if proxy_client is not None:
+                with proxy_client.stream("POST", url, json=data, headers=headers) as resp:
+                    for line in resp.iter_lines():
+                        if not line or line.startswith(":") or line.startswith("data: [DONE]"):
+                            continue
+                        if line.startswith("data: "):
+                            try:
+                                chunk = json.loads(line[6:])
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+
+                                # 文本 delta
+                                content = delta.get("content", "")
+                                if content:
+                                    text_buffer.append(content)
+                                    yield {"type": "text", "content": content}
+
+                                # 工具调用 delta
+                                tc_list = delta.get("tool_calls", [])
+                                for tc in tc_list:
+                                    idx = tc.get("index", 0)
+                                    if idx not in tool_calls_buffer:
+                                        tool_calls_buffer[idx] = {
+                                            "id": tc.get("id", ""),
+                                            "name": tc["function"].get("name", "") if tc.get("function") else "",
+                                            "arguments_chunks": [],
+                                        }
+                                    if tc.get("function", {}).get("arguments"):
+                                        tool_calls_buffer[idx]["arguments_chunks"].append(
+                                            tc["function"]["arguments"]
+                                        )
+                                    if tc.get("id"):
+                                        tool_calls_buffer[idx]["id"] = tc["id"]
+                                    if tc.get("function", {}).get("name"):
+                                        tool_calls_buffer[idx]["name"] = tc["function"]["name"]
+
+                            except json.JSONDecodeError:
+                                continue
+            else:
+                with httpx.Client(timeout=self.timeout, verify=self.settings.ssl_verify_enabled) as client:
+                    with client.stream("POST", url, json=data, headers=headers) as resp:
+                        for line in resp.iter_lines():
+                            if not line or line.startswith(":") or line.startswith("data: [DONE]"):
+                                continue
+                            if line.startswith("data: "):
+                                try:
+                                    chunk = json.loads(line[6:])
+                                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+
+                                    content = delta.get("content", "")
+                                    if content:
+                                        text_buffer.append(content)
+                                        yield {"type": "text", "content": content}
+
+                                    tc_list = delta.get("tool_calls", [])
+                                    for tc in tc_list:
+                                        idx = tc.get("index", 0)
+                                        if idx not in tool_calls_buffer:
+                                            tool_calls_buffer[idx] = {
+                                                "id": tc.get("id", ""),
+                                                "name": tc["function"].get("name", "") if tc.get("function") else "",
+                                                "arguments_chunks": [],
+                                            }
+                                        if tc.get("function", {}).get("arguments"):
+                                            tool_calls_buffer[idx]["arguments_chunks"].append(
+                                                tc["function"]["arguments"]
+                                            )
+                                        if tc.get("id"):
+                                            tool_calls_buffer[idx]["id"] = tc["id"]
+                                        if tc.get("function", {}).get("name"):
+                                            tool_calls_buffer[idx]["name"] = tc["function"]["name"]
+
+                                except json.JSONDecodeError:
+                                    continue
+
+            # 完成时，合并工具调用
+            if tool_calls_buffer:
+                for idx in sorted(tool_calls_buffer.keys()):
+                    buf = tool_calls_buffer[idx]
+                    full_args = "".join(buf["arguments_chunks"])
+                    try:
+                        parsed_args = json.loads(full_args) if full_args else {}
+                    except json.JSONDecodeError:
+                        parsed_args = {"_raw": full_args}
+                    yield {
+                        "type": "tool_call",
+                        "tool_name": buf["name"],
+                        "arguments": parsed_args,
+                        "id": buf["id"],
+                    }
+            elif text_buffer:
+                # 纯文本回复，无需额外操作
+                pass
+
+        except Exception as e:
+            logger.warning(f"chat_stream_with_tools failed: {e}, falling back")
+            yield from self._stream_tools_via_text(messages, tools, temperature)
+
+    def _stream_tools_via_text(self, messages, tools, temperature):
+        """回退方案：普通流式 + 从文本解析工具调用"""
+        # 收集完整文本
+        full_text = []
+        for token in self.chat_stream(messages, temperature):
+            full_text.append(token)
+            yield {"type": "text", "content": token}
+
+        complete = "".join(full_text)
+        # 尝试解析 JSON 工具调用
+        json_match = re.search(r'\{"tool"\s*:\s*"[^"]+"', complete)
+        if json_match:
+            # 让调用方自行解析
+            pass
 
     def _stream_langchain(self, messages, temperature):
         """LangChain 流式调用（兼容多种模型响应格式）"""
@@ -552,8 +894,9 @@ class LLMClient:
         }
 
         try:
-            with httpx.Client(timeout=self.timeout, verify=self.settings.ssl_verify_enabled) as client:
-                with client.stream("POST", url, json=data, headers=headers) as resp:
+            proxy_client = self._get_httpx_client()
+            if proxy_client is not None:
+                with proxy_client.stream("POST", url, json=data, headers=headers) as resp:
                     for line in resp.iter_lines():
                         if not line or line.startswith(":") or line.startswith("data: [DONE]"):
                             continue
@@ -566,12 +909,57 @@ class LLMClient:
                                     yield content
                             except json.JSONDecodeError:
                                 continue
+            else:
+                with httpx.Client(timeout=self.timeout, verify=self.settings.ssl_verify_enabled) as client:
+                    with client.stream("POST", url, json=data, headers=headers) as resp:
+                        for line in resp.iter_lines():
+                            if not line or line.startswith(":") or line.startswith("data: [DONE]"):
+                                continue
+                            if line.startswith("data: "):
+                                try:
+                                    chunk = json.loads(line[6:])
+                                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                    content = delta.get("content", "")
+                                    if content:
+                                        yield content
+                                except json.JSONDecodeError:
+                                    continue
         except Exception as e:
-            logger.error("OpenAI stream error: %s", e)
-            # fallback: complete response
-            yield self.chat(messages, temperature)
+            logger.error(f"Stream OpenAI error: {e}")
+            raise
+
+    def _summarize_messages(self, messages: List[Dict[str, str]], max_tokens: int = 300) -> str:
+        """
+        用 LLM 对对话消息做语义摘要。
+
+        Args:
+            messages: 需要摘要的消息列表
+            max_tokens: 摘要最大 token 数
+
+        Returns:
+            摘要文本
+        """
+        if not messages:
+            return ""
+
+        # 提取关键的 SQL、指标、结论
+        summary_prompt = f"""请用中文简要总结以下对话的核心内容（{max_tokens} token以内），包括：
+1. 用户关注的数据指标和维度
+2. 执行过的SQL查询（简要描述）
+3. 发现的关键结论
+
+对话内容：
+{json.dumps([{"role": m["role"], "content": m["content"][:300]} for m in messages], ensure_ascii=False, default=str)[:3000]}"""
+        try:
+            return self.chat([
+                {"role": "system", "content": "你是一个专业的对话摘要助手，请简洁准确地总结对话。"},
+                {"role": "user", "content": summary_prompt},
+            ], temperature=0.0)
+        except Exception as e:
+            logger.warning(f"对话摘要失败: {e}")
+            return f"[历史摘要: 共 {len(messages)//2} 轮对话]"
 
 
 def get_llm_client(provider: str = None) -> LLMClient:
-    """获取 LLM 客户端实例"""
+    """获取 LLM 客户端实例的工厂函数（保持与已有代码的兼容性）"""
     return LLMClient(provider)

@@ -64,6 +64,19 @@
           </el-form-item>
         </el-form>
       </el-card>
+
+      <!-- 测试结果对话框 -->
+      <el-dialog v-model="testDialogVisible" title="连接测试结果" width="420px">
+        <el-result
+          :icon="testResult.success ? 'success' : 'error'"
+          :title="testResult.success ? '连接成功' : '连接失败'"
+          :sub-title="testResult.message"
+        >
+          <template #extra>
+            <el-button @click="testDialogVisible = false">关闭</el-button>
+          </template>
+        </el-result>
+      </el-dialog>
     </div></template>
 
 <script>
@@ -83,6 +96,8 @@ export default {
     const testing = ref(false)
     const submitting = ref(false)
     const proxyServers = ref([])
+    const testDialogVisible = ref(false)
+    const testResult = ref({ success: false, message: '' })
     
     const form = ref({
       name: '',
@@ -123,24 +138,23 @@ export default {
     }
 
     const handleTest = async () => {
-      await formRef.value.validate()
       testing.value = true
+      testResult.value = { success: false, message: '' }
       try {
         const result = await testDataSourceConnection(form.value)
-        if (result.success) {
-          ElMessage.success('连接成功')
-        } else {
-          ElMessage.error(result.message)
-        }
+        testResult.value = result
+        testDialogVisible.value = true
       } catch (error) {
-        ElMessage.error('连接测试失败')
+        testResult.value = { success: false, message: error.message || '请求失败' }
+        testDialogVisible.value = true
       } finally {
         testing.value = false
       }
     }
 
     const handleSubmit = async () => {
-      await formRef.value.validate()
+      const valid = await formRef.value.validate().catch(() => false)
+      if (!valid) return
       submitting.value = true
       try {
         if (isEdit.value) {
@@ -152,7 +166,8 @@ export default {
         }
         router.push('/datasources')
       } catch (error) {
-        ElMessage.error(isEdit.value ? '更新失败' : '创建失败')
+        testResult.value = { success: false, message: error.message || (isEdit.value ? '更新失败' : '创建失败') }
+        testDialogVisible.value = true
       } finally {
         submitting.value = false
       }
@@ -195,6 +210,8 @@ export default {
       submitting,
       isEdit,
       proxyServers,
+      testDialogVisible,
+      testResult,
       loadProxyServers,
       handleProxyChange,
       handleTest,
