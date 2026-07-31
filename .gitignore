@@ -77,5 +77,7 @@ backend/htmlcov/
 .coverage
 htmlcov/
 
-# AtomCode local-scope configs (machine-specific)
-.atomcode/local/
+# AtomCode machine-local state. Keep reusable project skills versioned.
+.atomcode/*
+!.atomcode/skills/
+!.atomcode/skills/**
