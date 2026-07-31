@@ -32,6 +32,7 @@ from app.repositories.semantic_metric_repository import SemanticMetricRepository
 from app.utils.sql_validator import SQLValidator
 from app.utils.sql_normalizer import strip_trailing_semicolon, has_multi_level_table_reference, has_forbidden_sql_tokens
 from app.schemas.ai_analyst import AIAnalystChatResponse, AIAnalystMessage, AIAnalystToolCall
+from app.schemas.query import SQLQueryRequest
 from pydantic import BaseModel, Field
 from app.schemas.semantic_metric import SemanticMetricQueryRequest
 from app.services.semantic_metric_query_service import SemanticMetricQueryService
@@ -81,7 +82,7 @@ class AIAnalystService:
         if self._system_prompt_cache:
             return self._system_prompt_cache
         settings = get_settings()
-        prompt_path = getattr(settings, 'ai_analyst_system_prompt_path', None) or "../prompts/ai_analyst/system_prompt.md"
+        prompt_path = getattr(settings, 'ai_analyst_system_prompt_path', None) or "prompts/ai_analyst/system_prompt.md"
         template = self._prompt_mgr.load_template(prompt_path, "ai_analyst_system")
         if template:
             self._system_prompt_cache = template
@@ -130,7 +131,7 @@ class AIAnalystService:
                                "sql": {"type": "string", "description": "SELECT 语句"},
                                "data_source_id": {"type": "integer", "description": "数据源 ID"}},
                                "required": ["sql", "data_source_id"]}),
-            ToolDefinition(name="get_schema", description="获取数据库表结构",
+            ToolDefinition(name="get_schema", description="仅当语义层文档未覆盖表结构时，补充获取表名和列名",
                            parameters={"type": "object", "properties": {
                                "data_source_id": {"type": "integer", "description": "数据源 ID"},
                                "table_name": {"type": "string", "description": "表名（可选）"}},
@@ -164,8 +165,9 @@ class AIAnalystService:
     # ── 缓存 ──────────────────────────────────────
 
     @staticmethod
-    def _cache_key(msg: str, ds_id: int, gid: int = None) -> str:
-        return f"ai_analyst:cache:{hashlib.md5(f'{msg}:{ds_id}:{gid or ''}'.encode()).hexdigest()}"
+    def _cache_key(msg: str, ds_id: int, gid: int = None, user_id: int = None) -> str:
+        payload = f"{msg}:{ds_id}:{gid or ''}:{user_id or ''}"
+        return f"ai_analyst:cache:{hashlib.md5(payload.encode()).hexdigest()}"
 
     def _get_cached_response(self, key: str) -> Optional[str]:
         try:
@@ -182,14 +184,14 @@ class AIAnalystService:
         except Exception:
             pass
 
-    def _get_semantic_cache(self, message: str, ds_id: int, threshold: float = 0.92) -> Optional[str]:
+    def _get_semantic_cache(self, message: str, ds_id: int, user_id: int, threshold: float = 0.92) -> Optional[str]:
         try:
             r = get_redis()
             llm = self._get_llm_client()
             qemb = llm.get_embedding(message)
             if not qemb:
                 return None
-            items = r.hgetall(f"{_SEMANTIC_CACHE_PREFIX}index:{ds_id}")
+            items = r.hgetall(f"{_SEMANTIC_CACHE_PREFIX}index:{user_id}:{ds_id}")
             if not items:
                 return None
             best_score, best_ans = 0.0, None
@@ -215,14 +217,14 @@ class AIAnalystService:
             pass
         return None
 
-    def _set_semantic_cache(self, message: str, answer: str, ds_id: int, ttl: int = 3600):
+    def _set_semantic_cache(self, message: str, answer: str, ds_id: int, user_id: int, ttl: int = 3600):
         try:
             llm = self._get_llm_client()
             qemb = llm.get_embedding(message)
             if not qemb:
                 return
             r = get_redis()
-            key = f"{_SEMANTIC_CACHE_PREFIX}index:{ds_id}"
+            key = f"{_SEMANTIC_CACHE_PREFIX}index:{user_id}:{ds_id}"
             entry = {"question": message, "answer": answer, "embedding": qemb, "ts": time.time()}
             r.hset(key, hashlib.md5(message.encode()).hexdigest(), json.dumps(entry, ensure_ascii=False))
             r.expire(key, ttl)
@@ -260,7 +262,7 @@ class AIAnalystService:
 
     def _build_tools_prompt(self, ds_id: int) -> str:
         s = get_settings()
-        path = getattr(s, 'ai_analyst_tools_prompt_path', None) or "../prompts/ai_analyst/tools.md"
+        path = getattr(s, 'ai_analyst_tools_prompt_path', None) or "prompts/ai_analyst/tools.md"
         tpl = self._prompt_mgr.load_template(path, "ai_analyst_tools")
         return tpl.replace("{data_source_id}", str(ds_id)) if tpl else ""
 
@@ -275,7 +277,9 @@ class AIAnalystService:
 
     # ── SQL 执行（P0-2 + P1-4 + P1-6） ────────────
 
-    def execute_sql_tool(self, sql: str, ds_id: int) -> Dict[str, Any]:
+    def execute_sql_tool(self, sql: str, data_source_id: int, user_id: int = None) -> Dict[str, Any]:
+        if user_id is None:
+            return {"success": False, "error": "缺少用户上下文"}
         sql = strip_trailing_semicolon(sql)
         if has_forbidden_sql_tokens(sql):
             return {"success": False, "error": "不允许使用 QUALIFY"}
@@ -287,14 +291,20 @@ class AIAnalystService:
         ok, msg = SQLValidator.validate(sql)
         if not ok:
             return {"success": False, "error": f"SQL 验证失败: {msg}"}
-        ds = self.ds_repo.get_by_id(ds_id)
-        if not ds:
-            return {"success": False, "error": "数据源不存在"}
         if has_multi_level_table_reference(sql):
             return {"success": False, "error": "表名格式错误，只允许 库名.表名"}
-        from app.utils.db_executor import execute_query
         try:
-            rows, cols = execute_query(ds, sql)
+            response = self.query_service.execute_sql(
+                SQLQueryRequest(
+                    data_source_id=data_source_id,
+                    sql=sql,
+                    page=1,
+                    page_size=2000,
+                    skip_deep_pagination_check=True,
+                ),
+                user_id=user_id,
+            )
+            rows, cols = response.rows, response.columns
         except Exception as e:
             return {"success": False, "error": f"SQL 执行失败: {e}", "columns": [], "rows": [], "total": 0}
         if not rows:
@@ -302,26 +312,26 @@ class AIAnalystService:
         result = {"success": True, "columns": cols, "rows": rows[:2000], "total": len(rows),
                   "truncated": len(rows) > 2000, "execution_time_ms": 0}
 
+        insights = self._auto_statistical_summary(cols, rows)
+        patterns = self._auto_detect_patterns(cols, rows)
+        warns = self._check_sql_quality(sql, result)
+
         # ── 自学习: 成功后自动保存为 SQL 修正案例（仅保存非全表扫描的查询） ──
         if "WHERE" in sql.upper() or "LIMIT" in sql.upper() or "GROUP BY" in sql.upper():
             try:
-                from app.services.sql_correction_service import SqlCorrectionService
                 self._save_sql_learning_case(
-                    ds_id=ds_id, sql=sql, rows=rows, cols=cols,
+                    ds_id=data_source_id, sql=sql, rows=rows, cols=cols,
                     insights=insights, patterns=patterns, warns=warns
                 )
             except Exception:
                 pass
         # P0-2: 自动统计
-        insights = self._auto_statistical_summary(cols, rows)
         if insights:
             result["_auto_insights"] = insights
         # P1-4: 模式检测
-        patterns = self._auto_detect_patterns(cols, rows)
         if patterns:
             result["_auto_patterns"] = patterns
         # P1-6: 质量检查
-        warns = self._check_sql_quality(sql, result)
         if warns:
             result["_sql_quality_warnings"] = warns
         return result
@@ -462,28 +472,30 @@ class AIAnalystService:
         except Exception:
             return False
 
-    def list_metrics_tool(self, ds_id: int, uid: int = None) -> Dict[str, Any]:
-        if uid is None:
+    def list_metrics_tool(self, data_source_id: int, user_id: int = None) -> Dict[str, Any]:
+        if user_id is None:
             return {"success": False, "error": "缺少用户上下文", "metrics": []}
         try:
+            self.query_service.data_source_service.require_access(data_source_id, user_id)
             metrics = SemanticMetricRepository(self.db).list_visible_for_data_source(
-                ds_id, uid, self._is_admin_user(uid), 50, True)
+                data_source_id, user_id, self._is_admin_user(user_id), 50, True)
             return {"success": True, "metrics": [{"metric_key": m.metric_key, "name": m.name, "description": m.description,
                      "metric_expression": m.metric_expression, "dimensions": m.dimensions or [], "time_column": m.time_column}
                     for m in metrics], "total": len(metrics)}
         except Exception as e:
             return {"success": False, "error": str(e), "metrics": []}
 
-    def query_metric_tool(self, metric_key: str, ds_id: int, uid: int = None,
+    def query_metric_tool(self, metric_key: str, data_source_id: int, user_id: int = None,
                           dimensions: list = None, start_time: str = None, end_time: str = None,
                           filters: dict = None, page: int = 1, page_size: int = 50,
                           alternate_ds_id: int = None) -> Dict[str, Any]:
-        if uid is None:
+        if user_id is None:
             return {"success": False, "error": "缺少用户上下文"}
-        qid = alternate_ds_id or ds_id
+        qid = alternate_ds_id or data_source_id
         try:
-            admin = self._is_admin_user(uid)
-            vm = SemanticMetricRepository(self.db).get_visible_by_key(metric_key, uid, admin, True)
+            self.query_service.data_source_service.require_access(qid, user_id)
+            admin = self._is_admin_user(user_id)
+            vm = SemanticMetricRepository(self.db).get_visible_by_key(metric_key, user_id, admin, True)
             if not vm:
                 return {"success": False, "error": "指标不存在或已禁用"}
             if vm.data_source_id != qid:
@@ -491,18 +503,18 @@ class AIAnalystService:
             _, result = SemanticMetricQueryService(self.db).execute(
                 SemanticMetricQueryRequest(metric_key=metric_key, start_time=start_time, end_time=end_time,
                                             dimensions=dimensions or [], filters=filters or {},
-                                            page=page, page_size=page_size), uid, admin)
+                                            page=page, page_size=page_size), user_id, admin)
             return {"success": True, "metric": {"metric_key": vm.metric_key, "name": vm.name,
                      "dimensions": vm.dimensions or [], "time_column": vm.time_column},
                      "columns": result.columns, "rows": result.rows[:100], "total": result.total}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def get_schema_tool(self, ds_id: int, table_name: str = None) -> Dict[str, Any]:
-        ds = self.ds_repo.get_by_id(ds_id)
-        if not ds:
-            return {"success": False, "error": "数据源不存在"}
+    def get_schema_tool(self, data_source_id: int, table_name: str = None, user_id: int = None) -> Dict[str, Any]:
+        if user_id is None:
+            return {"success": False, "error": "缺少用户上下文"}
         try:
+            ds = self.query_service.data_source_service.require_access(data_source_id, user_id)
             from app.utils.db_executor import execute_query
             db_type = (ds.type or "").upper()
             if db_type in ("POSTGRES", "POSTGRESQL", "PG"):
@@ -703,12 +715,16 @@ class AIAnalystService:
 
     # ── Agent 核心 ──────────────────────────────────
 
-    def _execute_tool(self, action: Dict, ds_id: int, uid: int = None) -> Dict:
+    def _execute_tool(self, action: Dict, data_source_id: int, user_id: int = None) -> Dict:
         name, inp = action.get("tool", ""), action.get("input", {})
         if name == "execute_sql":
-            return self.execute_sql_tool(inp.get("sql", ""), inp.get("data_source_id", ds_id))
+            return self.execute_sql_tool(
+                inp.get("sql", ""), inp.get("data_source_id", data_source_id), user_id
+            )
         if name == "get_schema":
-            return self.get_schema_tool(inp.get("data_source_id", ds_id), inp.get("table_name"))
+            return self.get_schema_tool(
+                inp.get("data_source_id", data_source_id), inp.get("table_name"), user_id
+            )
         if name == "generate_chart":
             return self.generate_chart_tool(inp.get("chart_type", "bar"), inp.get("data", []),
                                              inp.get("x_axis_field", ""), inp.get("y_axis_field", ""),
@@ -716,9 +732,9 @@ class AIAnalystService:
         if name == "analyze_data":
             return self.analyze_data_tool(inp.get("data", []), inp.get("columns", []), inp.get("question", ""))
         if name == "list_metrics":
-            return self.list_metrics_tool(inp.get("data_source_id", ds_id), uid)
+            return self.list_metrics_tool(inp.get("data_source_id", data_source_id), user_id)
         if name == "query_metric":
-            return self.query_metric_tool(inp.get("metric_key", ""), inp.get("data_source_id", ds_id), uid,
+            return self.query_metric_tool(inp.get("metric_key", ""), inp.get("data_source_id", data_source_id), user_id,
                                            inp.get("dimensions"), inp.get("start_time"), inp.get("end_time"),
                                            inp.get("filters"), inp.get("page", 1), inp.get("page_size", 50),
                                            inp.get("alternate_ds_id"))
@@ -735,7 +751,26 @@ class AIAnalystService:
             if "_sql_quality_warnings" in result:
                 c["_sql_quality_warnings"] = result["_sql_quality_warnings"]
             return c
+        if name == "get_schema" and result.get("success"):
+            tables = []
+            for table in result.get("tables", []):
+                column_names = [column.get("column") for column in table.get("columns", [])]
+                tables.append({
+                    "table_name": table.get("table_name"),
+                    "column_count": table.get("column_count", len(column_names)),
+                    "columns_preview": column_names[:12],
+                    "columns_truncated": len(column_names) > 12,
+                })
+            return {
+                "success": True,
+                "total_count": result.get("total_count", len(tables)),
+                "tables": tables,
+            }
         return result
+
+    def _compact_tool_result_for_llm(self, name: str, result: Dict) -> Dict:
+        """Compatibility alias with a descriptive public helper name."""
+        return self._compact_for_llm(name, result)
 
     def _fmt_tool(self, name: str, result: Dict, limit: int = 12000) -> str:
         return json.dumps(self._compact_for_llm(name, result), ensure_ascii=False, default=str)[:limit]
@@ -774,19 +809,24 @@ class AIAnalystService:
 
     # ── 同步 chat ──────────────────────────────────
 
-    def chat(self, message: str, ds_id: int, cid: str = None,
-             gid: int = None, uid: int = None) -> AIAnalystChatResponse:
+    def chat(self, message: str, data_source_id: int, conversation_id: str = None,
+             group_id: int = None, user_id: int = None) -> AIAnalystChatResponse:
+        if user_id is None:
+            raise ValueError("缺少用户上下文")
+        self.query_service.data_source_service.require_access(data_source_id, user_id)
+        ds_id, cid, gid, uid = data_source_id, conversation_id, group_id, user_id
         if not cid:
             cid = str(uuid.uuid4())
-        ck = self._cache_key(message, ds_id, gid)
+        scoped_cid = f"{uid}:{cid}"
+        ck = self._cache_key(message, ds_id, gid, uid)
         cached = self._get_cached_response(ck)
         if cached:
             return AIAnalystChatResponse(conversation_id=cid, message=AIAnalystMessage(role="assistant", content=cached))
-        sc = self._get_semantic_cache(message, ds_id)
+        sc = self._get_semantic_cache(message, ds_id, uid)
         if sc:
             return AIAnalystChatResponse(conversation_id=cid, message=AIAnalystMessage(role="assistant", content=sc))
 
-        history = self._get_conversation_history(cid)
+        history = self._get_conversation_history(scoped_cid)
         tp = self._build_tools_prompt(ds_id)
         sem = build_semantic_runtime_context(self.db, ds_id, message, max_chars=0)
         from app.services.sql_correction_service import SqlCorrectionService
@@ -859,8 +899,8 @@ class AIAnalystService:
 
             all_text.append(response_text)
             self._set_cached_response(ck, response_text)
-            self._set_semantic_cache(message, response_text, ds_id)
-            self._save_conversation_history(cid, [{"role": "user", "content": message}, {"role": "assistant", "content": response_text}])
+            self._set_semantic_cache(message, response_text, ds_id, uid)
+            self._save_conversation_history(scoped_cid, [{"role": "user", "content": message}, {"role": "assistant", "content": response_text}])
             return AIAnalystChatResponse(conversation_id=cid,
                 message=AIAnalystMessage(role="assistant", content=response_text, tool_calls=tool_recs or None, chart_config=chart_cfg))
 
@@ -870,11 +910,16 @@ class AIAnalystService:
 
     # ── 流式 chat ──────────────────────────────────
 
-    async def chat_stream(self, message: str, ds_id: int, cid: str = None,
-                           gid: int = None, uid: int = None):
+    async def chat_stream(self, message: str, data_source_id: int, conversation_id: str = None,
+                           group_id: int = None, user_id: int = None):
+        if user_id is None:
+            raise ValueError("缺少用户上下文")
+        self.query_service.data_source_service.require_access(data_source_id, user_id)
+        ds_id, cid, gid, uid = data_source_id, conversation_id, group_id, user_id
         if not cid:
             cid = str(uuid.uuid4())
-        history = self._get_conversation_history(cid)
+        scoped_cid = f"{uid}:{cid}"
+        history = self._get_conversation_history(scoped_cid)
         tp = self._build_tools_prompt(ds_id)
         sem = build_semantic_runtime_context(self.db, ds_id, message, max_chars=0)
         from app.services.sql_correction_service import SqlCorrectionService
@@ -935,7 +980,7 @@ class AIAnalystService:
                         continue
                     else:
                         all_text = "".join(text_parts)
-                        self._save_conversation_history(cid, [{"role": "user", "content": message}, {"role": "assistant", "content": all_text}])
+                        self._save_conversation_history(scoped_cid, [{"role": "user", "content": message}, {"role": "assistant", "content": all_text}])
                         yield {"type": "done", "conversation_id": cid}
                         return
                 else:
@@ -962,7 +1007,7 @@ class AIAnalystService:
                         continue
                     for t in tokens:
                         yield {"type": "token", "content": t}
-                    self._save_conversation_history(cid, [{"role": "user", "content": message}, {"role": "assistant", "content": text}])
+                    self._save_conversation_history(scoped_cid, [{"role": "user", "content": message}, {"role": "assistant", "content": text}])
                     yield {"type": "done", "conversation_id": cid}
                     return
             except Exception as e:
@@ -976,5 +1021,5 @@ class AIAnalystService:
         for token in llm.chat_stream(messages):
             yield token
 
-    def get_schema(self, ds_id: int, table_name: str = None):
-        return self.get_schema_tool(ds_id, table_name)
+    def get_schema(self, data_source_id: int, table_name: str = None, user_id: int = None):
+        return self.get_schema_tool(data_source_id, table_name, user_id)

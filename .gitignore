@@ -28,7 +28,7 @@ wheels/
 # ML/Data artifacts
 *.pkl
 *.model
-models/
+/models/
 
 # Database
 *.db
@@ -43,7 +43,6 @@ logs/
 
 # Node
 node_modules/
-package-lock.json
 frontend/.env
 frontend/.env.*
 

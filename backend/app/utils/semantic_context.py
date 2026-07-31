@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-SEMANTIC_PROMPT_VERSION = "semantic-snapshot-v11"
+SEMANTIC_PROMPT_VERSION = "semantic-snapshot-v12"
 SEMANTIC_SCHEMA_PATH = Path(__file__).resolve().parents[3] / "semantic" / "semantic_layer.schema.json"
 
 
@@ -59,6 +59,7 @@ def _schema_summary(schema_entry: Dict[str, Any]) -> Dict[str, Any]:
         "join_rules": semantics.get("join_rules", []),
         "default_filters": semantics.get("default_filters", []),
         "forbidden_patterns": semantics.get("forbidden_patterns", []),
+        "semi_additive_metrics": semantics.get("semi_additive_metrics", []),
     }
 
 
@@ -76,6 +77,7 @@ def build_semantic_snapshot(doc: str, data_source_id: int, question: Optional[st
             "禁止发明字段、指标或 join",
             "比率类指标必须先汇总再计算",
             "金额默认按分存储，展示时转换为元",
+            "期初、期末和库存余额禁止跨日期直接求和；区间查询必须先选取开始和结束边界快照",
         ],
         "schema": _schema_summary(schema_entry) if schema_entry else {},
         "document_head": compact_semantic_doc(doc, max_chars=2600),

@@ -115,12 +115,16 @@ def auth_headers(test_user):
     return {"Authorization": f"Bearer {token}"}
 
 @pytest.fixture(scope="function", autouse=True)
-def mock_llm():
+def mock_llm(request):
     """全局 mock LLM 调用，防止测试中真实调用外部 API。
 
     自动应用于所有测试函数。单个测试可通过 patch 覆盖此 mock。
     chat() 返回固定 SQL 响应，避免真实 LLM 调用。
     """
+    if request.node.path.name == "test_llm_client.py":
+        yield None
+        return
+
     mock_content = """
     ```sql
     SELECT * FROM users LIMIT 10

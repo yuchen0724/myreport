@@ -2,7 +2,7 @@ def test_complete_template_workflow(client, auth_headers):
     """测试完整的模板工作流"""
     # 1. 创建模板
     create_response = client.post(
-        "/api/templates/",
+        "/api/templates",
         headers=auth_headers,
         json={
             "name": "工作流测试模板",

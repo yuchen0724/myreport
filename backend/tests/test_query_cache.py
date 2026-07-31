@@ -40,7 +40,7 @@ class TestQueryCache:
         cache_service.redis_client = mock_redis
 
         try:
-            # 第1次请求：应该未命中，返回 400（数据源不存在）
+            # 第1次请求：应该未命中，返回 404（数据源不存在）
             resp1 = client.post(
                 "/api/query/sql",
                 headers=auth_headers,
@@ -49,7 +49,7 @@ class TestQueryCache:
                     "sql": "SELECT 1",
                 },
             )
-            assert resp1.status_code == 400
+            assert resp1.status_code == 404
 
             # 缓存没有被写入（因为数据源不存在，流程在缓存之后抛异常）
             # key没有被set，因为execute_sql在获取ds时就已经raise了
@@ -60,7 +60,7 @@ class TestQueryCache:
             from app.services.query_service import QueryService
 
             service = QueryService(db_session)
-            key = service._make_cache_key("SELECT 1", None, 1, 50, None, False)
+            key = service._make_cache_key("SELECT 1", None, 1, 50, None, False, 1, test_user.id)
             assert key.startswith("query_result:")
             assert len(key) > 20
 
@@ -82,15 +82,20 @@ class TestQueryCache:
 
         service = QueryService(db_session)
 
-        key1 = service._make_cache_key("SELECT * FROM t", None, 1, 50, None, False)
-        key2 = service._make_cache_key("SELECT * FROM t", None, 2, 50, None, False)
-        key3 = service._make_cache_key("SELECT * FROM t", None, 1, 100, None, False)
-        key4 = service._make_cache_key("SELECT * FROM t", {"id": 1}, 1, 50, None, False)
-        key5 = service._make_cache_key("SELECT * FROM t2", None, 1, 50, None, False)
+        key1 = service._make_cache_key("SELECT * FROM t", None, 1, 50, None, False, 1, 1)
+        key2 = service._make_cache_key("SELECT * FROM t", None, 2, 50, None, False, 1, 1)
+        key3 = service._make_cache_key("SELECT * FROM t", None, 1, 100, None, False, 1, 1)
+        key4 = service._make_cache_key("SELECT * FROM t", {"id": 1}, 1, 50, None, False, 1, 1)
+        key5 = service._make_cache_key("SELECT * FROM t2", None, 1, 50, None, False, 1, 1)
 
         # 不同参数必须生成不同 key
         keys = [key1, key2, key3, key4, key5]
         assert len(set(keys)) == len(keys), f"缓存 key 冲突: {keys}"
+
+        assert service._make_cache_key("SELECT 1", None, 1, 50, None, False, 1, 1) != \
+            service._make_cache_key("SELECT 1", None, 1, 50, None, False, 2, 1)
+        assert service._make_cache_key("SELECT 1", None, 1, 50, None, False, 1, 1) != \
+            service._make_cache_key("SELECT 1", None, 1, 50, None, False, 1, 2)
 
     def test_response_cache_hit_field(self):
         """测试 cache_hit 字段在 schema 中的存在"""

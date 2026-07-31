@@ -70,12 +70,16 @@ def test_ai_analyst_list_metrics_tool_filters_by_current_user(db_session, test_u
 
 
 def test_ai_analyst_chat_includes_semantic_context(monkeypatch, db_session, test_user):
+    data_source = _create_data_source(db_session, test_user.id)
     service = AIAnalystService(db_session)
     captured = {}
 
     monkeypatch.setattr(service, "_get_conversation_history", lambda conversation_id: [])
     monkeypatch.setattr(service, "_build_tools_prompt", lambda data_source_id: "TOOLS_PROMPT")
-    monkeypatch.setattr(service, "_get_llm_client", lambda: type("C", (), {"chat": lambda self, messages, temperature=0.0: '"done"'})())
+    monkeypatch.setattr(service, "_get_llm_client", lambda: type("C", (), {
+        "supports_tools": False,
+        "chat": lambda self, messages, temperature=0.0: '"done"',
+    })())
     monkeypatch.setattr(service, "_parse_action", lambda response_text: None)
     monkeypatch.setattr(service, "_save_conversation_history", lambda *args, **kwargs: None)
 
@@ -87,7 +91,7 @@ def test_ai_analyst_chat_includes_semantic_context(monkeypatch, db_session, test
 
     response = service.chat(
         message="查询销售额",
-        data_source_id=1,
+        data_source_id=data_source.id,
         conversation_id="conv-1",
         group_id=812,
         user_id=test_user.id,
@@ -151,7 +155,7 @@ def test_ai_analyst_query_metric_tool_rejects_invisible_metric(db_session, test_
     )
 
     assert result["success"] is False
-    assert result["error"] == "指标不存在或已禁用"
+    assert result["error"] == "您没有权限访问此数据源"
 
 
 def test_ai_analyst_execute_tool_dispatches_metric_tools(db_session, test_user):

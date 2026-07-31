@@ -12,6 +12,7 @@ from app.utils.sql_validator import SQLValidator
 from app.repositories.query_history_repository import QueryHistoryRepository
 from app.models.query_history import QueryHistory
 from app.models.data_source import DataSource
+from app.exceptions import AuthorizationError, NotFoundError
 
 
 # =============================================================================
@@ -193,6 +194,7 @@ class TestQueryService:
         ds.use_proxy = False
         ds.proxy_server_id = None
         ds.is_active = True
+        ds.created_by = 1
         return ds
 
     @pytest.fixture
@@ -227,6 +229,8 @@ class TestQueryService:
             page_size=50,
             cursor=None,
             skip_deep_pagination_check=False,
+            data_source_id=1,
+            user_id=1,
         )
         assert cache_key.startswith("query_result:")
         assert len(cache_key) > 20
@@ -239,6 +243,8 @@ class TestQueryService:
             page_size=50,
             cursor=None,
             skip_deep_pagination_check=False,
+            data_source_id=1,
+            user_id=1,
         )
         assert cache_key == cache_key2
 
@@ -250,6 +256,8 @@ class TestQueryService:
             page_size=50,
             cursor=None,
             skip_deep_pagination_check=False,
+            data_source_id=1,
+            user_id=1,
         )
         assert cache_key != cache_key3
 
@@ -394,7 +402,7 @@ class TestQueryService:
             sql="SELECT 1",
         )
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             service.execute_sql(request, user_id=1)
         
         assert "数据源不存在" in str(exc_info.value)
@@ -675,6 +683,27 @@ class TestQueryService:
     def test_execute_sql_with_params(self, db_session):
         """测试带参数的 SQL 查询（边缘场景）"""
         pass  # 已经在 test_execute_sql_success 中覆盖
+
+    def test_execute_sql_rejects_other_users_data_source(self, db_session, test_user):
+        data_source = DataSource(
+            name="Other user's source",
+            type="MYSQL",
+            host="localhost",
+            port=3306,
+            database="testdb",
+            username="reader",
+            password_encrypted="encrypted",
+            created_by=test_user.id + 100,
+            is_active=True,
+        )
+        db_session.add(data_source)
+        db_session.commit()
+
+        service = QueryService(db_session)
+        request = SQLQueryRequest(data_source_id=data_source.id, sql="SELECT 1")
+
+        with pytest.raises(AuthorizationError):
+            service.execute_sql(request, user_id=test_user.id)
 
 
 # =============================================================================

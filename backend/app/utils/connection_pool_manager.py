@@ -76,8 +76,12 @@ class ConnectionPoolManager:
                     pdb.close()
 
             if socks_host and socks_port:
-                from app.utils.db_executor import socks5_pool_workaround
-                attach, _ = socks5_pool_workaround(socks_host, socks_port)
+                from app.utils.db_executor import build_pymysql_socks_creator
+                creator = build_pymysql_socks_creator(
+                    proxy_host=socks_host, proxy_port=socks_port,
+                    host=host, port=port, username=username,
+                    password=password, database=database,
+                )
                 engine = create_engine(
                     conn_url,
                     poolclass=QueuePool,
@@ -85,9 +89,8 @@ class ConnectionPoolManager:
                     max_overflow=10,
                     pool_pre_ping=True,
                     pool_recycle=3600,
-                    connect_args=connect_args,
+                    creator=creator,
                 )
-                attach(engine)
             else:
                 engine = create_engine(
                 conn_url,

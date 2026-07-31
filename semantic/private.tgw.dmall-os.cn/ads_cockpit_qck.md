@@ -278,6 +278,8 @@
 
 ### 主题四：库存汇总
 
+> **时间半可加规则**：`end_stock_num`、`end_stock_taxed_cost`、`end_stock_untaxed_cost` 等库存余额只能在同一快照日按门店、商品或类目汇总，禁止跨 `dt` 直接求和。区间期初取开始日前最近一期期末快照（或表内明确的期初字段），区间期末取结束日或此前最近一期期末快照。必须先按事实粒度选出边界记录，再汇总业务维度。
+
 ---
 
 #### 14. ads_cockpit_qck.ads_cockpit_qck_store_ware_stock_item_agg_d_v1（库存日汇总 - 商品维度）
@@ -784,6 +786,8 @@ WHERE dt = 20240510
 ORDER BY end_stock_untaxed_cost DESC
 LIMIT 20;
 ```
+
+区间库存查询不得写成 `SUM(end_stock_num)` 并覆盖多个 `dt`。销售、收货、退货等期间发生额可以在日期区间内累加；期初和期末必须分别从边界快照计算。
 
 ### 档期促销分析
 

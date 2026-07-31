@@ -9,6 +9,8 @@
 
 import time
 import threading
+import hashlib
+import uuid
 from collections import defaultdict
 from typing import Dict, Optional
 
@@ -37,6 +39,11 @@ def _get_path_config(path: str) -> Dict:
         if path.startswith(prefix):
             return config
     return {"max_requests": 100, "window": 60}
+
+
+def _path_token(path: str) -> str:
+    """Return a stable path partition across Python processes and restarts."""
+    return hashlib.sha256(path.encode("utf-8")).hexdigest()[:12]
 
 
 class MemoryRateLimiterBackend:
@@ -72,6 +79,9 @@ class MemoryRateLimiterBackend:
     def get_limit(self, path: str) -> int:
         return _get_path_config(path)["max_requests"]
 
+    def get_window(self, path: str) -> int:
+        return _get_path_config(path)["window"]
+
     def clear(self):
         with self._lock:
             self._requests.clear()
@@ -86,9 +96,7 @@ class RedisRateLimiterBackend:
         self.default_window = window
 
     def _redis_key(self, key: str, path: str) -> str:
-        config = _get_path_config(path)
-        # 不同路径组使用不同后缀以确保键的分布
-        return f"{key}:{hash(path) % 100}"
+        return key
 
     def is_allowed(self, key: str, path: str) -> bool:
         config = _get_path_config(path)
@@ -100,7 +108,8 @@ class RedisRateLimiterBackend:
         # 移除窗口外的记录
         pipe.zremrangebyscore(rkey, 0, now - window)
         # 添加当前请求
-        pipe.zadd(rkey, {str(now): now})
+        member = f"{time.time_ns()}:{uuid.uuid4().hex}"
+        pipe.zadd(rkey, {member: now})
         # 设置过期时间
         pipe.expire(rkey, window + 10)
         # 统计窗口内请求数
@@ -121,6 +130,9 @@ class RedisRateLimiterBackend:
 
     def get_limit(self, path: str) -> int:
         return _get_path_config(path)["max_requests"]
+
+    def get_window(self, path: str) -> int:
+        return _get_path_config(path)["window"]
 
     def clear(self):
         """清空所有限流键（测试用）"""
@@ -144,7 +156,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         settings = get_settings()
         max_r = getattr(settings, 'rate_limit_max_requests', 100)
-        window = getattr(settings, 'rate_limit_window', 60)
+        window = getattr(settings, 'rate_limit_window_seconds', 60)
+        self._trusted_proxy_ips = set(getattr(settings, 'rate_limit_trusted_proxy_ips', []))
 
         # 尝试使用 Redis 后端，不可用时回退到内存后端
         self._backend = self._init_backend(max_r, window)
@@ -168,7 +181,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
 
         client_ip = self._get_client_ip(request)
-        path_hash = hash(request.url.path) % 100
+        path_hash = _path_token(request.url.path)
         user_id = self._get_user_id_from_request(request)
         if user_id is not None:
             key = f"rate_limit:user:{user_id}:{path_hash}"
@@ -177,19 +190,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         if not self._backend.is_allowed(key, request.url.path):
             limit = self._backend.get_limit(request.url.path)
+            window = self._backend.get_window(request.url.path)
             return JSONResponse(
                 status_code=HTTP_429_TOO_MANY_REQUESTS,
                 content={
                     "detail": "请求过于频繁，请稍后再试",
                     "limit": limit,
                     "remaining": 0,
-                    "retry_after": 60,
+                    "retry_after": window,
                 },
                 headers={
                     "X-RateLimit-Limit": str(limit),
                     "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset": str(int(time.time()) + 60),
-                    "Retry-After": "60",
+                    "X-RateLimit-Reset": str(int(time.time()) + window),
+                    "Retry-After": str(window),
                 },
             )
 
@@ -203,13 +217,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return response
 
     def _get_client_ip(self, request: Request) -> str:
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip
-        return request.client.host if request.client else "unknown"
+        peer_ip = request.client.host if request.client else "unknown"
+        if peer_ip in self._trusted_proxy_ips:
+            forwarded_for = request.headers.get("X-Forwarded-For")
+            if forwarded_for:
+                return forwarded_for.split(",")[0].strip()
+            real_ip = request.headers.get("X-Real-IP")
+            if real_ip:
+                return real_ip.strip()
+        return peer_ip
 
     def _get_user_id_from_request(self, request: Request) -> Optional[int]:
         """从 Authorization: Bearer <token> 中提取 user_id，失败时返回 None"""

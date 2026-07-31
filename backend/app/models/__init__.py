@@ -19,6 +19,7 @@ from app.models.subscription import QuerySubscription, SubscriptionExecution
 from app.models.sql_review import SqlReview
 from app.models.rca import RcaMetricConfig, RcaAnalysisTask, RcaAnomaly
 from app.models.semantic_metric import SemanticMetric, SemanticMetricPermission, SemanticMetricVersion
+from app.models.sql_correction import SqlCorrection
 
 __all__ = [
     "User",
@@ -45,5 +46,6 @@ __all__ = [
     "SemanticMetric",
     "SemanticMetricPermission",
     "SemanticMetricVersion",
+    "SqlCorrection",
     "Template",
 ]

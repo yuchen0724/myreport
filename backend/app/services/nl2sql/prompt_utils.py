@@ -23,7 +23,7 @@ class PromptManager:
         cache_key = f"{template_name}:{template_path}"
         path = Path(template_path)
         if not path.is_absolute():
-            path = Path(__file__).resolve().parents[2] / path
+            path = Path(__file__).resolve().parents[3] / path
 
         try:
             stat_result = path.stat()
@@ -88,6 +88,7 @@ def build_system_prompt(
     schema_prompt: str,
     group_id: Optional[int] = None,
     semantic_metrics_prompt: Optional[str] = None,
+    settings=None,
 ) -> str:
     """构建 NL2SQL 系统提示词。"""
     from datetime import datetime
@@ -105,7 +106,7 @@ def build_system_prompt(
         "（例如 `ads_cockpit_freedom.store_sales`），否则跨库查询会失败！"
     )
 
-    settings = get_settings()
+    settings = settings or get_settings()
     custom_template = prompt_mgr.load_template(
         getattr(settings, "nl2sql_system_prompt_path", None),
         "system",
@@ -136,9 +137,10 @@ def build_repair_prompt(
     question: str,
     failed_sql: str,
     error_msg: str,
+    settings=None,
 ) -> str:
     """构建 SQL 修复提示词。"""
-    settings = get_settings()
+    settings = settings or get_settings()
     custom_template = prompt_mgr.load_template(
         getattr(settings, "nl2sql_repair_prompt_path", None),
         "repair",

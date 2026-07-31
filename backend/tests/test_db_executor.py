@@ -368,34 +368,18 @@ class TestProxyFunctions:
         self, mock_session_local, mock_proxy_repo_class,
         mock_ds_with_proxy, monkeypatch
     ):
-        """SOCKS5 代理配置正常时返回有效的 original_socket 和 use_socks=True"""
-        # 模拟 ProxyServerRepository.get_by_id 返回一个 SOCKS5 代理
-        mock_proxy = MagicMock()
-        mock_proxy.proxy_type = "socks5"
-        mock_proxy.host = "proxy.example.com"
-        mock_proxy.port = 1080
-
-        mock_repo_instance = MagicMock()
-        mock_repo_instance.get_by_id.return_value = mock_proxy
-        mock_proxy_repo_class.return_value = mock_repo_instance
-
-        mock_db_session = MagicMock()
-        mock_session_local.return_value = mock_db_session
+        """SOCKS5 配置不再返回或替换全局 socket。"""
+        monkeypatch.setattr(
+            "app.utils.db_executor._get_proxy_info",
+            lambda ds: {"host": "proxy.example.com", "port": 1080},
+        )
 
         from app.utils.db_executor import setup_proxy_for_ds, restore_socket
 
         original_socket, use_socks = setup_proxy_for_ds(mock_ds_with_proxy)
 
         assert use_socks is True
-        assert original_socket is not None
-
-        # 验证代理仓库查询
-        mock_repo_instance.get_by_id.assert_called_once_with(1)
-        mock_db_session.close.assert_called_once()
-
-        # 恢复 socket 避免影响其他测试
-        if use_socks and original_socket:
-            restore_socket(original_socket)
+        assert original_socket is None
 
     @patch("app.repositories.proxy_server_repository.ProxyServerRepository")
     @patch("app.core.database.SessionLocal")
@@ -449,11 +433,11 @@ class TestProxyFunctions:
 
         from app.utils.db_executor import _apply_socks_proxy
 
-        with pytest.raises(RuntimeError, match="SOCKS5 代理需要 PySocks 库"):
+        with pytest.raises(RuntimeError, match="已停用"):
             _apply_socks_proxy("host", 1080)
 
     def test_apply_and_restore_socks_proxy(self, monkeypatch):
-        """_apply_socks_proxy 替换 socket，restore_socket 恢复"""
+        """旧全局补丁入口必须拒绝执行且不得改变 socket。"""
         import app.utils.db_executor as db_exec
 
         # 确保 _HAS_SOCKS 为 True
@@ -472,20 +456,10 @@ class TestProxyFunctions:
         mock_socksocket = MagicMock()
         mock_socks.socksocket = mock_socksocket
 
-        _apply_socks_proxy("proxy.example.com", 1080, timeout=60)
-
-        # 验证 set_default_proxy 被调用
-        mock_socks.set_default_proxy.assert_called_once_with(5, "proxy.example.com", 1080)
-        # 验证 socket.socket 被替换
-        assert _socket.socket == mock_socksocket
-        # 验证默认超时被设置
-        assert _socket.getdefaulttimeout() == 60
-
-        # 恢复
-        restore_socket(original_socket)
-
-        # 验证 socket.socket 恢复
+        with pytest.raises(RuntimeError, match="已停用"):
+            _apply_socks_proxy("proxy.example.com", 1080, timeout=60)
         assert _socket.socket == original_socket
+        mock_socks.set_default_proxy.assert_not_called()
 
     def test_restore_socket_stores_default(self, monkeypatch):
         """restore_socket 恢复 socket 并重置 socks 默认代理"""
@@ -502,7 +476,7 @@ class TestProxyFunctions:
         restore_socket(original)
 
         assert _socket.socket == original
-        mock_socks.set_default_proxy.assert_called_once_with()
+        mock_socks.set_default_proxy.assert_not_called()
 
 
 # ===================================================================
@@ -512,22 +486,20 @@ class TestProxyFunctions:
 
 class TestExecuteQueryWithProxy:
 
-    @patch("app.utils.db_executor.socks_proxy_context")
+    @patch("app.utils.db_executor.build_pymysql_socks_creator")
+    @patch("app.utils.db_executor._get_proxy_info", return_value={"host": "proxy.example.com", "port": 1080})
     @patch("app.utils.db_executor.create_engine")
     @patch("app.utils.db_executor.decrypt_password", return_value="pwd")
     def test_execute_with_proxy(
-        self, mock_decrypt, mock_create_engine, mock_socks_context,
+        self, mock_decrypt, mock_create_engine, mock_proxy_info, mock_creator,
         mock_ds_with_proxy, mock_engine_connection
     ):
         """使用代理时的完整执行流程"""
         mock_engine, mock_conn, mock_result = mock_engine_connection
         mock_create_engine.return_value = mock_engine
 
-        # 模拟 socks_proxy_context 上下文管理器返回 True
-        mock_context = MagicMock()
-        mock_context.__enter__ = MagicMock(return_value=True)
-        mock_context.__exit__ = MagicMock(return_value=False)
-        mock_socks_context.return_value = mock_context
+        creator = MagicMock()
+        mock_creator.return_value = creator
 
         from app.utils.db_executor import execute_query
 
@@ -536,15 +508,15 @@ class TestExecuteQueryWithProxy:
         assert columns == ["id", "name", "age"]
         assert rows == [[1, "Alice", 30], [2, "Bob", 25]]
 
-        # 验证 socks_proxy_context 被调用
-        mock_socks_context.assert_called_once()
-        assert mock_socks_context.call_args[0][0] == mock_ds_with_proxy
+        mock_creator.assert_called_once()
+        assert mock_create_engine.call_args.kwargs["creator"] is creator
 
-    @patch("app.utils.db_executor.socks_proxy_context")
+    @patch("app.utils.db_executor.build_pymysql_socks_creator")
+    @patch("app.utils.db_executor._get_proxy_info", return_value={"host": "proxy.example.com", "port": 1080})
     @patch("app.utils.db_executor.create_engine")
     @patch("app.utils.db_executor.decrypt_password", return_value="pwd")
     def test_execute_with_proxy_restore_on_error(
-        self, mock_decrypt, mock_create_engine, mock_socks_context,
+        self, mock_decrypt, mock_create_engine, mock_proxy_info, mock_creator,
         mock_ds_with_proxy
     ):
         """代理场景下查询失败时仍会恢复 socket"""
@@ -552,36 +524,23 @@ class TestExecuteQueryWithProxy:
         mock_engine.connect.side_effect = OperationalError("mock", "mock", "mock")
         mock_create_engine.return_value = mock_engine
 
-        # 模拟 socks_proxy_context 上下文管理器返回 True
-        mock_context = MagicMock()
-        mock_context.__enter__ = MagicMock(return_value=True)
-        mock_context.__exit__ = MagicMock(return_value=False)
-        mock_socks_context.return_value = mock_context
-
         from app.utils.db_executor import execute_query
 
         with pytest.raises(ValueError, match="查询执行失败"):
             execute_query(mock_ds_with_proxy, "SELECT 1")
 
-        # 代理被 setup
-        mock_socks_context.assert_called_once()
+        assert mock_creator.call_count == 2
 
-    @patch("app.utils.db_executor.socks_proxy_context")
+    @patch("app.utils.db_executor._get_proxy_info", return_value=None)
     @patch("app.utils.db_executor.create_engine")
     @patch("app.utils.db_executor.decrypt_password", return_value="pwd")
     def test_execute_without_proxy_no_restore(
-        self, mock_decrypt, mock_create_engine, mock_socks_context,
+        self, mock_decrypt, mock_create_engine, mock_proxy_info,
         mock_ds, mock_engine_connection
     ):
         """不使用代理时不会调用 restore_socket"""
         mock_engine, mock_conn, mock_result = mock_engine_connection
         mock_create_engine.return_value = mock_engine
-
-        # 未使用代理
-        mock_context = MagicMock()
-        mock_context.__enter__ = MagicMock(return_value=False)
-        mock_context.__exit__ = MagicMock(return_value=False)
-        mock_socks_context.return_value = mock_context
 
         from app.utils.db_executor import execute_query
         # 需要 patch restore_socket 来验证它没有被调用
@@ -625,4 +584,3 @@ class TestExecuteQueryCleanup:
             execute_query(mock_ds, "SELECT 1")
 
         mock_engine.dispose.assert_called_once()
-

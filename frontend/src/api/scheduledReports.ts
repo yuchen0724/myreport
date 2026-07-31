@@ -37,7 +37,7 @@ export function getNextRunTime(cronExpression: string): Promise<{ next_run: stri
 export const createReport = createScheduledReport
 export const updateReport = updateScheduledReport
 export const deleteReport = deleteScheduledReport
-export function toggleReport(id: number, is_active: boolean): Promise<void> {
+export function toggleReport(id: number, is_active: boolean): Promise<ScheduledReport> {
   return updateScheduledReport(id, { is_active } as Partial<ScheduledReport>)
 }
 export function runNow(id: number): Promise<void> {

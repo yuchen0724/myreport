@@ -14,6 +14,12 @@
     - mix_taxed_and_untaxed
     - avg_of_ratios
     - count_bitmap_with_count_star
+    - sum_snapshot_across_time
+    semi_additive_metrics:
+    - fields: [begin_*, opening_*, end_*, closing_*, '*_stock_*']
+      non_additive_dimension: dt
+      opening_rule: start-day opening field, otherwise latest closing snapshot before start
+      closing_rule: latest closing snapshot on or before end
     join_rules: []
     default_filters: []
 - database: ads_cockpit_qck
@@ -32,6 +38,12 @@
     - mix_taxed_and_untaxed
     - avg_of_ratios
     - count_bitmap_with_count_star
+    - sum_snapshot_across_time
+    semi_additive_metrics:
+    - fields: [begin_*, opening_*, end_*, closing_*, '*_stock_*']
+      non_additive_dimension: dt
+      opening_rule: start-day opening field, otherwise latest closing snapshot before start
+      closing_rule: latest closing snapshot on or before end
     join_rules: []
     default_filters: []
 - database: retail_analysis

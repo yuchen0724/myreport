@@ -58,6 +58,7 @@ class NL2SQLService:
         Returns:
             NL2SQL 响应
         """
+        self.query_service.data_source_service.require_access(request.data_source_id, user_id)
         logger.info("=" * 60)
         logger.info("[NL2SQL] 🔵 ========== 新的 NL2SQL 请求 ==========")
         logger.info(f"[NL2SQL] ├─ 用户ID: {user_id}")
@@ -664,6 +665,7 @@ class NL2SQLService:
         return _build_system_prompt_standalone(
             self._prompt_mgr, db_type, db_limitations, schema_prompt,
             group_id=group_id, semantic_metrics_prompt=semantic_metrics_prompt,
+            settings=get_settings(),
         )
 
     @staticmethod
@@ -687,7 +689,9 @@ class NL2SQLService:
 
     def _build_repair_prompt(self, question: str, failed_sql: str, error_msg: str) -> str:
         """构建 SQL 修复提示词（委托 prompt_utils）"""
-        return _build_repair_prompt_standalone(self._prompt_mgr, question, failed_sql, error_msg)
+        return _build_repair_prompt_standalone(
+            self._prompt_mgr, question, failed_sql, error_msg, settings=get_settings()
+        )
 
     def _repair_sql_with_llm(
         self,
@@ -1233,16 +1237,16 @@ class NL2SQLService:
 
     def _get_semantic_dir(self) -> Optional[Path]:
         """获取语义层目录路径"""
+        configured_dir = getattr(get_settings(), "semantic_dir", None)
         possible_dirs = [
-            Path("/home/zhou/myreport/semantic"),
+            Path(configured_dir) if configured_dir else None,
             Path(__file__).parent.parent.parent / "semantic",
             Path(__file__).parent.parent / "semantic",
         ]
         for d in possible_dirs:
-            if d.exists():
+            if d and d.exists():
                 return d
-        # 返回第一个可能的目录（用于创建）
-        return possible_dirs[0]
+        return Path(configured_dir) if configured_dir else possible_dirs[1]
 
     def _fix_sql_aggregate_orderby(self, sql: str) -> str:
         """
@@ -1510,10 +1514,8 @@ class NL2SQLService:
         if not ds:
             raise ValueError("数据源不存在")
 
-        password = decrypt_password(ds.password_encrypted)
-        conn_url = f"mysql+pymysql://{ds.username}:***@{ds.host}:{ds.port}/{ds.database}"
+        from app.services.datasource_engine_factory import DataSourceEngineFactory
 
-        # SOCKS5 代理处理
         proxy_info = None
         if ds.use_proxy and ds.proxy_server_id:
             from app.utils.db_executor import _get_proxy_info
@@ -1521,36 +1523,23 @@ class NL2SQLService:
 
         if proxy_info:
             logger.info(f"[get_groups] 使用 SOCKS5 代理: {proxy_info['host']}:{proxy_info['port']} → {ds.host}:{ds.port}")
-            from app.utils.db_executor import socks5_patch
-            with socks5_patch(proxy_info['host'], proxy_info['port']):
-                engine = create_engine(
-                    conn_url.replace('***', password),
-                    poolclass=QueuePool, pool_size=1, max_overflow=0,
-                    connect_args={"connect_timeout": 10},
-                )
-                try:
-                    with engine.connect() as conn:
-                        result = conn.execute(text("SELECT DISTINCT group_id, group_name FROM ads_cockpit_qck.dim_store ORDER BY group_id"))
-                        rows = [{"group_id": row[0], "group_name": row[1]} for row in result.fetchall()]
-                        logger.info(f"[NL2SQL] └─ Doris 查询成功, 集团数: {len(rows)}")
-                except Exception as e:
-                    logger.error(f"[NL2SQL] ❌ 查询集团列表失败: {e}")
-                    raise
-                finally:
-                    engine.dispose()
+            engine = DataSourceEngineFactory(pool_size=1, max_overflow=0).create_engine_with_proxy(
+                ds, proxy_info['host'], proxy_info['port']
+            )
         else:
             logger.info(f"[get_groups] 直连（无代理）→ {ds.host}:{ds.port}")
-            engine = create_engine(conn_url.replace('***', password), poolclass=QueuePool, pool_size=1, max_overflow=0, connect_args={"connect_timeout": 5})
-            try:
-                with engine.connect() as conn:
-                    result = conn.execute(text("SELECT DISTINCT group_id, group_name FROM ads_cockpit_qck.dim_store ORDER BY group_id"))
-                    rows = [{"group_id": row[0], "group_name": row[1]} for row in result.fetchall()]
-                    logger.info(f"[NL2SQL] └─ Doris 查询成功, 集团数: {len(rows)}")
-            except Exception as e:
-                logger.error(f"[NL2SQL] ❌ 查询集团列表失败: {e}")
-                raise
-            finally:
-                engine.dispose()
+            engine = DataSourceEngineFactory(pool_size=1, max_overflow=0).create_engine(ds)
+
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text("SELECT DISTINCT group_id, group_name FROM ads_cockpit_qck.dim_store ORDER BY group_id"))
+                rows = [{"group_id": row[0], "group_name": row[1]} for row in result.fetchall()]
+                logger.info(f"[NL2SQL] └─ Doris 查询成功, 集团数: {len(rows)}")
+        except Exception as e:
+            logger.error(f"[NL2SQL] ❌ 查询集团列表失败: {e}")
+            raise
+        finally:
+            engine.dispose()
 
         # 3. 写入 Redis 缓存（TTL=1小时）
         try:

@@ -111,7 +111,11 @@ export function getVersionDiff(
     url: `/templates/${templateId}/versions/diff`,
     method: "get",
     params: { version1, version2 }
-  }) as Promise<unknown>
+  }) as Promise<{
+    version1: { version: number; config: TemplateConfig; created_at: string }
+    version2: { version: number; config: TemplateConfig; created_at: string }
+    changes: { added: string[]; removed: string[]; modified: Array<{ key: string; old: unknown; new: unknown }> }
+  }>
 }
 
 export function shareTemplate(id: number, data: { user_ids: number[] }): Promise<void> {

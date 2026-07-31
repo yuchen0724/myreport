@@ -7,6 +7,7 @@ from app.exceptions import NotFoundError, AuthorizationError
 
 class DataSourceService:
     def __init__(self, db: Session):
+        self.db = db
         self.ds_repo = DataSourceRepository(db)
 
     def _require_data_source(self, ds_id: int) -> DataSourceResponse:
@@ -23,6 +24,20 @@ class DataSourceService:
         """
         if not ds.created_by or ds.created_by != user_id:
             raise AuthorizationError("您没有权限操作此数据源")
+
+    def require_access(self, ds_id: int, user_id: int):
+        """Return a data source only when the user owns it or is an administrator."""
+        db_ds = self._require_data_source(ds_id)
+        if db_ds.created_by == user_id:
+            return db_ds
+
+        from app.models.user import User
+
+        user = self.db.query(User).filter(User.id == user_id).first()
+        is_admin = bool(user and user.role and user.role.name == "admin")
+        if not is_admin:
+            raise AuthorizationError("您没有权限访问此数据源")
+        return db_ds
 
     def create_data_source(self, ds_data: DataSourceCreate, user_id: int) -> DataSourceResponse:
         """创建数据源"""
@@ -42,11 +57,9 @@ class DataSourceService:
         db_ds = self.ds_repo.create(ds_data.model_dump(), user_id)
         return DataSourceResponse.model_validate(db_ds)
 
-    def get_data_source(self, ds_id: int) -> Optional[DataSourceResponse]:
+    def get_data_source(self, ds_id: int, user_id: int) -> Optional[DataSourceResponse]:
         """获取数据源"""
-        db_ds = self.ds_repo.get_by_id(ds_id)
-        if not db_ds:
-            return None
+        db_ds = self.require_access(ds_id, user_id)
         return DataSourceResponse.model_validate(db_ds)
 
     def list_data_sources(self, user_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[DataSourceResponse]:
@@ -118,48 +131,38 @@ class DataSourceService:
                 test_start = __import__("time").time()
                 
                 if proxy_type == "socks5":
-                    # SOCKS5：直接通过代理连接 MySQL，无需预检查
-                    from app.utils.db_executor import socks5_patch
+                    from app.utils.db_executor import build_pymysql_socks_creator
                     from sqlalchemy import create_engine, text
                     from sqlalchemy.pool import QueuePool
                     conn_url = f"mysql+pymysql://{request.username}:{encoded_password}@{request.host}:{request.port}/{request.database}"
-                    with socks5_patch(proxy_host, proxy_port, timeout=20):
-                        engine = create_engine(
-                            conn_url, poolclass=QueuePool, pool_size=1, max_overflow=0,
-                            connect_args={"connect_timeout": 10},
-                        )
-                        try:
-                            with engine.connect() as conn:
-                                conn.execute(text("SELECT 1"))
-                            elapsed = (__import__("time").time() - test_start) * 1000
-                            return DataSourceTestResponse(
-                                success=True,
-                                message=f"连接成功（通过SOCKS5代理，{elapsed:.0f}ms）"
-                            )
-                        except Exception as e:
-                            err_msg = self._format_conn_error(e, request.host, request.port)
-                            return DataSourceTestResponse(success=False, message=err_msg)
-                        finally:
-                            engine.dispose()
-                elif proxy_type == "http":
-                    # HTTP 代理：先用 curl 快速测试目标可达
-                    import subprocess
-                    conn_url = f"http://{request.host}:{request.port}/"
-                    test_cmd = f"curl --noproxy '*' -x http://{proxy_host}:{proxy_port} --connect-timeout 8 -s -o /dev/null -w '%{{http_code}}' '{conn_url}'"
-                    try:
-                        result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=12)
-                        if result.returncode != 0 or result.stdout.strip() in ("", "000"):
-                            return DataSourceTestResponse(success=False, message=f"通过HTTP代理无法连接到目标服务器 {request.host}:{request.port}")
-                    except Exception:
-                        pass
-                    # 直连测试（HTTP 代理在 driver 层不支持，仅验证目标可达）
-                    conn = pymysql.connect(
+                    creator = build_pymysql_socks_creator(
+                        proxy_host=proxy_host, proxy_port=proxy_port,
                         host=request.host, port=request.port,
-                        user=request.username, password=request.password,
+                        username=request.username, password=request.password,
                         database=request.database, connect_timeout=10,
                     )
-                    conn.close()
-                    return DataSourceTestResponse(success=True, message="连接成功（通过HTTP代理）")
+                    engine = create_engine(
+                        conn_url, poolclass=QueuePool, pool_size=1, max_overflow=0,
+                        creator=creator,
+                    )
+                    try:
+                        with engine.connect() as conn:
+                            conn.execute(text("SELECT 1"))
+                        elapsed = (__import__("time").time() - test_start) * 1000
+                        return DataSourceTestResponse(
+                            success=True,
+                            message=f"连接成功（通过SOCKS5代理，{elapsed:.0f}ms）"
+                        )
+                    except Exception as e:
+                        err_msg = self._format_conn_error(e, request.host, request.port)
+                        return DataSourceTestResponse(success=False, message=err_msg)
+                    finally:
+                        engine.dispose()
+                elif proxy_type == "http":
+                    return DataSourceTestResponse(
+                        success=False,
+                        message="数据库连接不支持 HTTP 代理，请改用 SOCKS5 代理",
+                    )
                 else:
                     # 无代理直连
                     conn = pymysql.connect(

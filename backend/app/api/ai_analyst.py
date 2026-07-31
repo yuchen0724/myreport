@@ -23,6 +23,8 @@ from app.schemas.ai_analyst import (
 )
 from app.services.ai_analyst_service import AIAnalystService
 from app.services.sql_correction_service import SqlCorrectionService
+from app.services.data_source_service import DataSourceService
+from app.exceptions import BaseAppException
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,8 @@ async def chat(
             user_id=current_user_id,
         )
         return response
+    except BaseAppException as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
     except Exception as e:
         logger.error(f"[AI-Analyst] 对话失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"AI 分析失败: {str(e)}")
@@ -85,10 +89,10 @@ async def chat_stream(
         try:
             async for chunk in service.chat_stream(
                 message=request.message,
-                ds_id=request.data_source_id,
-                cid=request.conversation_id,
-                gid=request.group_id,
-                uid=current_user_id,
+                data_source_id=request.data_source_id,
+                conversation_id=request.conversation_id,
+                group_id=request.group_id,
+                user_id=current_user_id,
             ):
                 event_type = chunk.get("type", "token")
                 data = json.dumps(chunk, ensure_ascii=False, default=str)
@@ -124,6 +128,7 @@ async def feedback(
     - **corrected_sql**: 用户修正后的正确 SQL
     - **user_feedback**: 用户的文字反馈（可选）
     """
+    DataSourceService(db).require_access(request.data_source_id, current_user_id)
     service = SqlCorrectionService(db)
     record = service.save_correction(
         data_source_id=request.data_source_id,
@@ -151,7 +156,7 @@ async def get_schema(
     """
     service = AIAnalystService(db)
     try:
-        result = service.get_schema(data_source_id, table_name)
+        result = service.get_schema(data_source_id, table_name, current_user_id)
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=result.get("error", "获取 schema 失败"))
         return AIAnalystSchemaResponse(

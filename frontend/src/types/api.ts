@@ -13,6 +13,7 @@ export interface PaginatedResponse<T> {
 export interface ApiError {
   error_code: string
   message: string
+  detail?: string
   details?: Record<string, unknown>
   path?: string
   request_id?: string

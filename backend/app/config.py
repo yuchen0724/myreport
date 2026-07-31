@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_max_requests: int = 100
     rate_limit_window_seconds: int = 60
+    rate_limit_trusted_proxy_ips: List[str] = []
 
     # LLM / NL2SQL
     llm_adapter: str = "langchain"  # raw, langchain
@@ -98,6 +99,7 @@ class Settings(BaseSettings):
     # 提示词模板路径（支持绝对路径或相对 backend/ 的路径）
     nl2sql_system_prompt_path: Optional[str] = "prompts/nl2sql/system_prompt.md"
     nl2sql_repair_prompt_path: Optional[str] = "prompts/nl2sql/repair_prompt.md"
+    semantic_dir: Optional[str] = None
 
     # Prediction (销售预测)
     prediction_enabled: bool = True

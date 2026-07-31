@@ -82,14 +82,14 @@ class LLMClient:
         """创建带代理的 httpx 客户端（如需），供 LangChain / raw OpenAI 使用"""
         if self._proxy_client is not None:
             return self._proxy_client
-        if not self.settings.llm_use_proxy or not self.settings.llm_proxy_host:
+        if not getattr(self.settings, "llm_use_proxy", False) or not getattr(self.settings, "llm_proxy_host", ""):
             self._proxy_client = None
             return None
-        proxy_type = self.settings.llm_proxy_type.lower()
+        proxy_type = getattr(self.settings, "llm_proxy_type", "http").lower()
         proxy_host = self.settings.llm_proxy_host
-        proxy_port = self.settings.llm_proxy_port
-        proxy_user = self.settings.llm_proxy_username or ""
-        proxy_pass = self.settings.llm_proxy_password or ""
+        proxy_port = getattr(self.settings, "llm_proxy_port", 0)
+        proxy_user = getattr(self.settings, "llm_proxy_username", "") or ""
+        proxy_pass = getattr(self.settings, "llm_proxy_password", "") or ""
 
         auth_part = f"{proxy_user}:{proxy_pass}@" if proxy_user else ""
         if proxy_type in ("http", "https"):
@@ -431,7 +431,13 @@ class LLMClient:
                 self.provider
             )
 
-        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+        try:
+            from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+        except ImportError as exc:
+            raise LLMError(
+                "LangChain adapter requires langchain-core and langchain-openai",
+                self.provider,
+            ) from exc
         lc_messages = []
         for msg in messages:
             role = msg.get("role", "")
@@ -448,21 +454,25 @@ class LLMClient:
 
     def _build_langchain_chat_model(self, temperature: float) -> Any:
         """构造 LangChain ChatOpenAI 模型（支持代理）"""
-        from langchain_openai import ChatOpenAI
-
-        extra_body = {}
-        if self.api_mode == "responses":
-            extra_body = {"api_mode": "responses"}
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as exc:
+            raise LLMError(
+                "LangChain adapter requires langchain-core and langchain-openai",
+                self.provider,
+            ) from exc
 
         kwargs = dict(
             model=self.settings.llm_model or "gpt-3.5-turbo",
             temperature=temperature,
-            openai_api_key=self.settings.llm_api_key,
-            openai_api_base=self.settings.llm_api_base,
+            api_key=self.settings.llm_api_key,
+            base_url=self.settings.llm_api_base,
             timeout=self.timeout,
             max_retries=self.max_retries,
-            extra_body=extra_body,
+            use_responses_api=self.api_mode == "responses",
         )
+        if self.api_mode == "responses":
+            kwargs["output_version"] = "responses/v1"
         proxy_client = self._get_httpx_client()
         if proxy_client is not None:
             kwargs["http_client"] = proxy_client

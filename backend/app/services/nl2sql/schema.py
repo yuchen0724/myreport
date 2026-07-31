@@ -28,20 +28,12 @@ class SchemaRetriever:
 
         # 代理 / 连接参数
         connect_args = {}
-        env_proxy_set = False
-        old_http_proxy = None
-        old_https_proxy = None
         proxy_info = self._resolve_proxy(ds, ds_type)
-        if proxy_info is not None:
-            pass  # used below
-        env_proxy_set_local = self._maybe_set_http_proxy(ds, ds_type)
-        if env_proxy_set_local:
-            env_proxy_set = env_proxy_set_local["set"]
-            old_http_proxy = env_proxy_set_local["old_http"]
-            old_https_proxy = env_proxy_set_local["old_https"]
+        if proxy_info and ds_type not in ("MYSQL", "DORIS"):
+            raise ValueError("SOCKS5 代理当前仅支持 MySQL/Doris 数据源")
 
         conn_url = self._build_conn_url(ds_type, ds.username, password, ds.host, ds.port, ds.database)
-        engine = self._create_engine(conn_url, connect_args, proxy_info)
+        engine = self._create_engine(conn_url, connect_args, proxy_info, ds, password)
 
         tables_info = {}
         try:
@@ -53,8 +45,6 @@ class SchemaRetriever:
             return tables_info
         finally:
             engine.dispose()
-            if env_proxy_set:
-                self._restore_env_proxy(old_http_proxy, old_https_proxy)
 
     # ── Internal helpers ────────────────────────────────────
 
@@ -107,15 +97,15 @@ class SchemaRetriever:
             return f"postgresql://{username}:{pwd}@{host}:{port}/{database}"
         raise ValueError(f"不支持的数据源类型: {ds_type}")
 
-    def _create_engine(self, conn_url: str, connect_args: dict, proxy_info: Optional[dict]):
+    def _create_engine(self, conn_url: str, connect_args: dict, proxy_info: Optional[dict], ds, password: str):
         if proxy_info:
-            from app.utils.db_executor import socks5_pool_workaround
-            attach, _ = socks5_pool_workaround(proxy_info['host'], proxy_info['port'])
-            engine = create_engine(
-                conn_url, pool_pre_ping=True, connect_args=connect_args,
+            from app.utils.db_executor import build_pymysql_socks_creator
+            creator = build_pymysql_socks_creator(
+                proxy_host=proxy_info['host'], proxy_port=proxy_info['port'],
+                host=ds.host, port=ds.port, username=ds.username,
+                password=password, database=ds.database,
             )
-            attach(engine)
-            return engine
+            return create_engine(conn_url, pool_pre_ping=True, creator=creator)
         return create_engine(conn_url, pool_pre_ping=True, connect_args=connect_args)
 
     def _fetch_mysql_tables(self, conn, ds_type: str) -> Dict[str, List[Dict[str, Any]]]:

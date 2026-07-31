@@ -1,7 +1,6 @@
 """数据库全量查询执行器 - 直接返回行+列格式数据"""
 
 import logging
-import socket as _socket
 from contextlib import contextmanager
 from typing import Optional, Tuple, Any
 
@@ -17,6 +16,49 @@ try:
     _HAS_SOCKS = True
 except ImportError:
     _HAS_SOCKS = False
+
+
+def build_pymysql_socks_creator(
+    *,
+    proxy_host: str,
+    proxy_port: int,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    database: str,
+    connect_timeout: int = 30,
+    read_timeout: int = 300,
+):
+    """Build a DBAPI creator whose socket is scoped to one MySQL connection."""
+    if not _HAS_SOCKS:
+        raise RuntimeError("SOCKS5 代理需要 PySocks 库: pip install PySocks")
+
+    import pymysql
+
+    def _creator():
+        sock = _socks.socksocket()
+        sock.set_proxy(_socks.SOCKS5, proxy_host, proxy_port)
+        sock.settimeout(connect_timeout)
+        connection = pymysql.connections.Connection(
+            host=host,
+            port=port,
+            user=username,
+            password=password,
+            database=database,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            defer_connect=True,
+        )
+        try:
+            sock.connect((host, port))
+            connection.connect(sock)
+            return connection
+        except BaseException:
+            sock.close()
+            raise
+
+    return _creator
 
 
 # ── SOCKS5 代理统一方案 ──────────────────────────────────────────
@@ -61,32 +103,9 @@ def _get_proxy_info(ds, db_session=None):
 
 @contextmanager
 def socks5_patch(proxy_host: str, proxy_port: int, timeout: int = 60):
-    """
-    临时将 socket.socket 替换为 PySocks 的 socksocket，
-    使得 pymysql / psycopg2 在创建连接时自动走 SOCKS5 代理。
-
-    pymysql 不接受预创 socket 或 custom creator，
-    这是 MySQL + SOCKS5 唯一可靠的做法。
-
-    Args:
-        proxy_host: SOCKS5 代理主机
-        proxy_port: SOCKS5 代理端口
-        timeout: socket 超时秒数
-
-    Yields: None
-    """
-    if not _HAS_SOCKS:
-        raise RuntimeError("SOCKS5 代理需要 PySocks 库: pip install PySocks")
-    original = _socket.socket
-    try:
-        _socks.set_default_proxy(_socks.SOCKS5, proxy_host, proxy_port)
-        _socket.socket = _socks.socksocket
-        logger.debug(f"[SOCKS5] socket 已打补丁 → {proxy_host}:{proxy_port}")
-        yield
-    finally:
-        _socket.socket = original
-        _socks.set_default_proxy()
-        logger.debug("[SOCKS5] socket 已恢复")
+    """Reject the legacy process-wide socket monkeypatch."""
+    raise RuntimeError("socks5_patch 已停用，请使用 build_pymysql_socks_creator")
+    yield  # pragma: no cover
 
 
 def create_socks5_engine(url: str, proxy_host: str, proxy_port: int, **engine_kwargs) -> Tuple[Any, bool]:
@@ -107,15 +126,7 @@ def create_socks5_engine(url: str, proxy_host: str, proxy_port: int, **engine_kw
         proxy_port: SOCKS5 代理端口
         **engine_kwargs: 透传给 create_engine 的其他参数
     """
-    if not _HAS_SOCKS:
-        raise RuntimeError("SOCKS5 代理需要 PySocks 库: pip install PySocks")
-
-    # 对 pymysql 等不支持 custom creator 的 driver，通过临时 socket 补丁创建 engine
-    # engine 创建时不实际建立连接，pool 建立新连接时需要补丁生效
-    with socks5_patch(proxy_host, proxy_port):
-        engine = create_engine(url, **engine_kwargs)
-    logger.info(f"[代理] 创建 SOCKS5 连接池: {proxy_host}:{proxy_port}")
-    return engine, True
+    raise RuntimeError("create_socks5_engine 已停用，请使用 DataSourceEngineFactory")
 
 
 def socks5_pool_workaround(proxy_host: str, proxy_port: int):
@@ -128,43 +139,10 @@ def socks5_pool_workaround(proxy_host: str, proxy_port: int):
         engine = create_engine(url)
         attach(engine)
     """
-    import threading
-    from sqlalchemy import event
-
-    _original_socket = _socket.socket
-    _ref_lock = threading.Lock()
-    ref_count = [0]
-
-    def _checkout(dbapi_conn, connection_record, connection_proxy):
-        with _ref_lock:
-            if ref_count[0] == 0:
-                _socks.set_default_proxy(_socks.SOCKS5, proxy_host, proxy_port)
-                _socket.socket = _socks.socksocket
-            ref_count[0] += 1
-
-    def _checkin(dbapi_conn, connection_record):
-        with _ref_lock:
-            ref_count[0] -= 1
-            if ref_count[0] <= 0:
-                ref_count[0] = 0
-                _socket.socket = _original_socket
-                _socks.set_default_proxy()
-
-    def _attach(engine):
-        event.listen(engine, 'checkout', _checkout)
-        event.listen(engine, 'checkin', _checkin)
-
-    def _detach(engine):
-        event.remove(engine, 'checkout', _checkout)
-        event.remove(engine, 'checkin', _checkin)
-
-    return _attach, _detach
+    raise RuntimeError("socks5_pool_workaround 已停用，请使用 build_pymysql_socks_creator")
 
 
 # ── 兼容层：旧函数保留供外部引用 ──────────────────────────────
-
-_original_global_socket = _socket.socket
-
 
 @contextmanager
 def socks_proxy_context(ds, db_session=None, timeout: int = 60):
@@ -179,8 +157,7 @@ def socks_proxy_context(ds, db_session=None, timeout: int = 60):
     proxy_info = _get_proxy_info(ds, db_session)
     use_socks = proxy_info is not None
     if use_socks:
-        with socks5_patch(proxy_info["host"], proxy_info["port"], timeout=timeout):
-            yield True
+        raise RuntimeError("socks_proxy_context 已停用，请使用 DataSourceEngineFactory")
     else:
         yield False
 
@@ -192,22 +169,12 @@ def setup_socks(ds, db_session=None, timeout: int = 60):
 
 
 def _apply_socks_proxy(proxy_host: str, proxy_port: int, timeout: int = 60):
-    """[兼容存根] 旧版全局 socket 替换。"""
-    if not _HAS_SOCKS:
-        raise RuntimeError("SOCKS5 代理需要 PySocks 库: pip install PySocks")
-    _socks.set_default_proxy(_socks.SOCKS5, proxy_host, proxy_port)
-    _socket.socket = _socks.socksocket
-    _socket.setdefaulttimeout(timeout)
+    """Reject the legacy process-wide socket replacement."""
+    raise RuntimeError("_apply_socks_proxy 已停用，请使用 build_pymysql_socks_creator")
 
 
 def _restore_socket():
-    """[兼容存根] 旧版 socket 恢复。"""
-    global _original_global_socket
-    _socket.socket = _original_global_socket
-    try:
-        _socks.set_default_proxy()
-    except Exception:
-        pass
+    """No-op retained for import compatibility."""
 
 
 def _restore_socket_cm():
@@ -285,29 +252,35 @@ def execute_query(ds, sql: str) -> tuple:
 
     # 确定是否需要 SOCKS5 代理
     proxy_info = _get_proxy_info(ds)
+    engine = None
     max_retries = 2
     try:
         for attempt in range(max_retries):
             try:
                 if proxy_info:
+                    if ds_type not in ("MYSQL", "DORIS"):
+                        raise ValueError("SOCKS5 代理当前仅支持 MySQL/Doris 数据源")
                     logger.info(f"[查询] 使用 SOCKS5 代理: {proxy_info['host']}:{proxy_info['port']}")
-                    with socks5_patch(proxy_info['host'], proxy_info['port'], timeout=300):
-                        engine = create_engine(
-                            conn_url, poolclass=QueuePool, pool_size=2, max_overflow=4,
-                        )
-                        with engine.connect() as conn:
-                            result = conn.execute(text(sql))
-                            columns = list(result.keys())
-                            rows = _fetch_all(result, batch_size=100000)
-                            return rows, columns
+                    creator = build_pymysql_socks_creator(
+                        proxy_host=proxy_info['host'], proxy_port=proxy_info['port'],
+                        host=ds.host, port=ds.port, username=ds.username,
+                        password=password, database=ds.database,
+                        connect_timeout=30, read_timeout=300,
+                    )
+                    engine = create_engine(
+                        conn_url, poolclass=QueuePool, pool_size=2, max_overflow=4,
+                        creator=creator,
+                    )
                 else:
-                    engine = create_engine(conn_url, poolclass=QueuePool, pool_size=2, max_overflow=4,
-                                           connect_args=connect_args)
-                    with engine.connect() as conn:
-                        result = conn.execute(text(sql))
-                        columns = list(result.keys())
-                        rows = _fetch_all(result, batch_size=100000)
-                        return rows, columns
+                    engine = create_engine(
+                        conn_url, poolclass=QueuePool, pool_size=2, max_overflow=4,
+                        connect_args=connect_args,
+                    )
+                with engine.connect() as conn:
+                    result = conn.execute(text(sql))
+                    columns = list(result.keys())
+                    rows = _fetch_all(result, batch_size=100000)
+                    return rows, columns
             except OperationalError as e:
                 if attempt < max_retries - 1:
                     time.sleep(2)
@@ -315,7 +288,8 @@ def execute_query(ds, sql: str) -> tuple:
                 raise ValueError(f"查询执行失败: {e}")
     finally:
         try:
-            engine.dispose()
+            if engine is not None:
+                engine.dispose()
         except Exception:
             pass
 

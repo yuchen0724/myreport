@@ -65,21 +65,20 @@ class DataSourceEngineFactory:
         return create_engine(config.url, **kwargs)
 
     def create_engine_with_proxy(self, ds, proxy_host: str, proxy_port: int):
-        """
-        创建带 SOCKS5 代理的 SQLAlchemy engine（通过 event.listen 实现线程安全）。
-
-        Args:
-            ds: 数据源对象
-            proxy_host: SOCKS5 代理主机
-            proxy_port: SOCKS5 代理端口
-
-        Returns:
-            SQLAlchemy Engine 实例
-        """
+        """Create an engine using a per-connection SOCKS5 socket."""
         config = self.build_config(ds)
-        engine = self._build_engine(config, ds)
+        if config.ds_type not in ("MYSQL", "DORIS"):
+            raise ValueError("SOCKS5 代理当前仅支持 MySQL/Doris 数据源")
 
-        from app.utils.db_executor import socks5_pool_workaround
-        attach, _ = socks5_pool_workaround(proxy_host, proxy_port)
-        attach(engine)
-        return engine
+        from app.utils.db_executor import build_pymysql_socks_creator
+
+        creator = build_pymysql_socks_creator(
+            proxy_host=proxy_host,
+            proxy_port=proxy_port,
+            host=ds.host,
+            port=ds.port,
+            username=ds.username,
+            password=decrypt_password(ds.password_encrypted),
+            database=ds.database,
+        )
+        return self._build_engine(config, ds, creator=creator)

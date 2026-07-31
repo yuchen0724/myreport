@@ -9,6 +9,7 @@ from app.models.data_source import DataSource
 from app.schemas.nl2sql import NL2SQLRequest, NL2SQLResponse
 from app.services.nl2sql_service import NL2SQLService
 from app.services.query_service import QueryService
+from app.exceptions import BaseAppException
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,8 @@ async def get_groups(
     try:
         groups = nl2sql_service.get_groups(data_source_id)
         return {"data": groups}
+    except BaseAppException as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -77,6 +80,8 @@ async def parse_question(
         response = nl2sql_service.parse_question(request, current_user_id)
         logger.info("NL2SQL /parse succeeded")
         return response
+    except BaseAppException as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
     except Exception as e:
         logger.error("NL2SQL /parse failed: %s: %s", type(e).__name__, str(e))
         raise HTTPException(status_code=500, detail=str(e))

@@ -51,19 +51,7 @@ async def get_data_source(
 ):
     """获取数据源详情"""
     ds_service = DataSourceService(db)
-    ds = ds_service.get_data_source(ds_id)
-    if not ds:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="数据源不存在",
-        )
-    # 编辑时需要返回解密密码
-    from app.models.data_source import DataSource
-    db_ds = db.query(DataSource).filter(DataSource.id == ds_id).first()
-    if db_ds and db_ds.password_encrypted:
-        from app.core.security import decrypt_password
-        ds.password_decrypted = decrypt_password(db_ds.password_encrypted)
-    return ds
+    return ds_service.get_data_source(ds_id, current_user_id)
 
 
 @router.get("/{ds_id}/password")
@@ -77,24 +65,7 @@ async def get_data_source_password(
     仅所有者或管理员可访问。此接口有审计日志记录。
     """
     ds_service = DataSourceService(db)
-    from app.models.data_source import DataSource
-    db_ds = db.query(DataSource).filter(DataSource.id == ds_id).first()
-    if not db_ds:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="数据源不存在",
-        )
-
-    # 权限检查：所有者或管理员
-    from app.models.user import User
-    user = db.query(User).filter(User.id == current_user_id).first()
-    is_owner = db_ds.created_by and db_ds.created_by == current_user_id
-    is_admin = user and user.role_id == 1
-    if not is_owner and not is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="您没有权限查看此数据源的密码",
-        )
+    db_ds = ds_service.require_access(ds_id, current_user_id)
 
     from app.core.security import decrypt_password
     return {

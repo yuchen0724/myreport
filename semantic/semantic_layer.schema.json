@@ -16,7 +16,16 @@
         "invent_columns",
         "mix_taxed_and_untaxed",
         "avg_of_ratios",
-        "count_bitmap_with_count_star"
+        "count_bitmap_with_count_star",
+        "sum_snapshot_across_time"
+      ],
+      "semi_additive_metrics": [
+        {
+          "fields": ["begin_*", "opening_*", "end_*", "closing_*", "*_stock_*"],
+          "non_additive_dimension": "dt",
+          "opening_rule": "start-day opening field, otherwise latest closing snapshot before start",
+          "closing_rule": "latest closing snapshot on or before end"
+        }
       ],
       "join_rules": [
         "ads_cockpit_fd_store_ware_d / ads_cockpit_fd_store_ware_trade_qc_d_v5 / ads_cockpit_fd_supply_ware_d use group_id, store_code, matnr, supplier_code, sell_type",
@@ -109,7 +118,16 @@
         "invent_columns",
         "mix_taxed_and_untaxed",
         "avg_of_ratios",
-        "count_bitmap_with_count_star"
+        "count_bitmap_with_count_star",
+        "sum_snapshot_across_time"
+      ],
+      "semi_additive_metrics": [
+        {
+          "fields": ["begin_*", "opening_*", "end_*", "closing_*", "*_stock_*"],
+          "non_additive_dimension": "dt",
+          "opening_rule": "start-day opening field, otherwise latest closing snapshot before start",
+          "closing_rule": "latest closing snapshot on or before end"
+        }
       ],
       "join_rules": [
         "order_*_v1 arrays must be exploded before aggregation",

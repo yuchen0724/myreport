@@ -17,6 +17,7 @@ from app.utils.query_optimizer import QueryOptimizer
 from app.services.datasource_engine_factory import DataSourceEngineFactory
 from app.services.query_executor import QueryExecutor
 from app.services.sql_pagination import SqlPaginator
+from app.services.data_source_service import DataSourceService
 
 from app.utils.db_executor import _get_proxy_info
 
@@ -27,14 +28,18 @@ class QueryService:
     def __init__(self, db: Session):
         self.db = db
         self.ds_repo = DataSourceRepository(db)
+        self.data_source_service = DataSourceService(db)
+        self.data_source_service.ds_repo = self.ds_repo
         self.history_repo = QueryHistoryRepository(db)
         self.engine_factory = DataSourceEngineFactory()
         self.sql_paginator = SqlPaginator()
         self.query_executor = QueryExecutor()
 
-    def _make_cache_key(self, sql: str, params: Optional[dict], page: int, page_size: int, cursor: Optional[str], skip_deep_pagination_check: bool) -> str:
+    def _make_cache_key(self, sql: str, params: Optional[dict], page: int, page_size: int, cursor: Optional[str], skip_deep_pagination_check: bool, data_source_id: int, user_id: int) -> str:
         """生成带分页参数的缓存键"""
         cache_data = {
+            "data_source_id": data_source_id,
+            "user_id": user_id,
             "sql": sql,
             "params": params or {},
             "page": page,
@@ -61,9 +66,7 @@ class QueryService:
         suggest_async = cost > 200
 
         # 获取数据源
-        ds = self.ds_repo.get_by_id(request.data_source_id)
-        if not ds:
-            raise ValueError("数据源不存在")
+        ds = self.data_source_service.require_access(request.data_source_id, user_id)
 
         # 调试日志
         logger.info(f"查询请求: page={request.page}, page_size={request.page_size}, sql={optimized_sql[:100]}")
@@ -76,7 +79,16 @@ class QueryService:
         skip_val = getattr(request, 'skip_deep_pagination_check', False)
 
         # 检查缓存
-        cache_key = self._make_cache_key(optimized_sql, request.params, request.page, request.page_size, cursor_val, skip_val)
+        cache_key = self._make_cache_key(
+            optimized_sql,
+            request.params,
+            request.page,
+            request.page_size,
+            cursor_val,
+            skip_val,
+            request.data_source_id,
+            user_id,
+        )
         cached = cache_service.redis_client.get(cache_key) if cache_service.redis_client else None
         if cached:
             cached_data = json.loads(cached)
@@ -180,7 +192,7 @@ class QueryService:
     def _execute_query(self, ds, sql: str, params: Optional[dict], page: int = 1, page_size: int = 100, cursor: Optional[str] = None, skip_deep_pagination_check: bool = False) -> dict:
         """执行查询并返回结果（带连接池和超时）"""
         import time as time_module
-        
+
         ds_type = ds.type.upper() if ds.type else ""
 
         proxy_info = _get_proxy_info(ds, db_session=self.db)
@@ -190,85 +202,61 @@ class QueryService:
             )
         else:
             engine = self.engine_factory.create_engine(ds)
-            
-            # 使用连接池执行查询（带超时和重试）
-            from sqlalchemy.exc import OperationalError
-            
-            max_retries = 3
-            retry_delay = 1  # 秒
-            
-            try:
-                for attempt in range(max_retries):
-                    try:
-                        with engine.connect() as conn:
-                            self.query_executor.apply_timeout(conn, ds_type)
 
-                            paginated_sql = self.sql_paginator.build(
-                                sql=sql,
-                                page=page,
-                                page_size=page_size,
-                                cursor=cursor,
-                                skip_deep_pagination_check=skip_deep_pagination_check,
-                            )
-                            if paginated_sql.is_nl2sql_skip:
-                                logger.info("NL2SQL查询：跳过深度分页检查，使用普通分页 LIMIT OFFSET")
-                            elif paginated_sql.cursor_params:
-                                logger.info(f"游标分页: cursor={cursor}")
-                            elif page_size < 999999 and (page - 1) * page_size > 1000:
-                                logger.info(f"深度分页优化: offset={(page - 1) * page_size}, 使用窗口函数")
-                            
-                            logger.info(f"执行查询: page={page}, page_size={page_size}")
+        from sqlalchemy.exc import OperationalError
 
-                            query_params = None
-                            if self.sql_paginator.has_placeholders(paginated_sql.query_sql):
-                                query_params = self.sql_paginator.filter_params(paginated_sql.query_sql, params)
-                                query_params.update(paginated_sql.cursor_params)
-                            columns, rows = self.query_executor.execute_rows(
-                                conn,
-                                paginated_sql.query_sql,
-                                query_params,
-                            )
+        max_retries = 3
+        retry_delay = 1
+        try:
+            for attempt in range(max_retries):
+                try:
+                    paginated_sql = self.sql_paginator.build(
+                        sql=sql,
+                        page=page,
+                        page_size=page_size,
+                        cursor=cursor,
+                        skip_deep_pagination_check=skip_deep_pagination_check,
+                    )
+                    with engine.connect() as conn:
+                        self.query_executor.apply_timeout(conn, ds_type)
+                        query_params = None
+                        if self.sql_paginator.has_placeholders(paginated_sql.query_sql):
+                            query_params = self.sql_paginator.filter_params(paginated_sql.query_sql, params)
+                            query_params.update(paginated_sql.cursor_params)
+                        columns, rows = self.query_executor.execute_rows(
+                            conn, paginated_sql.query_sql, query_params
+                        )
 
-                        # 获取真实总数
-                        # 如果 page_size >= 999999（全量查询），total 就是实际返回行数
-                        # 否则需要执行 COUNT(*) 获取真实总数
-                        if paginated_sql.should_count:
-                            try:
-                                count_sql, count_base_sql = self.sql_paginator.build_count_sql(sql)
-                                
-                                with engine.connect() as conn2:
-                                    self.query_executor.apply_timeout(
-                                        conn2,
-                                        ds_type,
-                                        self.query_executor.count_timeout_seconds,
-                                    )
-                                    exec_params = self.sql_paginator.filter_params(count_base_sql, params)
-                                    total = self.query_executor.execute_scalar(conn2, count_sql, exec_params) or 0
-                                    logger.info(f"COUNT 查询结果: total={total}")
-                            except Exception as e:
-                                logger.warning(f"COUNT 查询失败，回退到行数: {e}")
-                                total = len(rows)
-                        else:
+                    if paginated_sql.should_count:
+                        try:
+                            count_sql, count_base_sql = self.sql_paginator.build_count_sql(sql)
+                            with engine.connect() as conn2:
+                                self.query_executor.apply_timeout(
+                                    conn2, ds_type, self.query_executor.count_timeout_seconds
+                                )
+                                exec_params = self.sql_paginator.filter_params(count_base_sql, params)
+                                total = self.query_executor.execute_scalar(conn2, count_sql, exec_params) or 0
+                        except Exception as exc:
+                            logger.warning(f"COUNT 查询失败，回退到行数: {exc}")
                             total = len(rows)
+                    else:
+                        total = len(rows)
 
-                        has_more = len(rows) >= page_size and total > (page - 1) * page_size + len(rows)
-
-                        return {
-                            "columns": columns,
-                            "rows": rows,
-                            "total": total,
-                            "has_more": has_more,
-                            "order_cols": paginated_sql.order_cols,
-                        }
-                    except OperationalError as e:
-                        error_msg = str(e)
-                        if "fail to send batch" in error_msg or "network" in error_msg.lower():
-                            if attempt < max_retries - 1:
-                                time_module.sleep(retry_delay * (attempt + 1))  # 递增等待时间
-                                continue
-                        raise ValueError(f"查询执行失败: {error_msg}")
-
-                # 不应该到达这里
-                raise ValueError("查询重试失败")
-            finally:
-                engine.dispose()
+                    return {
+                        "columns": columns,
+                        "rows": rows,
+                        "total": total,
+                        "has_more": len(rows) >= page_size and total > (page - 1) * page_size + len(rows),
+                        "order_cols": paginated_sql.order_cols,
+                    }
+                except OperationalError as exc:
+                    error_msg = str(exc)
+                    if attempt < max_retries - 1 and (
+                        "fail to send batch" in error_msg or "network" in error_msg.lower()
+                    ):
+                        time_module.sleep(retry_delay * (attempt + 1))
+                        continue
+                    raise ValueError(f"查询执行失败: {error_msg}")
+            raise ValueError("查询重试失败")
+        finally:
+            engine.dispose()

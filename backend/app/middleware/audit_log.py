@@ -1,10 +1,14 @@
 """审计日志中间件"""
 
+import logging
+
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.database import SessionLocal
 from app.services.audit_log_service import AuditLogService
 from app.core.auth_deps import get_current_user_id
+
+logger = logging.getLogger(__name__)
 
 
 class AuditLogMiddleware(BaseHTTPMiddleware):
@@ -28,6 +32,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
         "/api/query": "query",
         "/api/nl2sql": "nl2sql",
         "/api/data-sources": "data_source",
+        "/api/datasources": "data_source",
         "/api/users": "user",
         "/api/reports": "report",
         "/api/charts": "chart"
@@ -55,7 +60,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             # 获取用户ID
             user_id = None
             try:
-                user_id = await get_current_user_id(
+                user_id = get_current_user_id(
                     request.headers.get("authorization", "").replace("Bearer ", ""),
                     db
                 )
@@ -75,42 +80,50 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             
             # 记录审计日志
             if user_id and resource_type and action:
-                audit_service = AuditLogService(db)
-                audit_service.create_log(
-                    user_id=user_id,
-                    action=action,
-                    resource_type=resource_type,
-                    resource_id=resource_id,
-                    details={
-                        "method": request.method,
-                        "path": request.url.path,
-                        "query_params": str(request.query_params),
-                        "status_code": response.status_code
-                    },
-                    ip_address=request.client.host if request.client else None,
-                    user_agent=request.headers.get("user-agent"),
-                    status="success" if response.status_code < 400 else "failure"
-                )
+                try:
+                    audit_service = AuditLogService(db)
+                    audit_service.create_log(
+                        user_id=user_id,
+                        action=action,
+                        resource_type=resource_type,
+                        resource_id=resource_id,
+                        details={
+                            "method": request.method,
+                            "path": request.url.path,
+                            "query_params": str(request.query_params),
+                            "status_code": response.status_code
+                        },
+                        ip_address=request.client.host if request.client else None,
+                        user_agent=request.headers.get("user-agent"),
+                        status="success" if response.status_code < 400 else "failure"
+                    )
+                except Exception as audit_error:
+                    db.rollback()
+                    logger.warning("审计日志写入失败，不影响主请求: %s", audit_error)
             
             return response
         except Exception as e:
             # 记录错误
             if user_id:
-                audit_service = AuditLogService(db)
-                audit_service.create_log(
-                    user_id=user_id,
-                    action="ERROR",
-                    resource_type="system",
-                    details={
-                        "method": request.method,
-                        "path": request.url.path,
-                        "error": str(e)
-                    },
-                    ip_address=request.client.host if request.client else None,
-                    user_agent=request.headers.get("user-agent"),
-                    status="failure",
-                    error_message=str(e)
-                )
+                try:
+                    audit_service = AuditLogService(db)
+                    audit_service.create_log(
+                        user_id=user_id,
+                        action="ERROR",
+                        resource_type="system",
+                        details={
+                            "method": request.method,
+                            "path": request.url.path,
+                            "error": str(e)
+                        },
+                        ip_address=request.client.host if request.client else None,
+                        user_agent=request.headers.get("user-agent"),
+                        status="failure",
+                        error_message=str(e)
+                    )
+                except Exception as audit_error:
+                    db.rollback()
+                    logger.warning("异常审计日志写入失败: %s", audit_error)
             raise
         finally:
             db.close()

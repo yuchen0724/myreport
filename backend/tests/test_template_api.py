@@ -1,7 +1,7 @@
 def test_create_template(client, auth_headers):
     """测试创建模板"""
     response = client.post(
-        "/api/templates/",
+        "/api/templates",
         headers=auth_headers,
         json={
             "name": "新模板",
@@ -17,7 +17,7 @@ def test_create_template(client, auth_headers):
 
 def test_get_templates(client, auth_headers, test_template):
     """测试获取模板列表"""
-    response = client.get("/api/templates/", headers=auth_headers)
+    response = client.get("/api/templates", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert len(data) >= 1

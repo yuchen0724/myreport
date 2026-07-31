@@ -1,6 +1,6 @@
 # backend/tests/test_rate_limit.py
 import pytest
-from app.middleware.rate_limit import MemoryRateLimiterBackend
+from app.middleware.rate_limit import MemoryRateLimiterBackend, _path_token
 
 def test_rate_limit():
     """测试限流功能"""
@@ -29,3 +29,8 @@ def test_rate_limit_remaining():
     # 剩余请求数应该是90
     remaining = limiter.get_remaining("test_key", path)
     assert remaining == 90
+
+
+def test_path_token_is_stable_and_path_specific():
+    assert _path_token("/api/query/sql") == _path_token("/api/query/sql")
+    assert _path_token("/api/query/sql") != _path_token("/api/nl2sql/parse")

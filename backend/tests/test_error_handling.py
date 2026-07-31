@@ -22,7 +22,7 @@ def test_validation_error_response(client, auth_headers):
     """测试验证错误响应"""
     # 测试验证错误
     response = client.post(
-        "/api/templates/",
+        "/api/templates",
         headers=auth_headers,
         json={
             # 缺少必填字段
@@ -38,7 +38,7 @@ def test_validation_error_response(client, auth_headers):
 
 def test_authentication_error_response(client):
     """测试认证错误响应"""
-    response = client.get("/api/templates/")
+    response = client.get("/api/templates")
     
     assert response.status_code == 401
     data = response.json()
