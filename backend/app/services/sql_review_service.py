@@ -9,6 +9,7 @@ SQL 审核服务
 """
 import logging
 import math
+import json
 from typing import Optional, List
 from datetime import datetime, timezone
 
@@ -19,6 +20,7 @@ from app.models.sql_review import SqlReview
 from app.models.user import User
 from app.models.template import Template
 from app.schemas.sql_review import SqlReviewCreate, SqlReviewUpdate
+from app.services.sql_review_analyzer import SqlReviewAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,7 @@ class SqlReviewService:
 
     def __init__(self, db: Session):
         self.db = db
+        self.analyzer = SqlReviewAnalyzer()
 
     # ------------------------------------------------------------------
     # 提交审核
@@ -39,16 +42,41 @@ class SqlReviewService:
         if not template:
             raise ValueError("模板不存在")
 
+        sql_content = data.sql_content or self._sql_from_template(template)
+        ai_review = self.analyzer.analyze(sql_content, use_llm=False)
         review = SqlReview(
             template_id=data.template_id,
             submitted_by=current_user_id,
             status="pending",
-            sql_content=data.sql_content,
+            sql_content=sql_content,
+            ai_risk_level=ai_review["risk_level"],
+            ai_review=ai_review,
+            ai_reviewed_at=datetime.now(timezone.utc),
         )
         self.db.add(review)
         self.db.commit()
         self.db.refresh(review)
         logger.info("SQL 审核工单已创建: id=%d, submitted_by=%d", review.id, current_user_id)
+        return review
+
+    @staticmethod
+    def _sql_from_template(template: Template) -> str:
+        try:
+            config = json.loads(template.config or "{}")
+            return str(config.get("sql") or "")
+        except (TypeError, ValueError):
+            return ""
+
+    def refresh_ai_review(self, review_id: int, use_llm: bool = True) -> SqlReview:
+        review = self.get_review(review_id)
+        if not review:
+            raise ValueError("审核工单不存在")
+        ai_review = self.analyzer.analyze(review.sql_content or "", use_llm=use_llm)
+        review.ai_risk_level = ai_review["risk_level"]
+        review.ai_review = ai_review
+        review.ai_reviewed_at = datetime.now(timezone.utc)
+        self.db.commit()
+        self.db.refresh(review)
         return review
 
     # ------------------------------------------------------------------

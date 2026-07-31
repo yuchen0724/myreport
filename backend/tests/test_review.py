@@ -76,6 +76,8 @@ class TestCreateReview:
         data = resp.json()
         assert data["status"] == "pending"
         assert data["template_id"] == tpl.id
+        assert data["ai_risk_level"] == "high"
+        assert data["ai_review"]["human_approval_required"] is True
 
     def test_submit_review_invalid_template(self, client: TestClient, db_session):
         """提交不存在的模板应返回 400"""

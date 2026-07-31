@@ -7,12 +7,14 @@ AI 数据分析师 API
 """
 import json
 import logging
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.auth_deps import get_current_user_id
+from app.core.auth_deps import get_current_admin_user, get_current_user_id
 from app.schemas.ai_analyst import (
     AIAnalystChatRequest,
     AIAnalystChatResponse,
@@ -20,10 +22,14 @@ from app.schemas.ai_analyst import (
     AIAnalystSchemaResponse,
     AIAnalystFeedbackRequest,
     AIAnalystFeedbackResponse,
+    SQLCorrectionItem,
+    SQLCorrectionReviewRequest,
 )
 from app.services.ai_analyst_service import AIAnalystService
 from app.services.sql_correction_service import SqlCorrectionService
 from app.services.data_source_service import DataSourceService
+from app.models.sql_correction import SqlCorrection
+from app.models.user import User
 from app.exceptions import BaseAppException
 
 logger = logging.getLogger(__name__)
@@ -130,15 +136,55 @@ async def feedback(
     """
     DataSourceService(db).require_access(request.data_source_id, current_user_id)
     service = SqlCorrectionService(db)
-    record = service.save_correction(
-        data_source_id=request.data_source_id,
-        question=request.question,
-        original_sql=request.original_sql,
-        corrected_sql=request.corrected_sql,
-        user_feedback=request.user_feedback,
-        user_id=current_user_id,
-    )
+    try:
+        record = service.save_correction(
+            data_source_id=request.data_source_id,
+            question=request.question,
+            original_sql=request.original_sql,
+            corrected_sql=request.corrected_sql,
+            user_feedback=request.user_feedback,
+            user_id=current_user_id,
+            review_status="verified",
+            source="user_feedback",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return AIAnalystFeedbackResponse(id=record.id, message="感谢反馈，我们会持续优化")
+
+
+@router.get("/feedback/candidates", response_model=List[SQLCorrectionItem])
+async def list_feedback_candidates(
+    data_source_id: int = Query(..., description="数据源 ID"),
+    status: str = Query("candidate", description="candidate / verified / rejected"),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    DataSourceService(db).require_access(data_source_id, current_user_id)
+    try:
+        return SqlCorrectionService(db).list_for_review(data_source_id, status, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/feedback/{correction_id}/review", response_model=SQLCorrectionItem)
+async def review_feedback_candidate(
+    correction_id: int,
+    request: SQLCorrectionReviewRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    service = SqlCorrectionService(db)
+    record = db.query(SqlCorrection).filter(SqlCorrection.id == correction_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="SQL 学习案例不存在")
+    DataSourceService(db).require_access(record.data_source_id, current_user.id)
+    return service.review_correction(
+        correction_id=correction_id,
+        approved=request.approved,
+        reviewer_id=current_user.id,
+        review_comment=request.comment,
+    )
 
 
 @router.get("/schema", response_model=AIAnalystSchemaResponse)

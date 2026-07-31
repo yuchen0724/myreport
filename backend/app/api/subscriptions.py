@@ -47,6 +47,8 @@ def create_subscription(
             notify_channel=request.notify_channel,
             semantic_metric_key=request.semantic_metric_key,
             semantic_query=request.semantic_query,
+            subscription_type=request.subscription_type,
+            briefing_config=request.briefing_config,
         )
         return sub.to_dict()
     except ValueError as e:

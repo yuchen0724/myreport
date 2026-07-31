@@ -34,13 +34,29 @@ class SubscriptionService:
         notify_channel: str = "feishu",
         semantic_metric_key: str | None = None,
         semantic_query: dict | None = None,
+        subscription_type: str = "query",
+        briefing_config: dict | None = None,
     ) -> QuerySubscription:
         """创建订阅"""
         # validate cron
         self._validate_cron(cron_expression)
 
-        if not template_id and not semantic_metric_key:
+        if subscription_type not in ("query", "briefing"):
+            raise ValueError("订阅类型必须是 query 或 briefing")
+        if subscription_type == "query" and not template_id and not semantic_metric_key:
             raise ValueError("模板订阅和语义指标订阅至少选择一种")
+        if subscription_type == "briefing":
+            metric_keys = (briefing_config or {}).get("metric_keys") or []
+            if not metric_keys:
+                raise ValueError("经营日报至少选择一个语义指标")
+            if len(metric_keys) > 10:
+                raise ValueError("经营日报最多选择 10 个语义指标")
+            for metric_key in metric_keys:
+                metric = SemanticMetricRepository(self.db).get_visible_by_key(
+                    metric_key, user_id=user_id, is_admin=False, active_only=True,
+                )
+                if not metric:
+                    raise ValueError(f"语义指标不存在或不可访问: {metric_key}")
 
         if template_id:
             template = self.db.query(Template).filter(Template.id == template_id).first()
@@ -65,6 +81,8 @@ class SubscriptionService:
             template_id=template_id,
             semantic_metric_key=semantic_metric_key,
             semantic_query=semantic_query or {},
+            subscription_type=subscription_type,
+            briefing_config=briefing_config or None,
             cron_expression=cron_expression,
             notify_channel=notify_channel,
             is_active=True,

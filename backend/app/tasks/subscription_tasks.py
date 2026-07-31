@@ -97,6 +97,14 @@ def _execute_subscription_impl(subscription_id: int) -> dict:
 
 
 def _execute_subscription_query(db, sub: QuerySubscription) -> tuple[str, str]:
+    if sub.subscription_type == "briefing":
+        from app.services.business_briefing_service import BusinessBriefingService
+
+        title, summary, _ = BusinessBriefingService(db).generate(
+            sub.briefing_config or {}, user_id=int(sub.user_id)
+        )
+        return title, summary
+
     if sub.semantic_metric_key:
         query_config = sub.semantic_query or {}
         metric, result = SemanticMetricQueryService(db).execute(

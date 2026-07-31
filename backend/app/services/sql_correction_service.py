@@ -6,14 +6,19 @@ import hashlib
 import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 from app.models.sql_correction import SqlCorrection
 from app.utils.llm_client import get_llm_client
 from app.core.redis import get_redis
+from app.utils.sql_validator import SQLValidator
 
 logger = logging.getLogger(__name__)
 
 _EMBEDDING_PREFIX = "sql_correction:embedding:"
+REVIEW_CANDIDATE = "candidate"
+REVIEW_VERIFIED = "verified"
+REVIEW_REJECTED = "rejected"
+VALID_REVIEW_STATUSES = {REVIEW_CANDIDATE, REVIEW_VERIFIED, REVIEW_REJECTED}
 
 
 class SqlCorrectionService:
@@ -33,10 +38,18 @@ class SqlCorrectionService:
         corrected_sql: str,
         user_feedback: Optional[str] = None,
         user_id: Optional[int] = None,
+        review_status: str = REVIEW_VERIFIED,
+        source: str = "user_feedback",
+        evidence: Optional[Dict[str, Any]] = None,
     ) -> Optional[SqlCorrection]:
         """保存一条修正记录（自动去重：同数据源同 corrected_sql 只保存一次）"""
         if not corrected_sql:
             return None
+        if review_status not in VALID_REVIEW_STATUSES:
+            raise ValueError(f"不支持的审核状态: {review_status}")
+        is_valid, validation_message = SQLValidator.validate(corrected_sql)
+        if not is_valid:
+            raise ValueError(f"修正 SQL 未通过安全校验: {validation_message}")
         existing = (
             self.db.query(SqlCorrection)
             .filter(
@@ -46,6 +59,16 @@ class SqlCorrectionService:
             .first()
         )
         if existing:
+            if review_status == REVIEW_VERIFIED and existing.review_status != REVIEW_VERIFIED:
+                existing.review_status = REVIEW_VERIFIED
+                existing.source = source
+                existing.user_feedback = user_feedback or existing.user_feedback
+                existing.verified_by = user_id
+                existing.verified_at = datetime.now(timezone.utc)
+                existing.evidence = evidence or existing.evidence
+                self.db.commit()
+                self.db.refresh(existing)
+                self._cache_question_embedding(existing)
             logger.info("[SqlCorrection] 跳过重复: id=%s data_source=%d sql=%s",
                          existing.id, data_source_id, corrected_sql[:60])
             return existing
@@ -58,17 +81,32 @@ class SqlCorrectionService:
             corrected_sql=corrected_sql,
             user_feedback=user_feedback,
             table_names=",".join(sorted(tables)) if tables else None,
+            review_status=review_status,
+            source=source,
+            evidence=evidence,
             created_by=user_id,
-            created_at=datetime.utcnow(),
+            verified_by=user_id if review_status == REVIEW_VERIFIED else None,
+            verified_at=datetime.now(timezone.utc) if review_status == REVIEW_VERIFIED else None,
+            created_at=datetime.now(timezone.utc),
         )
         self.db.add(record)
         self.db.commit()
         self.db.refresh(record)
 
-        # P1-7: 保存时自动生成并缓存 question embedding 到 Redis
+        if review_status == REVIEW_VERIFIED:
+            self._cache_question_embedding(record)
+
+        logger.info(
+            "[SqlCorrection] 保存修正: id=%s status=%s source=%s question=%s",
+            record.id, review_status, source, question[:60],
+        )
+        return record
+
+    def _cache_question_embedding(self, record: SqlCorrection) -> None:
+        """仅为已验证案例生成 embedding，候选案例不参与 RAG。"""
         try:
             llm = get_llm_client()
-            embedding = llm.get_embedding(question)
+            embedding = llm.get_embedding(record.question)
             if embedding:
                 r = get_redis()
                 r.setex(self._embedding_key(record.id), 86400 * 30,
@@ -76,7 +114,43 @@ class SqlCorrectionService:
         except Exception as e:
             logger.warning(f"[SqlCorrection] embedding 生成失败: {e}")
 
-        logger.info("[SqlCorrection] 保存修正: id=%s question=%s", record.id, question[:60])
+    def list_for_review(
+        self, data_source_id: int, review_status: str = REVIEW_CANDIDATE, limit: int = 50
+    ) -> List[SqlCorrection]:
+        if review_status not in VALID_REVIEW_STATUSES:
+            raise ValueError(f"不支持的审核状态: {review_status}")
+        return (
+            self.db.query(SqlCorrection)
+            .filter(
+                SqlCorrection.data_source_id == data_source_id,
+                SqlCorrection.review_status == review_status,
+            )
+            .order_by(SqlCorrection.created_at.desc())
+            .limit(min(max(limit, 1), 200))
+            .all()
+        )
+
+    def review_correction(
+        self, correction_id: int, approved: bool, reviewer_id: int,
+        review_comment: Optional[str] = None,
+    ) -> Optional[SqlCorrection]:
+        record = self.db.query(SqlCorrection).filter(SqlCorrection.id == correction_id).first()
+        if not record:
+            return None
+        record.review_status = REVIEW_VERIFIED if approved else REVIEW_REJECTED
+        record.verified_by = reviewer_id
+        record.verified_at = datetime.now(timezone.utc)
+        if review_comment:
+            record.user_feedback = review_comment
+        self.db.commit()
+        self.db.refresh(record)
+        if approved:
+            self._cache_question_embedding(record)
+        else:
+            try:
+                get_redis().delete(self._embedding_key(record.id))
+            except Exception:
+                pass
         return record
 
     def _get_embedding_from_cache(self, correction_id: int) -> Optional[List[float]]:
@@ -99,7 +173,10 @@ class SqlCorrectionService:
         """根据问题和数据源查找最相关历史修正（P1-7: embedding 语义匹配 + 关键词混合）"""
         current_tables = self._extract_tables(question)
 
-        query = self.db.query(SqlCorrection).filter(SqlCorrection.is_active == True)
+        query = self.db.query(SqlCorrection).filter(
+            SqlCorrection.is_active == True,
+            SqlCorrection.review_status == REVIEW_VERIFIED,
+        )
         if data_source_id is not None:
             query = query.filter(SqlCorrection.data_source_id == data_source_id)
         records = query.order_by(SqlCorrection.created_at.desc()).limit(50).all()
@@ -107,7 +184,10 @@ class SqlCorrectionService:
         if len(records) < 5:
             cross = (
                 self.db.query(SqlCorrection)
-                .filter(SqlCorrection.is_active == True)
+                .filter(
+                    SqlCorrection.is_active == True,
+                    SqlCorrection.review_status == REVIEW_VERIFIED,
+                )
                 .order_by(SqlCorrection.created_at.desc())
                 .limit(50).all()
             )

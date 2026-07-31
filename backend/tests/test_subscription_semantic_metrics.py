@@ -109,6 +109,22 @@ def test_create_subscription_requires_template_or_metric(db_session, test_user):
     assert "至少选择一种" in str(exc_info.value)
 
 
+def test_create_business_briefing_subscription(db_session, test_user):
+    data_source = _create_data_source(db_session, test_user.id)
+    _create_metric(db_session, data_source.id, test_user.id)
+
+    sub = SubscriptionService(db_session).create(
+        user_id=test_user.id,
+        template_id=None,
+        cron_expression="0 8 * * *",
+        subscription_type="briefing",
+        briefing_config={"metric_keys": ["gmv"], "period": "yesterday"},
+    )
+
+    assert sub.subscription_type == "briefing"
+    assert sub.briefing_config["metric_keys"] == ["gmv"]
+
+
 def test_execute_semantic_metric_subscription_query(monkeypatch, db_session, test_user):
     data_source = _create_data_source(db_session, test_user.id)
     _create_metric(db_session, data_source.id, test_user.id)

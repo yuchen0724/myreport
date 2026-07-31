@@ -35,6 +35,13 @@
             <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="ai_risk_level" label="机器预审" width="110">
+          <template #default="{ row }">
+            <el-tag :type="riskType(row.ai_risk_level)" size="small">
+              {{ riskLabel(row.ai_risk_level) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="submitter_name" label="提交人" width="100">
           <template #default="{ row }">
             {{ row.submitter_name || `用户#${row.submitted_by}` }}
@@ -53,6 +60,11 @@
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="showDetail(row)">详情</el-button>
+            <el-button
+              v-if="row.status === 'pending' && isAdmin"
+              type="primary" link size="small"
+              @click="handleAiReview(row)"
+            >重新预审</el-button>
             <el-button
               v-if="row.status === 'pending' && isAdmin"
               type="success" link size="small"
@@ -139,8 +151,28 @@
         <el-descriptions-item label="审核时间">{{ detailRow.reviewed_at ? formatDate(detailRow.reviewed_at) : '-' }}</el-descriptions-item>
         <el-descriptions-item label="提交时间">{{ detailRow.created_at ? formatDate(detailRow.created_at) : '-' }}</el-descriptions-item>
         <el-descriptions-item label="审核意见">{{ detailRow.review_comment || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="机器风险">
+          <el-tag :type="riskType(detailRow.ai_risk_level)">{{ riskLabel(detailRow.ai_risk_level) }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="预审建议">{{ detailRow.ai_review?.recommendation || '-' }}</el-descriptions-item>
         <el-descriptions-item label="SQL 内容" :span="2">
           <pre class="sql-block">{{ detailRow.sql_content || '无' }}</pre>
+        </el-descriptions-item>
+        <el-descriptions-item label="机器预审发现" :span="2">
+          <el-alert
+            v-for="finding in detailRow.ai_review?.findings || []"
+            :key="finding.code"
+            :title="finding.title"
+            :type="finding.severity === 'high' ? 'error' : riskType(finding.severity)"
+            :description="`${finding.detail} 建议：${finding.suggestion}`"
+            show-icon
+            :closable="false"
+            class="review-finding"
+          />
+          <el-empty v-if="!(detailRow.ai_review?.findings || []).length" description="未发现规则风险" :image-size="56" />
+        </el-descriptions-item>
+        <el-descriptions-item v-if="detailRow.ai_review?.ai_summary" label="AI 说明" :span="2">
+          <div class="ai-summary">{{ detailRow.ai_review.ai_summary }}</div>
         </el-descriptions-item>
       </el-descriptions>
     </el-dialog>
@@ -157,6 +189,7 @@ import {
   getReview,
   createReview,
   reviewSql,
+  refreshAiReview,
   deleteReview,
 } from '@/api/sqlReviews'
 
@@ -224,6 +257,16 @@ function statusLabel(s) {
   return map[s] || s
 }
 
+function riskType(s) {
+  const map = { low: 'success', medium: 'warning', high: 'danger' }
+  return map[s] || 'info'
+}
+
+function riskLabel(s) {
+  const map = { low: '低风险', medium: '中风险', high: '高风险' }
+  return map[s] || '未预审'
+}
+
 // ---- 提交审核 ----
 function showSubmitDialog() {
   submitForm.value = { template_id: 1, sql_content: '' }
@@ -270,6 +313,18 @@ async function handleReview() {
     ElMessage.error('审核操作失败')
   } finally {
     reviewing.value = false
+  }
+}
+
+async function handleAiReview(row) {
+  try {
+    const review = await refreshAiReview(row.id)
+    ElMessage.success('机器预审已更新')
+    detailRow.value = review
+    detailDialogVisible.value = true
+    loadReviews()
+  } catch {
+    ElMessage.error('机器预审失败')
   }
 }
 
@@ -333,5 +388,12 @@ function showDetail(row) {
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+.review-finding {
+  margin-bottom: 8px;
+}
+.ai-summary {
+  white-space: pre-wrap;
+  line-height: 1.7;
 }
 </style>

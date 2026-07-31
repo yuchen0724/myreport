@@ -15,8 +15,8 @@
         <el-table-column label="订阅对象" min-width="220">
           <template #default="{ row }">
             <div class="target-cell">
-              <el-tag :type="row.semantic_metric_key ? 'warning' : 'primary'" size="small">
-                {{ row.semantic_metric_key ? '语义指标' : '模板' }}
+              <el-tag :type="row.subscription_type === 'briefing' ? 'success' : row.semantic_metric_key ? 'warning' : 'primary'" size="small">
+                {{ row.subscription_type === 'briefing' ? '经营日报' : row.semantic_metric_key ? '语义指标' : '模板' }}
               </el-tag>
               <span>{{ subscriptionTargetLabel(row) }}</span>
             </div>
@@ -24,7 +24,8 @@
         </el-table-column>
         <el-table-column label="查询配置" min-width="180">
           <template #default="{ row }">
-            <span v-if="row.semantic_metric_key">{{ semanticQueryLabel(row.semantic_query) }}</span>
+            <span v-if="row.subscription_type === 'briefing'">{{ briefingConfigLabel(row.briefing_config) }}</span>
+            <span v-else-if="row.semantic_metric_key">{{ semanticQueryLabel(row.semantic_query) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -78,6 +79,7 @@
           <el-radio-group v-model="form.subscription_type" :disabled="!!editId">
             <el-radio-button label="template">模板查询</el-radio-button>
             <el-radio-button label="semantic">语义指标</el-radio-button>
+            <el-radio-button label="briefing">智能经营日报</el-radio-button>
           </el-radio-group>
         </el-form-item>
 
@@ -98,7 +100,7 @@
           </el-select>
         </el-form-item>
 
-        <template v-else>
+        <template v-else-if="form.subscription_type === 'semantic'">
           <el-form-item label="语义指标">
             <el-select
               v-model="form.semantic_metric_key"
@@ -169,6 +171,40 @@
 
           <el-form-item label="最大行数">
             <el-input-number v-model="form.semantic_query.page_size" :min="1" :max="1000" />
+          </el-form-item>
+        </template>
+
+        <template v-else>
+          <el-form-item label="日报标题">
+            <el-input v-model="form.briefing_config.title" placeholder="智能经营日报" />
+          </el-form-item>
+          <el-form-item label="经营指标" required>
+            <el-select
+              v-model="form.briefing_config.metric_keys"
+              multiple
+              filterable
+              :multiple-limit="10"
+              placeholder="选择 1-10 个已治理语义指标"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="metric in metrics"
+                :key="metric.metric_key"
+                :label="`${metric.name} (${metric.metric_key})`"
+                :value="metric.metric_key"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="统计周期">
+            <el-select v-model="form.briefing_config.period" style="width: 100%">
+              <el-option label="昨日" value="yesterday" />
+              <el-option label="今日" value="today" />
+              <el-option label="最近 7 天" value="last_7_days" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="AI 解读">
+            <el-switch v-model="form.briefing_config.include_ai_summary" />
+            <span class="field-help">数字由语义指标计算，AI 只负责解读证据。</span>
           </el-form-item>
         </template>
 
@@ -271,6 +307,12 @@ const defaultForm = () => ({
   template_id: null,
   semantic_metric_key: '',
   semantic_query: emptySemanticQuery(),
+  briefing_config: {
+    title: '智能经营日报',
+    metric_keys: [],
+    period: 'yesterday',
+    include_ai_summary: true,
+  },
   cron_expression: '0 8 * * 1',
   notify_channel: 'feishu',
 })
@@ -342,10 +384,16 @@ function showEditDialog(row) {
   editId.value = row.id
   const semanticQuery = normalizeSemanticQuery(row.semantic_query || {})
   form.value = {
-    subscription_type: row.semantic_metric_key ? 'semantic' : 'template',
+    subscription_type: row.subscription_type === 'briefing' ? 'briefing' : row.semantic_metric_key ? 'semantic' : 'template',
     template_id: row.template_id || null,
     semantic_metric_key: row.semantic_metric_key || '',
     semantic_query: semanticQuery,
+    briefing_config: {
+      title: row.briefing_config?.title || '智能经营日报',
+      metric_keys: row.briefing_config?.metric_keys || [],
+      period: row.briefing_config?.period || 'yesterday',
+      include_ai_summary: row.briefing_config?.include_ai_summary !== false,
+    },
     cron_expression: row.cron_expression,
     notify_channel: row.notify_channel,
   }
@@ -409,6 +457,10 @@ async function handleSubmit() {
     ElMessage.warning('请选择语义指标')
     return
   }
+  if (form.value.subscription_type === 'briefing' && !form.value.briefing_config.metric_keys.length) {
+    ElMessage.warning('请至少选择一个经营指标')
+    return
+  }
 
   submitting.value = true
   try {
@@ -437,6 +489,12 @@ function buildSubmitPayload() {
 
   if (form.value.subscription_type === 'template') {
     if (!editId.value) payload.template_id = form.value.template_id
+    return payload
+  }
+
+  if (form.value.subscription_type === 'briefing') {
+    payload.subscription_type = 'briefing'
+    payload.briefing_config = form.value.briefing_config
     return payload
   }
 
@@ -504,10 +562,19 @@ async function showExecutions(row) {
 }
 
 function subscriptionTargetLabel(row) {
+  if (row.subscription_type === 'briefing') {
+    return row.briefing_config?.title || '智能经营日报'
+  }
   if (row.semantic_metric_key) {
     return metricByKey.value.get(row.semantic_metric_key)?.name || row.metric_name || row.semantic_metric_key
   }
   return row.template_name || templateById.value.get(row.template_id)?.name || `模板#${row.template_id}`
+}
+
+function briefingConfigLabel(config) {
+  const metricCount = config?.metric_keys?.length || 0
+  const periodMap = { yesterday: '昨日', today: '今日', last_7_days: '最近 7 天' }
+  return `${periodMap[config?.period] || '昨日'} / ${metricCount} 个指标`
 }
 
 function semanticQueryLabel(query) {
@@ -561,6 +628,11 @@ function statusLabel(status) {
   margin-top: 4px;
   font-size: 12px;
   color: #409eff;
+}
+.field-help {
+  margin-left: 10px;
+  color: #667085;
+  font-size: 12px;
 }
 
 .filter-list {

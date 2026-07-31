@@ -1,6 +1,6 @@
 # backend/app/schemas/sql_review.py
 from pydantic import ConfigDict, BaseModel, Field
-from typing import Optional
+from typing import Any, Dict, Optional
 from datetime import datetime
 
 
@@ -25,6 +25,9 @@ class SqlReviewResponse(BaseModel):
     reviewer_id: Optional[int] = None
     review_comment: Optional[str] = None
     sql_content: Optional[str] = None
+    ai_risk_level: Optional[str] = None
+    ai_review: Optional[Dict[str, Any]] = None
+    ai_reviewed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     reviewed_at: Optional[datetime] = None
     # 额外展示字段

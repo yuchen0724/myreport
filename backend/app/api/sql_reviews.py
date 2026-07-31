@@ -91,6 +91,21 @@ async def get_review(
     return _enrich_review(review, db)
 
 
+@router.post("/{review_id}/ai-review", response_model=SqlReviewResponse)
+async def refresh_ai_review(
+    review_id: int,
+    use_llm: bool = Query(True, description="是否生成 LLM 中文审核摘要"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """重新执行机器预审；结构化规则始终运行，LLM 解释失败时自动降级。"""
+    try:
+        review = SqlReviewService(db).refresh_ai_review(review_id, use_llm=use_llm)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return _enrich_review(review, db)
+
+
 # ---- 审核操作（仅管理员） ----
 
 @router.put("/{review_id}/review", response_model=SqlReviewResponse)

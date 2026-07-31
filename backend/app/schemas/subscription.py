@@ -8,6 +8,8 @@ class SubscriptionCreate(BaseModel):
     template_id: Optional[int] = None
     semantic_metric_key: Optional[str] = None
     semantic_query: Optional[dict[str, Any]] = None
+    subscription_type: str = Field(default="query", description="query / briefing")
+    briefing_config: Optional[dict[str, Any]] = None
     cron_expression: str = Field(..., description="Cron 表达式，如 '0 8 * * 1'")
     notify_channel: str = Field(default="feishu", description="通知渠道: feishu / email")
 
@@ -15,6 +17,7 @@ class SubscriptionCreate(BaseModel):
 class SubscriptionUpdate(BaseModel):
     semantic_metric_key: Optional[str] = None
     semantic_query: Optional[dict[str, Any]] = None
+    briefing_config: Optional[dict[str, Any]] = None
     cron_expression: Optional[str] = None
     notify_channel: Optional[str] = None
     is_active: Optional[bool] = None
@@ -28,6 +31,8 @@ class SubscriptionResponse(BaseModel):
     template_id: Optional[int] = None
     semantic_metric_key: Optional[str] = None
     semantic_query: Optional[dict[str, Any]] = None
+    subscription_type: str = "query"
+    briefing_config: Optional[dict[str, Any]] = None
     cron_expression: str
     notify_channel: str
     is_active: bool

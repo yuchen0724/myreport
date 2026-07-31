@@ -72,3 +72,25 @@ class AIAnalystFeedbackResponse(BaseModel):
     """SQL 修正反馈响应"""
     id: int = Field(..., description="修正记录 ID")
     message: str = Field("感谢反馈，我们会持续优化", description="提示消息")
+
+
+class SQLCorrectionReviewRequest(BaseModel):
+    """审核 AI 自动产生的 SQL 学习候选。"""
+    approved: bool = Field(..., description="是否批准进入学习案例库")
+    comment: Optional[str] = Field(None, description="审核说明")
+
+
+class SQLCorrectionItem(BaseModel):
+    id: int
+    data_source_id: int
+    question: str
+    original_sql: str
+    corrected_sql: str
+    user_feedback: Optional[str] = None
+    review_status: str
+    source: str
+    evidence: Optional[Dict[str, Any]] = None
+    created_by: Optional[int] = None
+    verified_by: Optional[int] = None
+
+    model_config = {"from_attributes": True}

@@ -27,6 +27,8 @@ from app.api import sql_reviews as sql_reviews_api
 from app.api import dialects as dialects_api
 from app.api import ai_analyst as ai_analyst_api
 from app.api import rca as rca_api
+from app.api import inventory_copilot as inventory_copilot_api
+from app.api import ai_design as ai_design_api
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.audit_log import AuditLogMiddleware
 from app.middleware.error_handler import register_exception_handlers
@@ -171,6 +173,8 @@ app.include_router(pool_metrics_api.router)
 app.include_router(dialects_api.router)
 app.include_router(ai_analyst_api.router)
 app.include_router(rca_api.router)
+app.include_router(inventory_copilot_api.router)
+app.include_router(ai_design_api.router)
 # 预测路由受 prediction_enabled 控制
 if settings.prediction_enabled:
     app.include_router(prediction_api.router)

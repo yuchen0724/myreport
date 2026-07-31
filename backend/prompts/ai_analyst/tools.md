@@ -16,6 +16,11 @@
 ## query_metric
 输入: {"metric_key": "gmv", "data_source_id": {data_source_id}, "dimensions": [...], "start_time": "...", "end_time": "...", "filters": {}, "page": 1, "page_size": 50}
 
+## analyze_inventory
+用于区间进销存、缺货、积压、滞销和库存平衡分析。必须先通过 get_schema 确认字段。
+输入: {"data_source_id": {data_source_id}, "table_name": "库.表", "start_date": "2026-07-01", "end_date": "2026-07-31", "dimensions": ["store_id", "sku_id"], "entity_keys": ["store_id", "sku_id", "batch_id"], "fields": {"date_field": "dt", "closing_stock_field": "end_stock_num", "sales_field": "sale_num", "receipt_field": "receive_num"}, "filters": {}}
+**重要：期初和期末由工具选择边界快照，禁止自行对多个日期的库存余额求和。**
+
 ## generate_chart
 单系列: {"chart_type": "bar|line|pie|scatter", "data": [...], "x_axis_field": "...", "y_axis_field": "...", "title": "..."}
 多系列: {"chart_type": "line", "data": [...], "x_axis_field": "...", "y_axis_field": "...", "title": "...", "series_fields": ["门店1", "门店2"]}

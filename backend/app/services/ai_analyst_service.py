@@ -57,7 +57,8 @@ LEVEL_PREDICT = "predict"
 class AIAnalystService:
     """AI 数据分析师服务 v2"""
 
-    MAX_AGENT_STEPS = 30
+    # Bound autonomous loops so a malformed tool plan cannot consume unlimited calls.
+    MAX_AGENT_STEPS = 12
 
     def __init__(self, db: Session):
         self.db = db
@@ -156,6 +157,24 @@ class AIAnalystService:
                                "filters": {"type": "object"},
                                "alternate_ds_id": {"type": "integer", "description": "联邦查询时指定其他数据源 ID"}},
                                "required": ["metric_key", "data_source_id"]}),
+            ToolDefinition(
+                name="analyze_inventory",
+                description="按边界快照口径分析区间进销存，识别缺货、积压、滞销和库存平衡异常；期初期末不会跨日期直接汇总。",
+                parameters={"type": "object", "properties": {
+                    "data_source_id": {"type": "integer"}, "table_name": {"type": "string"},
+                    "start_date": {"type": "string"}, "end_date": {"type": "string"},
+                    "dimensions": {"type": "array", "items": {"type": "string"}},
+                    "entity_keys": {"type": "array", "items": {"type": "string"}},
+                    "fields": {"type": "object", "properties": {
+                        "date_field": {"type": "string"}, "opening_stock_field": {"type": "string"},
+                        "closing_stock_field": {"type": "string"}, "sales_field": {"type": "string"},
+                        "receipt_field": {"type": "string"}, "other_inbound_field": {"type": "string"},
+                        "other_outbound_field": {"type": "string"},
+                    }, "required": ["date_field", "closing_stock_field"]},
+                    "filters": {"type": "object"}, "stockout_cover_days": {"type": "number"},
+                    "overstock_cover_days": {"type": "number"},
+                }, "required": ["data_source_id", "table_name", "start_date", "end_date", "dimensions", "entity_keys", "fields"]},
+            ),
             ToolDefinition(name="analyze_data", description="对已有数据做统计分析",
                            parameters={"type": "object", "properties": {
                                "data": {"type": "array"}, "columns": {"type": "array", "items": {"type": "string"}},
@@ -266,18 +285,12 @@ class AIAnalystService:
         tpl = self._prompt_mgr.load_template(path, "ai_analyst_tools")
         return tpl.replace("{data_source_id}", str(ds_id)) if tpl else ""
 
-    # ── SQL 预检 ──────────────────────────────────
-
-    def _precheck_sql(self, sql: str) -> Optional[str]:
-        agg_fns = ["SUM", "COUNT", "AVG", "MAX", "MIN", "GROUP_CONCAT"]
-        has_agg = any(re.search(rf"\b{fn}\s*\(", sql, re.I) for fn in agg_fns)
-        if has_agg and "GROUP BY" not in sql.upper() and "SELECT" in sql.upper():
-            return "聚合查询必须包含 GROUP BY 所有非聚合字段"
-        return None
-
     # ── SQL 执行（P0-2 + P1-4 + P1-6） ────────────
 
-    def execute_sql_tool(self, sql: str, data_source_id: int, user_id: int = None) -> Dict[str, Any]:
+    def execute_sql_tool(
+        self, sql: str, data_source_id: int, user_id: int = None,
+        question: Optional[str] = None,
+    ) -> Dict[str, Any]:
         if user_id is None:
             return {"success": False, "error": "缺少用户上下文"}
         sql = strip_trailing_semicolon(sql)
@@ -285,9 +298,6 @@ class AIAnalystService:
             return {"success": False, "error": "不允许使用 QUALIFY"}
         if "FROM INFORMATION_SCHEMA" in sql.upper() or "JOIN INFORMATION_SCHEMA" in sql.upper():
             return {"success": False, "error": "禁止查询 information_schema，请用 get_schema"}
-        pre = self._precheck_sql(sql)
-        if pre:
-            return {"success": False, "error": f"SQL 预检失败: {pre}"}
         ok, msg = SQLValidator.validate(sql)
         if not ok:
             return {"success": False, "error": f"SQL 验证失败: {msg}"}
@@ -317,11 +327,12 @@ class AIAnalystService:
         warns = self._check_sql_quality(sql, result)
 
         # ── 自学习: 成功后自动保存为 SQL 修正案例（仅保存非全表扫描的查询） ──
-        if "WHERE" in sql.upper() or "LIMIT" in sql.upper() or "GROUP BY" in sql.upper():
+        if question and ("WHERE" in sql.upper() or "LIMIT" in sql.upper() or "GROUP BY" in sql.upper()):
             try:
                 self._save_sql_learning_case(
                     ds_id=data_source_id, sql=sql, rows=rows, cols=cols,
-                    insights=insights, patterns=patterns, warns=warns
+                    insights=insights, patterns=patterns, warns=warns,
+                    question=question, user_id=user_id,
                 )
             except Exception:
                 pass
@@ -340,8 +351,9 @@ class AIAnalystService:
 
     def _save_sql_learning_case(self, ds_id: int, sql: str, rows: List,
                                  cols: List[str] = None, insights: Optional[Dict] = None,
-                                 patterns: Optional[List] = None, warns: Optional[List] = None):
-        """将成功执行的 SQL 保存为学习案例（自动去重）"""
+                                 patterns: Optional[List] = None, warns: Optional[List] = None,
+                                 question: str = "", user_id: Optional[int] = None):
+        """将成功执行的 SQL 保存为待审核候选，不能直接进入 few-shot。"""
         from app.services.sql_correction_service import SqlCorrectionService
         quality_tags = []
         if warns:
@@ -353,11 +365,18 @@ class AIAnalystService:
             feedback += f", 特征: {', '.join(quality_tags)}"
         SqlCorrectionService(self.db).save_correction(
             data_source_id=ds_id,
-            question=f"[AI分析师] SQL查询 {sql[:60]}...",
+            question=question,
             original_sql="",
             corrected_sql=sql,
             user_feedback=feedback,
-            user_id=None,
+            user_id=user_id,
+            review_status="candidate",
+            source="ai_execution",
+            evidence={
+                "row_count": len(rows),
+                "columns": (cols or [])[:100],
+                "warnings": (warns or [])[:10],
+            },
         )
 
     @staticmethod
@@ -715,11 +734,14 @@ class AIAnalystService:
 
     # ── Agent 核心 ──────────────────────────────────
 
-    def _execute_tool(self, action: Dict, data_source_id: int, user_id: int = None) -> Dict:
+    def _execute_tool(
+        self, action: Dict, data_source_id: int, user_id: int = None,
+        question: Optional[str] = None,
+    ) -> Dict:
         name, inp = action.get("tool", ""), action.get("input", {})
         if name == "execute_sql":
             return self.execute_sql_tool(
-                inp.get("sql", ""), inp.get("data_source_id", data_source_id), user_id
+                inp.get("sql", ""), inp.get("data_source_id", data_source_id), user_id, question
             )
         if name == "get_schema":
             return self.get_schema_tool(
@@ -738,6 +760,20 @@ class AIAnalystService:
                                            inp.get("dimensions"), inp.get("start_time"), inp.get("end_time"),
                                            inp.get("filters"), inp.get("page", 1), inp.get("page_size", 50),
                                            inp.get("alternate_ds_id"))
+        if name == "analyze_inventory":
+            from app.schemas.inventory_copilot import InventoryCopilotRequest
+            from app.services.inventory_copilot_service import InventoryCopilotService
+
+            payload = {
+                **inp,
+                "data_source_id": inp.get("data_source_id", data_source_id),
+                "include_ai_summary": False,
+            }
+            try:
+                request = InventoryCopilotRequest(**payload)
+            except Exception as exc:
+                return {"success": False, "error": f"进销存参数无效: {exc}"}
+            return {"success": True, **InventoryCopilotService(self.db).analyze(request, user_id)}
         return {"success": False, "error": f"未知工具: {name}"}
 
     def _compact_for_llm(self, name: str, result: Dict) -> Dict:
@@ -765,6 +801,15 @@ class AIAnalystService:
                 "success": True,
                 "total_count": result.get("total_count", len(tables)),
                 "tables": tables,
+            }
+        if name == "analyze_inventory" and result.get("success"):
+            return {
+                "success": True,
+                "period": result.get("period"),
+                "snapshot_rule": result.get("snapshot_rule"),
+                "summary": result.get("summary"),
+                "actions": (result.get("actions") or [])[:30],
+                "row_count": result.get("total", 0),
             }
         return result
 
@@ -818,14 +863,6 @@ class AIAnalystService:
         if not cid:
             cid = str(uuid.uuid4())
         scoped_cid = f"{uid}:{cid}"
-        ck = self._cache_key(message, ds_id, gid, uid)
-        cached = self._get_cached_response(ck)
-        if cached:
-            return AIAnalystChatResponse(conversation_id=cid, message=AIAnalystMessage(role="assistant", content=cached))
-        sc = self._get_semantic_cache(message, ds_id, uid)
-        if sc:
-            return AIAnalystChatResponse(conversation_id=cid, message=AIAnalystMessage(role="assistant", content=sc))
-
         history = self._get_conversation_history(scoped_cid)
         tp = self._build_tools_prompt(ds_id)
         sem = build_semantic_runtime_context(self.db, ds_id, message, max_chars=0)
@@ -868,7 +905,7 @@ class AIAnalystService:
                     if choice.tool_calls:
                         for tc in choice.tool_calls:
                             act = {"tool": tc.name, "input": tc.arguments}
-                            tr = self._execute_tool(act, ds_id, uid)
+                            tr = self._execute_tool(act, ds_id, uid, message)
                             tool_recs.append(AIAnalystToolCall(tool_name=tc.name, tool_input=tc.arguments,
                                                                tool_output=self._fmt_tool(tc.name, tr)))
                             if tc.name == "execute_sql" and tr.get("success"):
@@ -883,7 +920,7 @@ class AIAnalystService:
                     response_text = llm.chat(messages, temperature=0.0)
                     act = self._parse_action(response_text)
                     if act:
-                        tr = self._execute_tool(act, ds_id, uid)
+                        tr = self._execute_tool(act, ds_id, uid, message)
                         tool_recs.append(AIAnalystToolCall(tool_name=act["tool"], tool_input=act.get("input", {}),
                                                            tool_output=self._fmt_tool(act["tool"], tr)))
                         if act["tool"] == "execute_sql" and tr.get("success"):
@@ -898,8 +935,8 @@ class AIAnalystService:
                     message=AIAnalystMessage(role="assistant", content=f"AI 服务暂时不可用: {e}"))
 
             all_text.append(response_text)
-            self._set_cached_response(ck, response_text)
-            self._set_semantic_cache(message, response_text, ds_id, uid)
+            # Final numeric answers are intentionally not cached by question
+            # similarity because source partitions may change between requests.
             self._save_conversation_history(scoped_cid, [{"role": "user", "content": message}, {"role": "assistant", "content": response_text}])
             return AIAnalystChatResponse(conversation_id=cid,
                 message=AIAnalystMessage(role="assistant", content=response_text, tool_calls=tool_recs or None, chart_config=chart_cfg))
@@ -964,7 +1001,7 @@ class AIAnalystService:
                     if tool_calls:
                         for tc in tool_calls:
                             act = {"tool": tc["tool_name"], "input": tc["arguments"]}
-                            tr = self._execute_tool(act, ds_id, uid)
+                            tr = self._execute_tool(act, ds_id, uid, message)
                             yield {"type": "tool_result", "tool_name": tc["tool_name"],
                                    "tool_output": self._fmt_tool(tc["tool_name"], tr)}
                             if tc["tool_name"] == "execute_sql" and tr.get("success"):
@@ -991,7 +1028,7 @@ class AIAnalystService:
                     act = self._parse_action(text)
                     if act:
                         yield {"type": "tool_call", "tool_name": act.get("tool"), "tool_input": act.get("input", {})}
-                        tr = self._execute_tool(act, ds_id, uid)
+                        tr = self._execute_tool(act, ds_id, uid, message)
                         yield {"type": "tool_result", "tool_name": act.get("tool"),
                                "tool_output": self._fmt_tool(act.get("tool"), tr)}
                         if act.get("tool") == "execute_sql" and tr.get("success"):

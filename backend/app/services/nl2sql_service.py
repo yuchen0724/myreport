@@ -289,6 +289,9 @@ class NL2SQLService:
                 corrected_sql=repaired_sql,
                 user_feedback=f"LLM 自动修复成功, 置信度={repaired_confidence}",
                 user_id=user_id,
+                review_status="candidate",
+                source="auto_repair",
+                evidence={"confidence": repaired_confidence, "execution_succeeded": True},
             )
         except Exception as learn_err:
             logger.warning(f"[NL2SQL] ⚠️ 自动保存修复案例失败: {learn_err}")

@@ -217,6 +217,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, roles: ["admin", "editor", "user"] },
   },
   {
+    path: "/ai-design",
+    name: "AIDesignStudio",
+    component: () => import("@/views/AIDesignStudio.vue"),
+    meta: { requiresAuth: true, roles: ["admin", "editor"] },
+  },
+  {
     path: "/rca",
     name: "RcaDashboard",
     component: () => import("@/views/RcaDashboard.vue"),

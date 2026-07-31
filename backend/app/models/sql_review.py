@@ -1,5 +1,5 @@
 # backend/app/models/sql_review.py
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import JSON, Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -16,6 +16,9 @@ class SqlReview(Base):
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     review_comment = Column(Text, nullable=True)
     sql_content = Column(Text, nullable=True)  # 提交审核的 SQL 内容
+    ai_risk_level = Column(String(20), nullable=True, index=True)
+    ai_review = Column(JSON, nullable=True, comment="机器预审发现、建议与证据")
+    ai_reviewed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
 

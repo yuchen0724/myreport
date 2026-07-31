@@ -42,6 +42,21 @@ class TestSQLValidator:
         )
         assert is_valid is True
 
+    def test_valid_aggregate_without_group_by(self):
+        """纯聚合查询没有非聚合字段时不需要 GROUP BY。"""
+        is_valid, message = SQLValidator.validate(
+            "SELECT SUM(amount) AS total_amount FROM orders"
+        )
+        assert is_valid is True
+        assert message == "验证通过"
+
+    def test_rejects_write_hidden_in_cte(self):
+        is_valid, message = SQLValidator.validate(
+            "WITH removed AS (DELETE FROM users RETURNING id) SELECT * FROM removed"
+        )
+        assert is_valid is False
+        assert "DELETE" in message or "写入" in message
+
     def test_empty_sql(self):
         """验证空 SQL"""
         is_valid, message = SQLValidator.validate("")
@@ -563,7 +578,7 @@ class TestQueryService:
             
             request = SQLQueryRequest(
                 data_source_id=1,
-                sql="SELECT * FROM large_table JOIN other_table ON ...",
+                sql="SELECT * FROM large_table JOIN other_table ON large_table.id = other_table.id",
                 page=1,
                 page_size=10,
             )

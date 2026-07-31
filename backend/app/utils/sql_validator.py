@@ -2,6 +2,9 @@ import re
 import logging
 from typing import List, Tuple
 
+from sqlglot import exp, parse
+from sqlglot.errors import ParseError
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,6 +60,11 @@ class SQLValidator:
 
     # SQL 最大长度限制
     MAX_SQL_LENGTH = 50000  # 50KB
+
+    _write_expression_types = (
+        exp.Alter, exp.Command, exp.Create, exp.Delete, exp.Drop, exp.Insert,
+        exp.LoadData, exp.Merge, exp.Set, exp.Transaction, exp.Update,
+    )
 
     # 预编译正则
     _danger_patterns = [
@@ -122,9 +130,25 @@ class SQLValidator:
         if ";" in sql:
             return False, "不允许使用分号"
 
-        # 6. 检查括号匹配（防止语法错误）
-        if sql.count("(") != sql.count(")"):
-            return False, "括号不匹配"
+        # 6. 使用 AST 判断语句边界和只读语义。相比字符串计数，这不会被
+        # 字面量、注释或嵌套 CTE 干扰，也能阻断 WITH ... DELETE 等变体。
+        try:
+            statements = [statement for statement in parse(sql) if statement is not None]
+        except ParseError as exc:
+            description = exc.errors[0].get("description", str(exc))
+            if "Expecting )" in description:
+                return False, "括号不匹配"
+            return False, f"SQL 语法解析失败: {description}"
+        if len(statements) != 1:
+            return False, "只允许执行一条 SQL 语句"
+
+        statement = statements[0]
+        if isinstance(statement, cls._write_expression_types):
+            return False, "只允许只读查询"
+        if any(isinstance(node, cls._write_expression_types) for node in statement.walk()):
+            return False, "查询中包含写入或管理操作"
+        if not isinstance(statement, (exp.Query, exp.Union, exp.Intersect, exp.Except)):
+            return False, "只允许 SELECT 查询"
 
         return True, "验证通过"
 

@@ -14,6 +14,8 @@ class QuerySubscription(Base):
     template_id = Column(Integer, ForeignKey("templates.id", ondelete="CASCADE"), nullable=True, index=True)
     semantic_metric_key = Column(String(100), nullable=True, index=True)
     semantic_query = Column(JSON, nullable=True)
+    subscription_type = Column(String(20), nullable=False, default="query", index=True)
+    briefing_config = Column(JSON, nullable=True)
     cron_expression = Column(String(50), nullable=False)
     notify_channel = Column(String(20), nullable=False, default="feishu")  # feishu / email
     is_active = Column(Boolean, default=True)
@@ -33,6 +35,8 @@ class QuerySubscription(Base):
             "template_id": self.template_id,
             "semantic_metric_key": self.semantic_metric_key,
             "semantic_query": self.semantic_query,
+            "subscription_type": self.subscription_type,
+            "briefing_config": self.briefing_config,
             "cron_expression": self.cron_expression,
             "notify_channel": self.notify_channel,
             "is_active": self.is_active,
