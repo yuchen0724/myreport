@@ -93,7 +93,7 @@ def list_reports(
 ):
     """获取定时报表列表"""
     svc = ScheduledReportService(db)
-    reports = svc.list_reports(offset=offset, limit=limit)
+    reports = svc.list_reports(current_user_id, offset=offset, limit=limit)
     return [r.to_dict() for r in reports]
 
 
@@ -105,7 +105,7 @@ def get_report(
 ):
     """获取定时报表详情"""
     svc = ScheduledReportService(db)
-    report = svc.get(report_id)
+    report = svc.get(report_id, current_user_id)
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="定时报表不存在")
     return report.to_dict()
@@ -123,7 +123,10 @@ def update_report(
     data = request.model_dump(exclude_unset=True)
     if "recipients" in data and data["recipients"]:
         data["recipients"] = [r.model_dump() if isinstance(r, Recipient) else r for r in data["recipients"]]
-    report = svc.update(report_id, **data)
+    try:
+        report = svc.update(report_id, current_user_id, **data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="定时报表不存在")
     return report.to_dict()
@@ -137,7 +140,7 @@ def delete_report(
 ):
     """删除定时报表"""
     svc = ScheduledReportService(db)
-    if not svc.delete(report_id):
+    if not svc.delete(report_id, current_user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="定时报表不存在")
 
 
@@ -150,7 +153,7 @@ def toggle_report(
 ):
     """启用/禁用定时报表"""
     svc = ScheduledReportService(db)
-    report = svc.toggle_enabled(report_id, request.enabled)
+    report = svc.toggle_enabled(report_id, current_user_id, request.enabled)
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="定时报表不存在")
     return report.to_dict()
@@ -164,10 +167,13 @@ def run_now(
 ):
     """手动立即执行一次定时报表"""
     svc = ScheduledReportService(db)
-    report = svc.schedule_next_run(report_id)
+    report = svc.get(report_id, current_user_id)
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="定时报表不存在")
-    return {"message": "已触发执行", "report": report.to_dict()}
+    from app.tasks.scheduled_report_tasks import execute_scheduled_report_task
+
+    task = execute_scheduled_report_task.delay(report_id, True)
+    return {"message": "已触发执行", "task_id": task.id, "report": report.to_dict()}
 
 
 @router.get("/{report_id}/deliveries")
@@ -180,7 +186,9 @@ def get_deliveries(
 ):
     """获取报表投递历史"""
     svc = ScheduledReportService(db)
-    deliveries = svc.get_deliveries(report_id, offset=offset, limit=limit)
+    if not svc.get(report_id, current_user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="定时报表不存在")
+    deliveries = svc.get_deliveries(report_id, current_user_id, offset=offset, limit=limit)
     return [d.to_dict() for d in deliveries]
 
 

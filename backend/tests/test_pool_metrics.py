@@ -322,12 +322,13 @@ class TestPoolMetricsAPI:
         resp = client.get("/api/metrics/pool/9999", headers=auth_headers)
         assert resp.status_code == 404
 
-    def test_get_pool_metrics_success(self, client, auth_headers, db_session):
+    def test_get_pool_metrics_success(self, client, auth_headers, db_session, test_user):
         """成功获取连接池指标"""
         from app.models.data_source import DataSource
         ds = DataSource(
             name="api_test_ds", type="MYSQL", host="localhost", port=3306,
             database="testdb", username="root", password_encrypted="encrypted",
+            created_by=test_user.id,
         )
         db_session.add(ds)
         db_session.commit()
@@ -345,13 +346,13 @@ class TestPoolMetricsAPI:
             assert "active_connections" in data
             assert "is_active" in data
 
-    def test_get_all_pool_metrics(self, client, auth_headers, db_session):
+    def test_get_all_pool_metrics(self, client, admin_auth_headers, db_session):
         """获取所有连接池指标"""
         with patch("app.api.pool_metrics._metrics_cache") as mock_cache:
             mock_cache.get_all.return_value = None
             mock_cache.set_all.return_value = True
 
-            resp = client.get("/api/metrics/pool", headers=auth_headers)
+            resp = client.get("/api/metrics/pool", headers=admin_auth_headers)
             assert resp.status_code == 200
             data = resp.json()
             assert "pools" in data
@@ -359,11 +360,21 @@ class TestPoolMetricsAPI:
             assert "total_idle" in data
             assert "total_waiting" in data
 
-    def test_get_pool_metrics_from_cache(self, client, auth_headers):
+    def test_get_pool_metrics_from_cache(self, client, auth_headers, db_session, test_user):
         """从缓存获取指标"""
         import json
+        from app.models.data_source import DataSource
+
+        ds = DataSource(
+            name="cached_ds", type="MYSQL", host="localhost", port=3306,
+            database="testdb", username="root", password_encrypted="encrypted",
+            created_by=test_user.id,
+        )
+        db_session.add(ds)
+        db_session.commit()
+        db_session.refresh(ds)
         cached_data = {
-            "data_source_id": 1,
+            "data_source_id": ds.id,
             "data_source_name": "cached_ds",
             "data_source_type": "MYSQL",
             "active_connections": 2,
@@ -382,7 +393,7 @@ class TestPoolMetricsAPI:
         with patch("app.api.pool_metrics._metrics_cache") as mock_cache:
             mock_cache.get.return_value = cached_data
 
-            resp = client.get("/api/metrics/pool/1", headers=auth_headers)
+            resp = client.get(f"/api/metrics/pool/{ds.id}", headers=auth_headers)
             assert resp.status_code == 200
             data = resp.json()
             assert data["data_source_name"] == "cached_ds"

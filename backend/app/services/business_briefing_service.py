@@ -28,18 +28,32 @@ class BusinessBriefingService:
         evidence = []
 
         for metric_key in (config.get("metric_keys") or [])[:10]:
-            metric, current_result = self.metric_service.execute(
-                self._request(metric_key, current, dimensions, filters),
+            metric, current_total_result = self.metric_service.execute(
+                self._request(metric_key, current, [], filters),
                 user_id=user_id,
                 is_admin=False,
             )
-            _, previous_result = self.metric_service.execute(
-                self._request(metric_key, previous, dimensions, filters),
+            _, previous_total_result = self.metric_service.execute(
+                self._request(metric_key, previous, [], filters),
                 user_id=user_id,
                 is_admin=False,
             )
-            current_value = self._metric_total(current_result.columns, current_result.rows)
-            previous_value = self._metric_total(previous_result.columns, previous_result.rows)
+            breakdown_result = current_total_result
+            if dimensions:
+                _, breakdown_result = self.metric_service.execute(
+                    self._request(metric_key, current, dimensions, filters),
+                    user_id=user_id,
+                    is_admin=False,
+                )
+
+            # Totals must come from a dedicated ungrouped aggregate. Summing grouped
+            # rows breaks non-additive metrics such as averages and period balances.
+            current_value = self._metric_value(
+                current_total_result.columns, current_total_result.rows
+            )
+            previous_value = self._metric_value(
+                previous_total_result.columns, previous_total_result.rows
+            )
             change_rate = None if previous_value == 0 else (current_value - previous_value) / abs(previous_value)
             evidence.append({
                 "metric_key": metric.metric_key,
@@ -47,8 +61,14 @@ class BusinessBriefingService:
                 "current_value": current_value,
                 "previous_value": previous_value,
                 "change_rate": change_rate,
-                "current_rows": current_result.total,
-                "top_dimensions": self._top_dimensions(current_result.columns, current_result.rows),
+                "current_rows": breakdown_result.total,
+                "top_dimensions": (
+                    self._top_dimensions(
+                        breakdown_result.columns, breakdown_result.rows
+                    )
+                    if dimensions
+                    else []
+                ),
             })
 
         title = config.get("title") or "智能经营日报"
@@ -94,20 +114,19 @@ class BusinessBriefingService:
         )
 
     @staticmethod
-    def _metric_total(columns: Iterable[str], rows: Iterable[Any]) -> float:
+    def _metric_value(columns: Iterable[str], rows: Iterable[Any]) -> float:
         columns = list(columns or [])
         try:
             value_index = columns.index("metric_value")
         except ValueError:
             return 0.0
-        total = 0.0
         for row in rows or []:
             value = row.get("metric_value") if isinstance(row, dict) else row[value_index]
             try:
-                total += float(value or 0)
+                return float(value or 0)
             except (TypeError, ValueError):
-                continue
-        return total
+                return 0.0
+        return 0.0
 
     @classmethod
     def _top_dimensions(cls, columns: Iterable[str], rows: Iterable[Any]) -> list[Dict[str, Any]]:

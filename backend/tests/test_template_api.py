@@ -31,6 +31,14 @@ def test_get_template_detail(client, auth_headers, test_template):
     assert data["id"] == test_template.id
     assert data["name"] == test_template.name
 
+
+def test_private_template_rejects_other_user(client, db_session, test_template):
+    _, headers = _other_headers(db_session)
+
+    response = client.get(f"/api/templates/{test_template.id}", headers=headers)
+
+    assert response.status_code == 403
+
 def test_update_template(client, auth_headers, test_template):
     """测试更新模板"""
     response = client.put(
@@ -54,3 +62,19 @@ def test_delete_template(client, auth_headers, test_template):
     # 验证删除
     response = client.get(f"/api/templates/{test_template.id}", headers=auth_headers)
     assert response.status_code == 404
+from app.core.security import create_access_token, get_password_hash
+from app.models.user import User
+
+
+def _other_headers(db_session):
+    user = User(
+        username="template_other",
+        email="template_other@example.com",
+        password_hash=get_password_hash("testpassword"),
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    token = create_access_token({"sub": user.username, "user_id": user.id})
+    return user, {"Authorization": f"Bearer {token}"}

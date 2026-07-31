@@ -17,20 +17,24 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@": resolve(__dirname, "src")
+      "@": resolve(import.meta.dirname, "src")
     }
   },
   build: {
     // 代码分割优化
     rollupOptions: {
       output: {
-        manualChunks: {
-          // 将Element Plus单独打包
-          'element-plus': ['element-plus'],
-          // 将ECharts单独打包
-          'echarts': ['echarts'],
-          // 将Vue相关库单独打包
-          'vue-vendor': ['vue', 'vue-router', 'pinia']
+        manualChunks(id) {
+          if (id.includes('/node_modules/element-plus/')) {
+            return 'element-plus'
+          }
+          if (
+            id.includes('/node_modules/vue/') ||
+            id.includes('/node_modules/vue-router/') ||
+            id.includes('/node_modules/pinia/')
+          ) {
+            return 'vue-vendor'
+          }
         }
       }
     },

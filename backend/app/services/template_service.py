@@ -31,6 +31,24 @@ class TemplateService:
         if template.created_by != user_id:
             raise AuthorizationError("您没有权限操作此模板")
 
+    def require_view_access(self, template_id: int, user_id: int) -> Template:
+        """返回当前用户可见的模板，否则拒绝访问。"""
+        template = self._require_template(template_id)
+        if template.created_by == user_id or template.is_public:
+            return template
+
+        user = self.db.query(User).filter(User.id == user_id).first()
+        if user and user.role and user.role.name == "admin":
+            return template
+
+        shared = self.db.query(TemplateShare).filter(
+            TemplateShare.template_id == template_id,
+            TemplateShare.user_id == user_id,
+        ).first()
+        if shared:
+            return template
+        raise AuthorizationError("您没有权限查看此模板")
+
     def create_template(self, template_data: TemplateCreate, user_id: int) -> TemplateResponse:
         """
         创建模板
@@ -84,7 +102,7 @@ class TemplateService:
             updated_at=created_template.updated_at
         )
 
-    def get_template(self, template_id: int) -> Optional[TemplateResponse]:
+    def get_template(self, template_id: int, user_id: int) -> Optional[TemplateResponse]:
         """
         获取模板
 
@@ -94,8 +112,9 @@ class TemplateService:
         Returns:
             模板响应
         """
-        template = self.template_repo.get_by_id(template_id)
-        if not template:
+        try:
+            template = self.require_view_access(template_id, user_id)
+        except NotFoundError:
             return None
 
         return TemplateResponse(
@@ -261,7 +280,7 @@ class TemplateService:
         self.db.commit()
         return result
 
-    def get_template_versions(self, template_id: int) -> List[TemplateVersionResponse]:
+    def get_template_versions(self, template_id: int, user_id: int) -> List[TemplateVersionResponse]:
         """
         获取模板版本列表
 
@@ -271,6 +290,7 @@ class TemplateService:
         Returns:
             版本响应列表
         """
+        self.require_view_access(template_id, user_id)
         versions = self.version_repo.get_by_template_id(template_id)
 
         return [
@@ -476,7 +496,7 @@ class TemplateService:
         self.db.commit()
         return True
 
-    def get_version_diff(self, template_id: int, version1: int, version2: int) -> dict:
+    def get_version_diff(self, template_id: int, version1: int, version2: int, user_id: int) -> dict:
         """
         获取两个版本之间的差异
 
@@ -488,6 +508,7 @@ class TemplateService:
         Returns:
             版本差异
         """
+        self.require_view_access(template_id, user_id)
         v1 = self.db.query(TemplateVersion).filter(
             TemplateVersion.template_id == template_id,
             TemplateVersion.version == version1

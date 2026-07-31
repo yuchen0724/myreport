@@ -144,12 +144,15 @@ async def feedback(
             corrected_sql=request.corrected_sql,
             user_feedback=request.user_feedback,
             user_id=current_user_id,
-            review_status="verified",
+            review_status="candidate",
             source="user_feedback",
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return AIAnalystFeedbackResponse(id=record.id, message="感谢反馈，我们会持续优化")
+    return AIAnalystFeedbackResponse(
+        id=record.id,
+        message="反馈已提交，审核通过后将用于 SQL 学习",
+    )
 
 
 @router.get("/feedback/candidates", response_model=List[SQLCorrectionItem])
@@ -158,9 +161,9 @@ async def list_feedback_candidates(
     status: str = Query("candidate", description="candidate / verified / rejected"),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(get_current_user_id),
+    current_user: User = Depends(get_current_admin_user),
 ):
-    DataSourceService(db).require_access(data_source_id, current_user_id)
+    DataSourceService(db).require_access(data_source_id, current_user.id)
     try:
         return SqlCorrectionService(db).list_for_review(data_source_id, status, limit)
     except ValueError as exc:

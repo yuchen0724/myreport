@@ -1,6 +1,6 @@
 # backend/app/schemas/async_export.py
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime
 
 class AsyncExportRequest(BaseModel):
@@ -9,6 +9,7 @@ class AsyncExportRequest(BaseModel):
     sql: str = Field(..., description="SQL查询语句")
     export_type: str = Field(..., description="导出类型: excel/pdf")
     filename: Optional[str] = Field(None, description="文件名")
+    params: dict[str, Any] = Field(default_factory=dict, description="SQL 参数")
 
 class AsyncExportResponse(BaseModel):
     """异步导出响应"""

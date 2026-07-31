@@ -27,9 +27,13 @@ class AsyncExportService:
 
         # 根据导出类型调度任务
         if request.export_type.lower() == "excel":
-            export_excel_async.delay(task_id, request.data_source_id, request.sql, user_id)
+            export_excel_async.delay(
+                task_id, request.data_source_id, request.sql, user_id, request.params
+            )
         elif request.export_type.lower() == "pdf":
-            export_pdf_async.delay(task_id, request.data_source_id, request.sql, user_id)
+            export_pdf_async.delay(
+                task_id, request.data_source_id, request.sql, user_id, request.params
+            )
         else:
             raise ValueError(f"不支持的导出类型: {request.export_type}")
 

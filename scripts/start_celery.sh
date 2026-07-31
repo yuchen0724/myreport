@@ -7,4 +7,4 @@ cd /home/zhou/myreport/backend
 export PYTHONPATH=/home/zhou/myreport/backend:$PYTHONPATH
 
 # 启动 Celery Worker
-celery -A celery_config worker --loglevel=info --concurrency=4
+celery -A celery_config worker --loglevel=info --concurrency=4 -B

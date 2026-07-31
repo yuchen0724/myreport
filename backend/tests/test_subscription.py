@@ -53,7 +53,9 @@ class TestSubscriptionService:
         from app.services.subscription_service import SubscriptionService
 
         svc = SubscriptionService(db_session)
-        with pytest.raises(ValueError, match="模板不存在"):
+        from app.exceptions import NotFoundError
+
+        with pytest.raises(NotFoundError, match="模板不存在"):
             svc.create(user_id=test_user.id, template_id=99999, cron_expression="0 8 * * *")
 
     def test_get_subscription(self, db_session, test_user, test_template):

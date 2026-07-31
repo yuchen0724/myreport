@@ -175,13 +175,21 @@ class CacheService:
             return False
 
     def clear_pattern(self, pattern: str) -> bool:
-        """根据模式清除缓存"""
+        """清除查询缓存命名空间，拒绝操作其他 Redis 业务键。"""
         if not self.redis_client:
             return False
+        if pattern != "query_result:*":
+            logger.warning("拒绝清除非查询缓存命名空间: %s", pattern)
+            return False
         try:
-            keys = self.redis_client.keys(pattern)
-            if keys:
-                self.redis_client.delete(*keys)
+            batch = []
+            for key in self.redis_client.scan_iter(match=pattern, count=500):
+                batch.append(key)
+                if len(batch) >= 500:
+                    self.redis_client.delete(*batch)
+                    batch.clear()
+            if batch:
+                self.redis_client.delete(*batch)
             return True
         except Exception as e:
             logger.warning("批量缓存删除失败: %s", e)

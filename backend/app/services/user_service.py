@@ -37,6 +37,14 @@ class UserService:
             return None
 
         update_data = user_data.model_dump(exclude_unset=True)
+        if "username" in update_data:
+            existing = self.user_repo.get_by_username(update_data["username"])
+            if existing and existing.id != user_id:
+                raise ValueError("用户名已存在")
+        if "email" in update_data:
+            existing = self.user_repo.get_by_email(update_data["email"])
+            if existing and existing.id != user_id:
+                raise ValueError("邮箱已存在")
         return self.user_repo.update(user, update_data)
 
     def delete_user(self, user_id: int) -> bool:

@@ -219,7 +219,7 @@ def restore_socket(original_socket):
 
 # ── 查询执行器 ──────────────────────────────────────────────────
 
-def execute_query(ds, sql: str) -> tuple:
+def execute_query(ds, sql: str, params: dict | None = None) -> tuple:
     """
     执行查询并返回 (rows, columns)
     支持数据源配置的 SOCKS5 代理（use_proxy + proxy_server_id）。
@@ -277,7 +277,10 @@ def execute_query(ds, sql: str) -> tuple:
                         connect_args=connect_args,
                     )
                 with engine.connect() as conn:
-                    result = conn.execute(text(sql))
+                    if params is None:
+                        result = conn.execute(text(sql))
+                    else:
+                        result = conn.execute(text(sql), params)
                     columns = list(result.keys())
                     rows = _fetch_all(result, batch_size=100000)
                     return rows, columns

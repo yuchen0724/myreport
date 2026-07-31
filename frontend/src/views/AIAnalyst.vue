@@ -254,7 +254,7 @@
 import { ref, nextTick, onMounted, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { MagicStick, User, SetUp, Promotion, Search } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
+import echarts from '@/utils/echarts'
 import { chatStream } from '@/api/aiAnalyst'
 import { getGroups } from '@/api/nl2sql'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'

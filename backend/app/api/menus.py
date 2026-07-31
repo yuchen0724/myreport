@@ -5,7 +5,8 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.auth_deps import get_current_user_id
+from app.core.auth_deps import get_current_user_id, get_current_admin_user
+from app.models.user import User
 from app.services.menu_service import MenuService
 from app.schemas.menu import MenuCreate, MenuUpdate, MenuResponse
 
@@ -52,7 +53,7 @@ async def get_menu(
 async def create_menu(
     data: MenuCreate,
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(get_current_user_id)
+    current_user: User = Depends(get_current_admin_user),
 ):
     """创建菜单"""
     service = MenuService(db)
@@ -64,7 +65,7 @@ async def update_menu(
     menu_id: int,
     data: MenuUpdate,
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(get_current_user_id)
+    current_user: User = Depends(get_current_admin_user),
 ):
     """更新菜单"""
     service = MenuService(db)
@@ -78,7 +79,7 @@ async def update_menu(
 async def delete_menu(
     menu_id: int,
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(get_current_user_id)
+    current_user: User = Depends(get_current_admin_user),
 ):
     """删除菜单"""
     service = MenuService(db)
@@ -96,7 +97,7 @@ async def get_menu_with_template(
 ):
     """获取菜单及其关联的报表模板"""
     service = MenuService(db)
-    result = service.get_menu_with_template(menu_id)
+    result = service.get_menu_with_template(menu_id, current_user_id)
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="菜单不存在")
     return result

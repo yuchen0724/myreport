@@ -3,9 +3,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.auth_deps import get_current_user_id
+from app.core.auth_deps import get_current_user_id, get_current_admin_user
+from app.models.user import User
 from app.schemas.pool_metrics import PoolMetricsResponse, AllPoolMetricsResponse
 from app.services.pool_monitor_service import PoolMonitorService, PoolMetricsCache
+from app.services.data_source_service import DataSourceService
 
 router = APIRouter(prefix="/api/metrics", tags=["连接池监控"])
 
@@ -20,6 +22,7 @@ async def get_pool_metrics(
     current_user_id: int = Depends(get_current_user_id),
 ):
     """获取指定数据源的连接池指标"""
+    DataSourceService(db).require_access(data_source_id, current_user_id)
     # 尝试从 Redis 缓存获取
     cached = _metrics_cache.get(data_source_id)
     if cached:
@@ -43,7 +46,7 @@ async def get_pool_metrics(
 @router.get("/pool", response_model=AllPoolMetricsResponse)
 async def get_all_pool_metrics(
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(get_current_user_id),
+    current_user: User = Depends(get_current_admin_user),
 ):
     """获取所有数据源的连接池指标"""
     # 尝试从 Redis 缓存获取

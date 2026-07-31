@@ -536,15 +536,22 @@ class AIAnalystService:
             ds = self.query_service.data_source_service.require_access(data_source_id, user_id)
             from app.utils.db_executor import execute_query
             db_type = (ds.type or "").upper()
+            params = {"table_name": table_name} if table_name else {}
             if db_type in ("POSTGRES", "POSTGRESQL", "PG"):
+                params["schema_name"] = "public"
+                table_filter = " AND table_name = :table_name" if table_name else ""
                 sql = ("SELECT table_name, column_name, data_type, is_nullable, column_default, "
                        "col_description((quote_ident(table_schema)||'.'||quote_ident(table_name))::regclass, ordinal_position) as comment "
-                       "FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position")
+                       "FROM information_schema.columns WHERE table_schema = :schema_name"
+                       f"{table_filter} ORDER BY table_name, ordinal_position")
             else:
-                sql = f"SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT FROM information_schema.columns WHERE TABLE_SCHEMA = '{ds.database}' ORDER BY TABLE_NAME, ORDINAL_POSITION"
-                if table_name:
-                    sql = sql.replace("WHERE", f"WHERE TABLE_NAME = '{table_name}' AND")
-            rows, _ = execute_query(ds, sql)
+                params["schema_name"] = ds.database
+                table_filter = " AND TABLE_NAME = :table_name" if table_name else ""
+                sql = ("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, "
+                       "COLUMN_DEFAULT, COLUMN_COMMENT FROM information_schema.columns "
+                       "WHERE TABLE_SCHEMA = :schema_name"
+                       f"{table_filter} ORDER BY TABLE_NAME, ORDINAL_POSITION")
+            rows, _ = execute_query(ds, sql, params)
             tables = {}
             for r in rows:
                 t = r[0]

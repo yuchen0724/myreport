@@ -11,4 +11,4 @@ set +a
 
 # 启动Celery worker
 cd /home/zhou/myreport/backend
-celery -A app.celery_app worker --loglevel=info --concurrency=4
+celery -A app.celery_app worker --loglevel=info --concurrency=4 -B

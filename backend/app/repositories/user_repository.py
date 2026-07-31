@@ -34,7 +34,9 @@ class UserRepository:
 
     def update(self, user: User, user_data: dict) -> User:
         for key, value in user_data.items():
-            if hasattr(user, key) and value is not None:
+            if key == "password" and value:
+                user.password_hash = get_password_hash(value)
+            elif hasattr(user, key) and value is not None:
                 setattr(user, key, value)
         self.db.flush()
         self.db.refresh(user)

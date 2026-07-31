@@ -38,7 +38,7 @@ class SqlCorrectionService:
         corrected_sql: str,
         user_feedback: Optional[str] = None,
         user_id: Optional[int] = None,
-        review_status: str = REVIEW_VERIFIED,
+        review_status: str = REVIEW_CANDIDATE,
         source: str = "user_feedback",
         evidence: Optional[Dict[str, Any]] = None,
     ) -> Optional[SqlCorrection]:
@@ -180,22 +180,6 @@ class SqlCorrectionService:
         if data_source_id is not None:
             query = query.filter(SqlCorrection.data_source_id == data_source_id)
         records = query.order_by(SqlCorrection.created_at.desc()).limit(50).all()
-
-        if len(records) < 5:
-            cross = (
-                self.db.query(SqlCorrection)
-                .filter(
-                    SqlCorrection.is_active == True,
-                    SqlCorrection.review_status == REVIEW_VERIFIED,
-                )
-                .order_by(SqlCorrection.created_at.desc())
-                .limit(50).all()
-            )
-            eids = {r.id for r in records}
-            for r in cross:
-                if r.id not in eids:
-                    records.append(r)
-                    eids.add(r.id)
 
         if not records:
             return []

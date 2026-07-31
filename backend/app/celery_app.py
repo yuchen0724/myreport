@@ -23,7 +23,16 @@ def create_celery_app():
         task_soft_time_limit=25 * 60,
         worker_prefetch_multiplier=1,
         worker_max_tasks_per_child=1000,
-        beat_schedule={},
+        beat_schedule={
+            'dispatch-query-subscriptions': {
+                'task': 'app.tasks.subscription_tasks.run_all_subscriptions',
+                'schedule': 60.0,
+            },
+            'dispatch-scheduled-reports': {
+                'task': 'app.tasks.scheduled_report_tasks.dispatch_scheduled_reports',
+                'schedule': 60.0,
+            },
+        },
     )
 
     return celery
@@ -34,3 +43,4 @@ celery_app = create_celery_app()
 from app.tasks import export_tasks  # noqa: E402, F401
 from app.tasks import prediction_tasks  # noqa: E402, F401
 from app.tasks import subscription_tasks  # noqa: E402, F401
+from app.tasks import scheduled_report_tasks  # noqa: E402, F401

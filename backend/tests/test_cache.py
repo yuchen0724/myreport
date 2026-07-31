@@ -75,3 +75,19 @@ def test_cache_no_redis_fallback():
     assert cache.exists("SELECT 1") is False
     assert cache.clear_pattern("*") is False
     assert cache.get_stats() == {"status": "disconnected"}
+
+
+def test_cache_clear_pattern_only_allows_query_namespace(mock_redis):
+    cache = CacheService(redis_client=mock_redis)
+
+    assert cache.clear_pattern("*") is False
+    mock_redis.scan_iter.assert_not_called()
+
+
+def test_cache_clear_pattern_uses_scan_batches(mock_redis):
+    cache = CacheService(redis_client=mock_redis)
+    mock_redis.scan_iter.return_value = iter(["query_result:1", "query_result:2"])
+
+    assert cache.clear_pattern("query_result:*") is True
+    mock_redis.scan_iter.assert_called_once_with(match="query_result:*", count=500)
+    mock_redis.delete.assert_called_once_with("query_result:1", "query_result:2")

@@ -34,7 +34,7 @@ def test_get_template(db_session):
     created = service.create_template(template_data, user_id=3)
 
     # 获取模板
-    template = service.get_template(created.id)
+    template = service.get_template(created.id, user_id=3)
 
     assert template is not None
     assert template.id == created.id
@@ -84,5 +84,5 @@ def test_delete_template(db_session):
     assert success is True
 
     # 验证已删除
-    template = service.get_template(created.id)
+    template = service.get_template(created.id, user_id=3)
     assert template is None

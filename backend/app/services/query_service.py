@@ -20,6 +20,7 @@ from app.services.sql_pagination import SqlPaginator
 from app.services.data_source_service import DataSourceService
 
 from app.utils.db_executor import _get_proxy_info
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,79 @@ class QueryService:
         self.engine_factory = DataSourceEngineFactory()
         self.sql_paginator = SqlPaginator()
         self.query_executor = QueryExecutor()
+        self.settings = get_settings()
+
+    def execute_export_sql(
+        self,
+        data_source_id: int,
+        sql: str,
+        user_id: int,
+        params: Optional[dict] = None,
+        max_rows: Optional[int] = None,
+    ) -> tuple[list[str], list[list], int]:
+        """Execute a complete, size-bounded query for file exports."""
+        export_sql = strip_trailing_semicolon(sql)
+        is_valid, message = SQLValidator.validate(export_sql)
+        if not is_valid:
+            raise ValueError(message)
+
+        row_limit = max_rows or self.settings.export_max_rows
+        ds = self.data_source_service.require_access(data_source_id, user_id)
+        converted_sql = self.sql_paginator.convert_placeholders(export_sql)
+        query_params = None
+        if self.sql_paginator.has_placeholders(converted_sql):
+            query_params = self.sql_paginator.filter_params(converted_sql, params)
+
+        proxy_info = _get_proxy_info(ds, db_session=self.db)
+        if proxy_info:
+            engine = self.engine_factory.create_engine_with_proxy(
+                ds, proxy_info["host"], proxy_info["port"]
+            )
+        else:
+            engine = self.engine_factory.create_engine(ds)
+
+        ds_type = ds.type.upper() if ds.type else ""
+        started_at = time.time()
+        try:
+            count_sql = f"SELECT COUNT(*) FROM ({converted_sql}) AS _export_query"
+            with engine.connect() as conn:
+                self.query_executor.apply_timeout(
+                    conn,
+                    ds_type,
+                    self.settings.export_query_timeout_seconds,
+                )
+                total = int(
+                    self.query_executor.execute_scalar(conn, count_sql, query_params) or 0
+                )
+            if total > row_limit:
+                raise ValueError(
+                    f"导出结果共 {total} 行，超过上限 {row_limit} 行，请缩小查询范围"
+                )
+
+            with engine.connect() as conn:
+                self.query_executor.apply_timeout(
+                    conn,
+                    ds_type,
+                    self.settings.export_query_timeout_seconds,
+                )
+                columns, rows = self.query_executor.execute_rows(
+                    conn, converted_sql, query_params
+                )
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError(f"导出查询执行失败: {exc}") from exc
+
+        elapsed_ms = int((time.time() - started_at) * 1000)
+        self.history_repo.create({
+            "user_id": user_id,
+            "data_source_id": data_source_id,
+            "query_type": "EXPORT",
+            "query_text": export_sql,
+            "execution_time_ms": elapsed_ms,
+            "row_count": total,
+        })
+        return columns, rows, total
 
     def _make_cache_key(self, sql: str, params: Optional[dict], page: int, page_size: int, cursor: Optional[str], skip_deep_pagination_check: bool, data_source_id: int, user_id: int) -> str:
         """生成带分页参数的缓存键"""

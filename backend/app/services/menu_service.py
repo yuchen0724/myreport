@@ -1,7 +1,6 @@
 """
 菜单服务层
 """
-import json
 from typing import List, Optional, Dict
 from sqlalchemy.orm import Session
 from app.repositories.menu_repository import MenuRepository
@@ -98,7 +97,7 @@ class MenuService:
         """获取菜单总数"""
         return self.repo.get_count()
     
-    def get_menu_with_template(self, menu_id: int) -> Optional[Dict]:
+    def get_menu_with_template(self, menu_id: int, user_id: int) -> Optional[Dict]:
         """获取菜单及其关联的报表模板"""
         menu = self.repo.get_by_id(menu_id)
         if not menu:
@@ -114,16 +113,15 @@ class MenuService:
         }
 
         if menu.template_id:
-            # 通过 TemplateRepository 查询关联模板（避免 template relationship 依赖）
-            from app.repositories.template_repository import TemplateRepository
-            template_repo = TemplateRepository(self.db)
-            tmpl = template_repo.get_by_id(menu.template_id)
+            from app.services.template_service import TemplateService
+
+            tmpl = TemplateService(self.db).get_template(menu.template_id, user_id)
             if tmpl:
                 result["template"] = {
                     "id": tmpl.id,
                     "name": tmpl.name,
                     "description": tmpl.description,
-                    "config": json.loads(tmpl.config) if isinstance(tmpl.config, str) else tmpl.config,
+                    "config": tmpl.config,
                 }
 
         return result

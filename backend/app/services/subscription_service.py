@@ -10,8 +10,8 @@ from croniter import croniter
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 from app.models.subscription import QuerySubscription, SubscriptionExecution
-from app.models.template import Template
 from app.repositories.semantic_metric_repository import SemanticMetricRepository
+from app.services.template_service import TemplateService
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +59,7 @@ class SubscriptionService:
                     raise ValueError(f"语义指标不存在或不可访问: {metric_key}")
 
         if template_id:
-            template = self.db.query(Template).filter(Template.id == template_id).first()
-            if not template:
-                raise ValueError("模板不存在")
+            TemplateService(self.db).require_view_access(template_id, user_id)
 
         if semantic_metric_key:
             metric = SemanticMetricRepository(self.db).get_visible_by_key(
@@ -128,6 +126,25 @@ class SubscriptionService:
             )
             if not metric:
                 raise ValueError(f"语义指标不存在或不可访问: {semantic_metric_key}")
+        if kwargs.get("template_id"):
+            TemplateService(self.db).require_view_access(kwargs["template_id"], sub.user_id)
+        if "notify_channel" in kwargs and kwargs["notify_channel"] not in ("feishu", "email"):
+            raise ValueError(f"不支持的通知渠道: {kwargs['notify_channel']}")
+        if "subscription_type" in kwargs and kwargs["subscription_type"] not in ("query", "briefing"):
+            raise ValueError("订阅类型必须是 query 或 briefing")
+        if kwargs.get("briefing_config"):
+            metric_keys = kwargs["briefing_config"].get("metric_keys") or []
+            if not metric_keys or len(metric_keys) > 10:
+                raise ValueError("经营日报必须配置 1 到 10 个语义指标")
+            for metric_key in metric_keys:
+                metric = SemanticMetricRepository(self.db).get_visible_by_key(
+                    metric_key,
+                    user_id=sub.user_id,
+                    is_admin=False,
+                    active_only=True,
+                )
+                if not metric:
+                    raise ValueError(f"语义指标不存在或不可访问: {metric_key}")
         for key, value in kwargs.items():
             if hasattr(sub, key) and value is not None:
                 setattr(sub, key, value)

@@ -67,7 +67,7 @@ async def get_template(
 ):
     """获取模板详情"""
     service = TemplateService(db)
-    template = service.get_template(template_id)
+    template = service.get_template(template_id, current_user_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     return template
@@ -107,7 +107,7 @@ async def get_template_versions(
 ):
     """获取模板版本列表"""
     service = TemplateService(db)
-    versions = service.get_template_versions(template_id)
+    versions = service.get_template_versions(template_id, current_user_id)
     return versions
 
 @router.post("/{template_id}/rollback/{version}", response_model=TemplateResponse)
@@ -180,4 +180,4 @@ async def get_version_diff(
 ):
     """获取版本差异"""
     service = TemplateService(db)
-    return service.get_version_diff(template_id, version1, version2)
+    return service.get_version_diff(template_id, version1, version2, current_user_id)

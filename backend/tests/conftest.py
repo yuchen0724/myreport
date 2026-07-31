@@ -15,6 +15,7 @@ from app.main import app
 from app.core.database import Base, get_db
 from app.core.security import create_access_token
 from app.models.user import User
+from app.models.role import Role
 from app.models.template import Template
 from app.middleware.rate_limit import RateLimitMiddleware
 
@@ -78,8 +79,10 @@ def client(db_session):
     async def override_get_db():
         try:
             yield db_session
-        finally:
-            pass
+            db_session.commit()
+        except Exception:
+            db_session.rollback()
+            raise
     
     # 禁用限流中间件（测试环境）
     app.user_middleware = [
@@ -112,6 +115,33 @@ def test_user(db_session):
 def auth_headers(test_user):
     """创建认证头"""
     token = create_access_token(data={"sub": test_user.username, "user_id": test_user.id})
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(scope="function")
+def test_admin(db_session):
+    """创建管理员用户。"""
+    from app.core.security import get_password_hash
+
+    role = Role(name="admin", description="Administrator")
+    db_session.add(role)
+    db_session.flush()
+    user = User(
+        username="testadmin",
+        email="admin@example.com",
+        password_hash=get_password_hash("testpassword"),
+        role_id=role.id,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture(scope="function")
+def admin_auth_headers(test_admin):
+    token = create_access_token(data={"sub": test_admin.username, "user_id": test_admin.id})
     return {"Authorization": f"Bearer {token}"}
 
 @pytest.fixture(scope="function", autouse=True)

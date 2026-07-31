@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Any, Optional
 
 
 class ExcelExportRequest(BaseModel):
@@ -7,6 +7,11 @@ class ExcelExportRequest(BaseModel):
     sql: str
     filename: Optional[str] = "export.xlsx"
     sheet_name: Optional[str] = "Sheet1"
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class PDFExportRequest(ExcelExportRequest):
+    filename: Optional[str] = "export.pdf"
 
 
 class ExcelExportResponse(BaseModel):

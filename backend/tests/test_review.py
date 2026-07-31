@@ -43,6 +43,7 @@ def _create_template(db_session, user_id):
         name="审核测试模板",
         config='{"sql": "SELECT 1"}',
         created_by=user_id,
+        is_public=True,
     )
     db_session.add(tpl)
     db_session.commit()
@@ -89,7 +90,7 @@ class TestCreateReview:
             json={"template_id": 99999},
             headers=headers,
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 404
 
     def test_submit_review_unauthenticated(self, client: TestClient, db_session):
         """未登录应返回 401"""

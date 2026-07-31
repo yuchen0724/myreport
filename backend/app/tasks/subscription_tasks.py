@@ -2,35 +2,37 @@
 import logging
 import traceback
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from app.celery_app import celery_app
 from app.core.database import SessionLocal
 from app.models.subscription import QuerySubscription, SubscriptionExecution
 from app.models.template import Template
+from app.models.user import User
 from app.schemas.semantic_metric import SemanticMetricQueryRequest
 from app.services.query_service import QueryService
 from app.services.semantic_metric_query_service import SemanticMetricQueryService
 from app.services.notification_service import NotificationService
+from app.services.report_delivery_service import ReportDeliveryService
+from app.core.redis import get_redis
 
 logger = logging.getLogger(__name__)
 
 
 def _send_feishu_notification(user_id: int, template_name: str, result_summary: str):
-    """发送飞书通知（复用 notification_service 思路，简化实现）"""
-    # In production, integrate with Feishu webhook / bot API.
-    # For now we log the notification and store an alert record.
-    logger.info(
-        "飞书通知: user_id=%d, template=%s, summary=%s",
-        user_id, template_name, result_summary[:200],
-    )
+    """通过配置的飞书机器人 Webhook 发送通知。"""
+    ReportDeliveryService().send_feishu_text(template_name, result_summary)
 
 
-def _send_email_notification(user_id: int, template_name: str, result_summary: str):
+def _send_email_notification(db, user_id: int, template_name: str, result_summary: str):
     """发送邮件通知"""
-    # In production, integrate with SMTP / email service.
-    logger.info(
-        "邮件通知: user_id=%d, template=%s, summary=%s",
-        user_id, template_name, result_summary[:200],
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.email:
+        raise RuntimeError("订阅用户未配置邮箱")
+    ReportDeliveryService().send_email(
+        [user.email],
+        subject=template_name,
+        body=result_summary,
     )
 
 
@@ -70,12 +72,25 @@ def _execute_subscription_impl(subscription_id: int) -> dict:
             if sub.notify_channel == "feishu":
                 _send_feishu_notification(sub.user_id, template_name, result_summary)
             elif sub.notify_channel == "email":
-                _send_email_notification(sub.user_id, template_name, result_summary)
+                _send_email_notification(db, sub.user_id, template_name, result_summary)
             else:
-                logger.warning("未知通知渠道: %s", sub.notify_channel)
+                raise ValueError(f"未知通知渠道: {sub.notify_channel}")
         except Exception as notif_err:
             logger.error("通知发送失败: %s", notif_err)
-            # don't fail the execution just because notification failed
+            exec_rec.status = "failed"
+            exec_rec.error_message = f"通知发送失败: {str(notif_err)[:500]}"
+            db.commit()
+            try:
+                NotificationService(db).create_alert(
+                    task_id=f"subscription:{subscription_id}:{exec_rec.id}",
+                    task_type="subscription",
+                    error_message=str(notif_err),
+                    alert_message=exec_rec.error_message,
+                    user_id=sub.user_id,
+                )
+            except Exception:
+                logger.exception("订阅失败告警记录失败")
+            return {"status": "error", "message": exec_rec.error_message}
 
         # update execution record
         exec_rec.status = "success"
@@ -145,7 +160,7 @@ def _execute_subscription_query(db, sub: QuerySubscription) -> tuple[str, str]:
         data_source_id=data_source_id,
         sql=sql,
         page=1,
-        page_size=999999,
+        page_size=1,
     )
     result = query_service.execute_sql(request, int(sub.user_id))
     return template.name, f"查询完成: {result.total} 行数据, {result.execution_time_ms}ms"
@@ -155,7 +170,10 @@ def _execute_subscription_query(db, sub: QuerySubscription) -> tuple[str, str]:
 def execute_subscription_task(self, subscription_id: int):
     """执行单个订阅推送任务"""
     try:
-        return _execute_subscription_impl(subscription_id)
+        result = _execute_subscription_impl(subscription_id)
+        if result.get("status") == "error":
+            raise RuntimeError(result.get("message") or "订阅执行失败")
+        return result
     except Exception as exc:
         logger.error("订阅任务失败 (will retry): subscription_id=%d, error=%s", subscription_id, exc)
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
@@ -173,19 +191,42 @@ def run_all_subscriptions():
     db = SessionLocal()
     try:
         subs = db.query(QuerySubscription).filter(QuerySubscription.is_active == True).all()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(ZoneInfo("Asia/Shanghai"))
         triggered = 0
 
         for sub in subs:
             try:
                 cron = croniter(sub.cron_expression, now)
                 prev_run = cron.get_prev(datetime)
-                # If the previous cron time is within the last 2 minutes,
-                # it's time to run this subscription
                 diff = (now - prev_run).total_seconds()
-                if diff <= 120:
+                if not 0 <= diff < 90:
+                    continue
+
+                if sub.last_run_at:
+                    last_run = sub.last_run_at
+                    if last_run.tzinfo is None:
+                        last_run = last_run.replace(tzinfo=timezone.utc)
+                    if last_run.timestamp() >= prev_run.timestamp():
+                        continue
+
+                lock_key = f"subscription_schedule:{sub.id}:{int(prev_run.timestamp())}"
+                redis = get_redis()
+                try:
+                    acquired = bool(redis.set(lock_key, "1", nx=True, ex=300))
+                except Exception:
+                    logger.exception("订阅调度锁不可用: subscription_id=%d", sub.id)
+                    acquired = True
+                if not acquired:
+                    continue
+                try:
                     execute_subscription_task.delay(sub.id)
                     triggered += 1
+                except Exception:
+                    try:
+                        redis.delete(lock_key)
+                    except Exception:
+                        pass
+                    raise
             except Exception as cron_err:
                 logger.warning("Cron 解析失败: subscription_id=%d, cron=%s, error=%s",
                                sub.id, sub.cron_expression, cron_err)

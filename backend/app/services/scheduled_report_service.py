@@ -5,11 +5,14 @@
 import logging
 from datetime import datetime, timezone
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 from croniter import croniter
 from sqlalchemy.orm import Session
 
 from app.models.scheduled_report import ScheduledReport, ReportDelivery
+from app.services.data_source_service import DataSourceService
+from app.services.template_service import TemplateService
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +39,12 @@ class ScheduledReportService:
         created_by: int,
     ) -> ScheduledReport:
         """创建定时报表"""
-        # 验证 cron 表达式
         self._validate_cron(cron_expression)
+        TemplateService(self.db).require_view_access(template_id, created_by)
+        if data_source_id is not None:
+            DataSourceService(self.db).require_access(data_source_id, created_by)
+        if output_format not in ("excel", "pdf"):
+            raise ValueError("output_format 必须是 excel 或 pdf")
 
         report = ScheduledReport(
             name=name,
@@ -56,22 +63,35 @@ class ScheduledReportService:
         self.db.refresh(report)
         return report
 
-    def get(self, report_id: int) -> Optional[ScheduledReport]:
+    def _get(self, report_id: int) -> Optional[ScheduledReport]:
         return self.db.query(ScheduledReport).filter(ScheduledReport.id == report_id).first()
 
-    def list_reports(self, offset: int = 0, limit: int = 20) -> List[ScheduledReport]:
+    def get(self, report_id: int, user_id: int) -> Optional[ScheduledReport]:
+        return self.db.query(ScheduledReport).filter(
+            ScheduledReport.id == report_id,
+            ScheduledReport.created_by == user_id,
+        ).first()
+
+    def list_reports(self, user_id: int, offset: int = 0, limit: int = 20) -> List[ScheduledReport]:
         return (
             self.db.query(ScheduledReport)
+            .filter(ScheduledReport.created_by == user_id)
             .order_by(ScheduledReport.created_at.desc())
             .offset(offset)
             .limit(limit)
             .all()
         )
 
-    def update(self, report_id: int, **kwargs) -> Optional[ScheduledReport]:
-        report = self.get(report_id)
+    def update(self, report_id: int, user_id: int, **kwargs) -> Optional[ScheduledReport]:
+        report = self.get(report_id, user_id)
         if not report:
             return None
+        if "template_id" in kwargs:
+            TemplateService(self.db).require_view_access(kwargs["template_id"], user_id)
+        if kwargs.get("data_source_id") is not None:
+            DataSourceService(self.db).require_access(kwargs["data_source_id"], user_id)
+        if "output_format" in kwargs and kwargs["output_format"] not in ("excel", "pdf"):
+            raise ValueError("output_format 必须是 excel 或 pdf")
         for key, value in kwargs.items():
             if hasattr(report, key):
                 setattr(report, key, value)
@@ -82,16 +102,16 @@ class ScheduledReportService:
         self.db.refresh(report)
         return report
 
-    def delete(self, report_id: int) -> bool:
-        report = self.get(report_id)
+    def delete(self, report_id: int, user_id: int) -> bool:
+        report = self.get(report_id, user_id)
         if not report:
             return False
         self.db.delete(report)
         self.db.commit()
         return True
 
-    def toggle_enabled(self, report_id: int, enabled: bool) -> Optional[ScheduledReport]:
-        report = self.get(report_id)
+    def toggle_enabled(self, report_id: int, user_id: int, enabled: bool) -> Optional[ScheduledReport]:
+        report = self.get(report_id, user_id)
         if not report:
             return None
         report.enabled = enabled
@@ -105,7 +125,11 @@ class ScheduledReportService:
 
     # ── 投递记录 ──
 
-    def get_deliveries(self, report_id: int, offset: int = 0, limit: int = 20) -> List[ReportDelivery]:
+    def get_deliveries(
+        self, report_id: int, user_id: int, offset: int = 0, limit: int = 20
+    ) -> List[ReportDelivery]:
+        if not self.get(report_id, user_id):
+            return []
         return (
             self.db.query(ReportDelivery)
             .filter(ReportDelivery.scheduled_report_id == report_id)
@@ -148,12 +172,21 @@ class ScheduledReportService:
             .all()
         )
 
-    def schedule_next_run(self, report_id: int) -> Optional[ScheduledReport]:
-        """手动触发并安排下一次执行"""
-        report = self.get(report_id)
+    def schedule_next_run(self, report_id: int, user_id: int) -> Optional[ScheduledReport]:
+        """兼容旧调用：仅重新计算下一次计划时间。"""
+        report = self.get(report_id, user_id)
         if not report:
             return None
-        report.last_run_at = _utc_now_naive()
+        self._update_next_run(report)
+        self.db.commit()
+        self.db.refresh(report)
+        return report
+
+    def mark_dispatched(self, report_id: int) -> Optional[ScheduledReport]:
+        """任务成功进入队列后推进下一次计划时间。"""
+        report = self._get(report_id)
+        if not report:
+            return None
         self._update_next_run(report)
         self.db.commit()
         self.db.refresh(report)
@@ -171,8 +204,10 @@ class ScheduledReportService:
     @staticmethod
     def _update_next_run(report: ScheduledReport):
         try:
-            cron = croniter(report.cron_expression, _utc_now_naive())
-            report.next_run_at = cron.get_next(datetime)
+            local_now = datetime.now(ZoneInfo("Asia/Shanghai"))
+            cron = croniter(report.cron_expression, local_now)
+            next_local = cron.get_next(datetime)
+            report.next_run_at = next_local.astimezone(timezone.utc).replace(tzinfo=None)
         except Exception:
             pass
 
@@ -180,7 +215,7 @@ class ScheduledReportService:
     def next_run_time(cron_expression: str) -> Optional[str]:
         """计算 cron 表达式的下次执行时间"""
         try:
-            cron = croniter(cron_expression, _utc_now_naive())
+            cron = croniter(cron_expression, datetime.now(ZoneInfo("Asia/Shanghai")))
             next_time = cron.get_next(datetime)
             return next_time.strftime("%Y-%m-%d %H:%M:%S")
         except Exception:

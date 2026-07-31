@@ -33,24 +33,21 @@ class ProxyServerService:
         ps = self.ps_repo.create(ps_data.model_dump(), user_id)
         return ProxyServerResponse.model_validate(ps)
 
-    def get_proxy_server(self, ps_id: int) -> Optional[ProxyServerResponse]:
+    def get_proxy_server(self, ps_id: int, user_id: int) -> Optional[ProxyServerResponse]:
         """获取代理服务器"""
         ps = self.ps_repo.get_by_id(ps_id)
-        if not ps:
+        if not ps or ps.created_by != user_id:
             return None
         return ProxyServerResponse.model_validate(ps)
 
-    def list_proxy_servers(self, user_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[ProxyServerResponse]:
+    def list_proxy_servers(self, user_id: int, skip: int = 0, limit: int = 100) -> List[ProxyServerResponse]:
         """列出代理服务器"""
-        if user_id:
-            ps_list = self.ps_repo.get_by_user(user_id, skip, limit)
-        else:
-            ps_list = self.ps_repo.get_all(skip, limit)
+        ps_list = self.ps_repo.get_by_user(user_id, skip, limit)
         return [ProxyServerResponse.model_validate(ps) for ps in ps_list]
 
-    def get_active_proxy_servers(self) -> List[ProxyServerResponse]:
+    def get_active_proxy_servers(self, user_id: int) -> List[ProxyServerResponse]:
         """获取所有启用的代理服务器"""
-        ps_list = self.ps_repo.get_active()
+        ps_list = [ps for ps in self.ps_repo.get_active() if ps.created_by == user_id]
         return [ProxyServerResponse.model_validate(ps) for ps in ps_list]
 
     def update_proxy_server(self, ps_id: int, ps_data: ProxyServerUpdate, user_id: int) -> Optional[ProxyServerResponse]:

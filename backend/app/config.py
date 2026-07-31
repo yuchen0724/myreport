@@ -44,6 +44,18 @@ class Settings(BaseSettings):
     redis_pool_size: int = 10
     redis_url: Optional[str] = None
 
+    # Report delivery
+    feishu_webhook_url: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_address: str = ""
+    smtp_use_tls: bool = True
+    export_max_rows: int = 100000
+    pdf_export_max_rows: int = 10000
+    export_query_timeout_seconds: int = 300
+
     # JWT
     secret_key: str = "change-me-in-production-please"
     algorithm: str = "HS256"

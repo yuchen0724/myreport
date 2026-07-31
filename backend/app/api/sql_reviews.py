@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.core.database import get_db
-from app.core.auth_deps import get_current_user_id, get_current_admin_user
+from app.core.auth_deps import get_current_user_id, get_current_admin_user, get_current_user
 from app.models.user import User
 from app.schemas.sql_review import (
     SqlReviewCreate,
@@ -55,13 +55,15 @@ async def list_reviews(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(get_current_user_id),
+    current_user: User = Depends(get_current_user),
 ):
     """获取审核列表"""
     service = SqlReviewService(db)
+    is_admin = bool(current_user.role and current_user.role.name == "admin")
+    effective_submitter = submitted_by if is_admin else current_user.id
     result = service.list_reviews(
         status=review_status,
-        submitted_by=submitted_by,
+        submitted_by=effective_submitter,
         page=page,
         page_size=page_size,
     )
@@ -81,13 +83,16 @@ async def list_reviews(
 async def get_review(
     review_id: int,
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(get_current_user_id),
+    current_user: User = Depends(get_current_user),
 ):
     """获取审核工单详情"""
     service = SqlReviewService(db)
     review = service.get_review(review_id)
     if not review:
         raise HTTPException(status_code=404, detail="审核工单不存在")
+    is_admin = bool(current_user.role and current_user.role.name == "admin")
+    if review.submitted_by != current_user.id and not is_admin:
+        raise HTTPException(status_code=403, detail="无权查看该审核工单")
     return _enrich_review(review, db)
 
 

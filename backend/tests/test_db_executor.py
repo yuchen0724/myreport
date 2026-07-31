@@ -167,6 +167,25 @@ class TestExecuteQueryConnectionURL:
 
     @patch("app.utils.db_executor.create_engine")
     @patch("app.utils.db_executor.decrypt_password", return_value="decrypted_pwd")
+    def test_query_params_are_bound(
+        self, mock_decrypt, mock_create_engine, mock_ds_mysql,
+        mock_engine_connection,
+    ):
+        mock_engine, mock_conn, _ = mock_engine_connection
+        mock_create_engine.return_value = mock_engine
+
+        from app.utils.db_executor import execute_query
+
+        execute_query(
+            mock_ds_mysql,
+            "SELECT * FROM t WHERE name = :name",
+            {"name": "x' OR 1=1 --"},
+        )
+
+        assert mock_conn.execute.call_args.args[1] == {"name": "x' OR 1=1 --"}
+
+    @patch("app.utils.db_executor.create_engine")
+    @patch("app.utils.db_executor.decrypt_password", return_value="decrypted_pwd")
     def test_doris_url(self, mock_decrypt, mock_create_engine, mock_ds_doris, mock_engine_connection):
         """DORIS: 也使用 mysql+pymysql://..."""
         mock_engine, _, _ = mock_engine_connection

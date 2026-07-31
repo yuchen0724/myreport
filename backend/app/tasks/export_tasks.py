@@ -16,7 +16,14 @@ logger = logging.getLogger(__name__)
 EXPORT_DIR = os.getenv("EXPORT_DIR", "/tmp/exports")
 
 
-def _export_excel_impl(self, task_id: str, data_source_id: int, sql: str, user_id: int) -> dict:
+def _export_excel_impl(
+    self,
+    task_id: str,
+    data_source_id: int,
+    sql: str,
+    user_id: int,
+    params: dict | None = None,
+) -> dict:
     """
     Excel 导出内部实现（抽取为普通函数，方便测试和复用）。
 
@@ -46,7 +53,8 @@ def _export_excel_impl(self, task_id: str, data_source_id: int, sql: str, user_i
         export_request = ExcelExportRequest(
             data_source_id=data_source_id,
             sql=sql,
-            filename=f"export_{task_id}.xlsx"
+            filename=f"export_{task_id}.xlsx",
+            params=params or {},
         )
 
         excel_data = report_service.generate_excel(export_request, user_id)
@@ -58,6 +66,7 @@ def _export_excel_impl(self, task_id: str, data_source_id: int, sql: str, user_i
 
         task.status = "SUCCESS"
         task.file_path = file_path
+        task.row_count = report_service.last_row_count
         task.completed_at = datetime.now(timezone.utc)
         db.commit()
 
@@ -95,7 +104,14 @@ def _export_excel_impl(self, task_id: str, data_source_id: int, sql: str, user_i
         db.close()
 
 
-def _export_pdf_impl(self, task_id: str, data_source_id: int, sql: str, user_id: int) -> dict:
+def _export_pdf_impl(
+    self,
+    task_id: str,
+    data_source_id: int,
+    sql: str,
+    user_id: int,
+    params: dict | None = None,
+) -> dict:
     """
     PDF 导出内部实现（抽取为普通函数，方便测试和复用）。
 
@@ -124,7 +140,8 @@ def _export_pdf_impl(self, task_id: str, data_source_id: int, sql: str, user_id:
         export_request = PDFExportRequest(
             data_source_id=data_source_id,
             sql=sql,
-            filename=f"export_{task_id}.pdf"
+            filename=f"export_{task_id}.pdf",
+            params=params or {},
         )
 
         pdf_data = report_service.generate_pdf(export_request, user_id)
@@ -136,6 +153,7 @@ def _export_pdf_impl(self, task_id: str, data_source_id: int, sql: str, user_id:
 
         task.status = "SUCCESS"
         task.file_path = file_path
+        task.row_count = report_service.last_row_count
         task.completed_at = datetime.now(timezone.utc)
         db.commit()
 
@@ -176,12 +194,26 @@ def _export_pdf_impl(self, task_id: str, data_source_id: int, sql: str, user_id:
 # 采用 bind=True 并通过 run 方法委托到 _impl 函数
 
 @celery_app.task(bind=True, base=ExportTaskBase, max_retries=3, default_retry_delay=60)
-def export_excel_async(self, task_id: str, data_source_id: int, sql: str, user_id: int):
+def export_excel_async(
+    self,
+    task_id: str,
+    data_source_id: int,
+    sql: str,
+    user_id: int,
+    params: dict | None = None,
+):
     """异步导出 Excel 任务（带自动重试，指数退避）"""
-    return _export_excel_impl(self, task_id, data_source_id, sql, user_id)
+    return _export_excel_impl(self, task_id, data_source_id, sql, user_id, params)
 
 
 @celery_app.task(bind=True, base=ExportTaskBase, max_retries=3, default_retry_delay=60)
-def export_pdf_async(self, task_id: str, data_source_id: int, sql: str, user_id: int):
+def export_pdf_async(
+    self,
+    task_id: str,
+    data_source_id: int,
+    sql: str,
+    user_id: int,
+    params: dict | None = None,
+):
     """异步导出 PDF 任务（带自动重试，指数退避）"""
-    return _export_pdf_impl(self, task_id, data_source_id, sql, user_id)
+    return _export_pdf_impl(self, task_id, data_source_id, sql, user_id, params)

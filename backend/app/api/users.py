@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
-from app.core.auth_deps import get_current_user, get_current_admin_user
+from app.core.auth_deps import get_current_admin_user
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.services.user_service import UserService
 from app.models.user import User
@@ -15,7 +15,7 @@ async def get_users(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
 ):
     """获取用户列表（仅管理员可查看）"""
     service = UserService(db)
@@ -27,7 +27,7 @@ async def get_users(
 async def get_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
 ):
     """获取用户详情"""
     service = UserService(db)
@@ -66,7 +66,10 @@ async def update_user(
 ):
     """更新用户（仅管理员）"""
     service = UserService(db)
-    user = service.update_user(user_id, user_data)
+    try:
+        user = service.update_user(user_id, user_data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

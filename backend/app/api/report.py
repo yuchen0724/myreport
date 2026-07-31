@@ -73,5 +73,7 @@ async def export_pdf(
                 "Content-Disposition": f"attachment; filename={request.filename or 'report.pdf'}"
             }
         )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="PDF 导出失败") from e

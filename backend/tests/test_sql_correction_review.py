@@ -71,3 +71,19 @@ def test_unsafe_correction_is_rejected(db_session):
         assert "安全校验" in str(exc)
     else:
         raise AssertionError("unsafe correction should be rejected")
+
+
+def test_verified_corrections_never_cross_data_source_boundaries(db_session):
+    service = SqlCorrectionService(db_session)
+    service.save_correction(
+        data_source_id=1,
+        question="统计昨日销售额",
+        original_sql="",
+        corrected_sql="SELECT SUM(amount) FROM sales",
+        review_status="verified",
+    )
+
+    llm = MagicMock()
+    llm.get_embedding.return_value = None
+    with patch("app.services.sql_correction_service.get_llm_client", return_value=llm):
+        assert service.find_matches("统计昨日销售额", data_source_id=2) == []

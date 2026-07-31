@@ -35,7 +35,7 @@ async def list_proxy_servers(
 ):
     """获取代理服务器列表"""
     ps_service = ProxyServerService(db)
-    return ps_service.list_proxy_servers(skip=skip, limit=limit)
+    return ps_service.list_proxy_servers(current_user_id, skip=skip, limit=limit)
 
 
 @router.get("/active", response_model=List[ProxyServerResponse])
@@ -45,7 +45,7 @@ async def get_active_proxy_servers(
 ):
     """获取所有启用的代理服务器"""
     ps_service = ProxyServerService(db)
-    return ps_service.get_active_proxy_servers()
+    return ps_service.get_active_proxy_servers(current_user_id)
 
 
 @router.get("/{ps_id}", response_model=ProxyServerResponse)
@@ -56,7 +56,7 @@ async def get_proxy_server(
 ):
     """获取代理服务器详情"""
     ps_service = ProxyServerService(db)
-    ps = ps_service.get_proxy_server(ps_id)
+    ps = ps_service.get_proxy_server(ps_id, current_user_id)
     if not ps:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

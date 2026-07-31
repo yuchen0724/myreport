@@ -97,6 +97,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
                         user_agent=request.headers.get("user-agent"),
                         status="success" if response.status_code < 400 else "failure"
                     )
+                    db.commit()
                 except Exception as audit_error:
                     db.rollback()
                     logger.warning("审计日志写入失败，不影响主请求: %s", audit_error)
@@ -121,6 +122,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
                         status="failure",
                         error_message=str(e)
                     )
+                    db.commit()
                 except Exception as audit_error:
                     db.rollback()
                     logger.warning("异常审计日志写入失败: %s", audit_error)

@@ -234,6 +234,57 @@ class TestQueryService:
         assert service.ds_repo is not None
         assert service.history_repo is not None
 
+    def test_execute_export_sql_keeps_full_query_and_params(
+        self, db_session, mock_ds
+    ):
+        service = QueryService(db_session)
+        service.data_source_service.require_access = MagicMock(return_value=mock_ds)
+        service.engine_factory.create_engine = MagicMock()
+        service.query_executor = MagicMock()
+        service.query_executor.execute_scalar.return_value = 3
+        service.query_executor.execute_rows.return_value = (
+            ["id"], [[1], [2], [3]]
+        )
+        service.history_repo.create = MagicMock()
+        params = {"start_date": "2026-07-01", "end_date": "2026-07-31"}
+        sql = (
+            "SELECT id FROM stock WHERE dt >= ${start_date} "
+            "AND dt < ${end_date} ORDER BY id"
+        )
+
+        with patch("app.services.query_service._get_proxy_info", return_value=None):
+            columns, rows, total = service.execute_export_sql(
+                1, sql, user_id=7, params=params, max_rows=3
+            )
+
+        assert columns == ["id"]
+        assert rows == [[1], [2], [3]]
+        assert total == 3
+        count_call = service.query_executor.execute_scalar.call_args
+        assert "SELECT COUNT(*) FROM (" in count_call.args[1]
+        assert count_call.args[2] == params
+        row_call = service.query_executor.execute_rows.call_args
+        assert row_call.args[1].endswith("ORDER BY id")
+        assert " LIMIT " not in row_call.args[1].upper()
+        assert row_call.args[2] == params
+
+    def test_execute_export_sql_rejects_results_over_limit(
+        self, db_session, mock_ds
+    ):
+        service = QueryService(db_session)
+        service.data_source_service.require_access = MagicMock(return_value=mock_ds)
+        service.engine_factory.create_engine = MagicMock()
+        service.query_executor = MagicMock()
+        service.query_executor.execute_scalar.return_value = 1001
+
+        with patch("app.services.query_service._get_proxy_info", return_value=None):
+            with pytest.raises(ValueError, match="超过上限 1000 行"):
+                service.execute_export_sql(
+                    1, "SELECT id FROM stock", user_id=7, max_rows=1000
+                )
+
+        service.query_executor.execute_rows.assert_not_called()
+
     def test_make_cache_key(self, db_session):
         """测试缓存键生成"""
         service = QueryService(db_session)

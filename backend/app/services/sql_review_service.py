@@ -21,6 +21,7 @@ from app.models.user import User
 from app.models.template import Template
 from app.schemas.sql_review import SqlReviewCreate, SqlReviewUpdate
 from app.services.sql_review_analyzer import SqlReviewAnalyzer
+from app.services.template_service import TemplateService
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +39,7 @@ class SqlReviewService:
     def create_review(self, data: SqlReviewCreate, current_user_id: int) -> SqlReview:
         """创建新的审核工单"""
         # 验证模板存在
-        template = self.db.query(Template).filter(Template.id == data.template_id).first()
-        if not template:
-            raise ValueError("模板不存在")
+        template = TemplateService(self.db).require_view_access(data.template_id, current_user_id)
 
         sql_content = data.sql_content or self._sql_from_template(template)
         ai_review = self.analyzer.analyze(sql_content, use_llm=False)
