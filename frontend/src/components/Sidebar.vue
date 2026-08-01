@@ -1,13 +1,16 @@
 <template>
   <!-- 登录页不渲染侧边栏 -->
-  <div v-if="!isLoginPage" class="sidebar">
+  <div v-if="!isLoginPage" ref="sidebarEl" class="sidebar">
     <el-menu
       :default-active="activeMenu"
+      :default-openeds="openMenus"
       background-color="#304156"
       text-color="#bfcbd9"
       active-text-color="#409eff"
       router
       :collapse-transition="false"
+      @open="handleMenuOpen"
+      @close="handleMenuClose"
     >
       <!-- 静态系统菜单 -->
       <el-menu-item index="/">
@@ -157,7 +160,7 @@
 </template>
 
 <script>
-import { computed, onMounted } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
   House, Monitor, DataLine, Document, ChatLineRound, TrendCharts, 
@@ -175,6 +178,9 @@ export default {
     const route = useRoute()
     const userStore = useUserStore()
     const menuStore = useMenuStore()
+    const sidebarEl = ref(null)
+    const openMenus = ref([])
+    const sidebarStateKey = 'report-sidebar-state'
     
     // 判断是否在登录页
     const isLoginPage = computed(() => route.path === '/login')
@@ -186,17 +192,66 @@ export default {
     
     // 直接从 store 获取菜单（只有在非登录页才加载）
     const reportMenus = computed(() => menuStore.menus)
+
+    const restoreSidebarState = async () => {
+      await nextTick()
+      try {
+        const saved = JSON.parse(window.sessionStorage.getItem(sidebarStateKey) || '{}')
+        openMenus.value = Array.isArray(saved.openMenus) ? saved.openMenus : []
+        if (sidebarEl.value && Number.isFinite(saved.scrollTop)) {
+          sidebarEl.value.scrollTop = saved.scrollTop
+        }
+      } catch {
+        openMenus.value = []
+      }
+    }
+
+    const saveSidebarState = () => {
+      try {
+        window.sessionStorage.setItem(sidebarStateKey, JSON.stringify({
+          openMenus: openMenus.value,
+          scrollTop: sidebarEl.value?.scrollTop || 0,
+        }))
+      } catch {
+        // 浏览器隐私模式下无法持久化时，不影响菜单使用。
+      }
+    }
+
+    const handleMenuOpen = (index) => {
+      if (!openMenus.value.includes(index)) openMenus.value.push(index)
+      saveSidebarState()
+    }
+
+    const handleMenuClose = (index) => {
+      openMenus.value = openMenus.value.filter(item => item !== index)
+      saveSidebarState()
+    }
     
     // 首次加载菜单（非登录页才加载）
     onMounted(() => {
+      restoreSidebarState()
+      sidebarEl.value?.addEventListener('scroll', saveSidebarState, { passive: true })
       if (!isLoginPage.value) {
         // loadMenus 内有 loaded 守卫，多次调用不会重复拉取
-        menuStore.loadMenus()
+        menuStore.loadMenus().then(restoreSidebarState)
       }
+    })
+
+    onBeforeUnmount(() => {
+      sidebarEl.value?.removeEventListener('scroll', saveSidebarState)
+    })
+
+    watch(() => route.path, async () => {
+      // 菜单项切换可能触发 Element Plus 的自动滚动，恢复用户上次所在位置。
+      await restoreSidebarState()
     })
     
     return { 
       activeMenu, 
+      sidebarEl,
+      openMenus,
+      handleMenuOpen,
+      handleMenuClose,
       reportMenus, 
       isAdmin,
       isLoginPage

@@ -37,6 +37,14 @@ request.interceptors.response.use(
       if (status === 401) {
         const userStore = useUserStore()
         userStore.logout()
+        // 清理旧版本遗留的 localStorage token，避免失效 token 被迁移回 sessionStorage
+        // 后触发“401 -> 登录页 -> 恢复旧 token -> 401”的整页刷新循环。
+        try {
+          window.localStorage.removeItem("token")
+          window.localStorage.removeItem("user")
+        } catch {
+          // 某些隐私模式可能禁止访问 localStorage，sessionStorage 仍已清理。
+        }
         if (window.location.pathname !== '/login') {
           window.location.href = '/login'
         }
